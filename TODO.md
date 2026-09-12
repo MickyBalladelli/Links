@@ -49,6 +49,8 @@ Build the security foundation needed for the first two clients and 1-to-1 messag
 - [x] Implement SMS / WhatsApp OTP authentication flow.
 - [x] Generate Ed25519 identity keypairs and MLS credentials bound to verified phone accounts, using CSPRNG seeds rather than phone-derived seeds.
 - [ ] Secure identity keys using native device hardware keystores: iOS Secure Enclave and Android Keystore TEE.
+About Secure identity keys. Still unverified: full Android Gradle/NDK packaging and signed physical-device acceptance. I updated TODO.md but left its checkbox open pending that acceptance.
+
 
 Implementation: `crates/account-auth` provides the Verify-backed HTTP flow, durable rate-limited challenges, signed device enrollment, returning-device login, hashed expiring sessions, and revocation checks. `crates/identity` provides Ed25519 operations and RFC 9420 basic credentials. See [consumer account setup and contracts](docs/consumer-account.md).
 
