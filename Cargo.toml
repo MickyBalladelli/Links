@@ -13,6 +13,11 @@ prost = "0.14"
 thiserror = "2"
 uuid = "1"
 zeroize = "1"
+getrandom = { version = "0.4", features = ["wasm_js"] }
+hkdf = "0.12"
+sha2 = "0.10"
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+ml-kem = { version = "0.3", features = ["hazmat", "zeroize"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "migrate", "macros"] }
 links-protocol = { path = "crates/protocol" }

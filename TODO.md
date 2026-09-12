@@ -62,11 +62,18 @@ Verification: 25 Rust unit tests and 14 PostgreSQL integration tests passed; for
 
 ### Post-quantum session security
 
-- [ ] Implement PQXDH pairing X25519 with ML-KEM (Kyber-768).
+- [x] Implement PQXDH pairing X25519 with ML-KEM-768 (standardized Kyber-768 successor).
 - [ ] Build Pre-Key Bundle generation and automatic upload for offline message initiation.
 - [ ] Integrate the core MLS ratcheting engine with TreeKEM (`O(log N)` member update complexity).
 - [ ] Standardize 1-to-1 chats as 2-member MLS groups.
 - [ ] Wrap encrypted payloads in Sealed Sender envelopes to hide origin metadata from routing nodes.
+
+PQXDH implementation: `links-client-core::pqxdh` provides the Links X25519 +
+ML-KEM-768 + HKDF-SHA-512 profile, signed prekey transcripts, initiator/responder
+agreement, strict key/ID validation, one-time-key consumption markers and
+zeroized secret buffers. Account authentication uses a separate hardware-backed
+Ed25519 key. Prekey persistence/upload and authenticated first-payload processing
+remain in the following roadmap items. See [PQXDH profile and security limits](docs/pqxdh.md).
 
 ### Account recovery
 

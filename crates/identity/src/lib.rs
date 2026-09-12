@@ -23,7 +23,7 @@ pub struct IdentitySeed(Zeroizing<[u8; 32]>);
 impl IdentitySeed {
     pub fn generate() -> Result<Self, IdentityError> {
         let mut seed = Zeroizing::new([0u8; 32]);
-        getrandom::getrandom(seed.as_mut()).map_err(|_| IdentityError::RandomUnavailable)?;
+        getrandom::fill(seed.as_mut()).map_err(|_| IdentityError::RandomUnavailable)?;
         Ok(Self(seed))
     }
     /// Only for bytes recovered from the device vault, never from phone numbers.

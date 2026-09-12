@@ -1,10 +1,11 @@
 # Links
 
-Centralized-first encrypted messaging. The foundation now includes phone OTP
-account authentication and Ed25519 device enrollment. **This is not yet a working
-messenger or a claim of post-quantum security.** MLS/envelope encryption, delivery
-gateways, and client applications remain in later phases. Native hardware vaults
-are implemented but physical-device acceptance remains open.
+Centralized-first encrypted messaging. The foundation includes phone OTP account
+authentication, Ed25519 device enrollment, hardware-backed identity custody and
+the Links X25519 + ML-KEM-768 PQXDH profile. **This is not yet a working messenger
+or a production post-quantum security claim.** MLS/envelope encryption, delivery
+gateways, and client applications remain in later phases. Native hardware vault
+acceptance and the cryptographic audit remain open.
 
 ## Workspace
 
@@ -12,7 +13,7 @@ are implemented but physical-device acceptance remains open.
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, user, media, receipt, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors and boundary validation. |
-| `crates/client-core` | Portable identity/crypto/MLS interfaces, envelope orchestration and durable sync validation. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, envelope orchestration and durable sync validation. |
 | `crates/server-store` | PostgreSQL repository/migrations, encrypted payload-store contract, Redis-shaped state contract and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, HTTP API and sessions. |
@@ -21,6 +22,7 @@ are implemented but physical-device acceptance remains open.
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
 | `docs/storage.md` | PostgreSQL, payload-store and ephemeral-state guarantees and limits. |
+| `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
 
 ## Build and test
 
