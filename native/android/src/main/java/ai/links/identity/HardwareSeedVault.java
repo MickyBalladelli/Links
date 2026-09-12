@@ -1,5 +1,6 @@
 package ai.links.identity;
 
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
@@ -8,6 +9,7 @@ import android.security.keystore.KeyProperties;
 import android.util.AtomicFile;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -29,8 +31,10 @@ public final class HardwareSeedVault {
     private static final byte[] MAGIC = new byte[] {'L','K','S','1'};
     private final File directory;
     private final KeyStore keyStore;
+    private final KeyguardManager keyguard;
 
     public HardwareSeedVault(Context context) throws GeneralSecurityException, IOException {
+        keyguard = context.getSystemService(KeyguardManager.class);
         directory = new File(context.getNoBackupFilesDir(), "links-identity");
         if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Identity storage unavailable");
         keyStore = KeyStore.getInstance("AndroidKeyStore");
@@ -38,6 +42,7 @@ public final class HardwareSeedVault {
     }
     public synchronized String storeSeed(byte[] seed) throws GeneralSecurityException, IOException {
         if (seed == null || seed.length != 32) throw new GeneralSecurityException("Invalid identity seed");
+        requireUnlocked();
         String handle = UUID.randomUUID().toString();
         String alias = alias(handle);
         try {
@@ -69,12 +74,22 @@ public final class HardwareSeedVault {
     /** Caller wipes the returned buffer after handing it to the Rust signer. */
     public synchronized byte[] loadSeed(String handle) throws GeneralSecurityException, IOException {
         String alias = alias(handle);
-        // Reject unexpected file sizes before allocating/reading untrusted bytes.
-        AtomicFile file = record(handle);
-        long size = file.getBaseFile().length();
-        if (size != 64) throw new GeneralSecurityException("Identity record unavailable");
-        byte[] record = file.readFully();
-        if (record.length != 64 || !Arrays.equals(Arrays.copyOfRange(record, 0, 4), MAGIC))
+        requireUnlocked();
+        // openRead performs AtomicFile crash recovery before the bounded read.
+        // Never allocate according to an untrusted on-disk record length.
+        byte[] record = new byte[64];
+        try (FileInputStream input = record(handle).openRead()) {
+            int offset = 0;
+            while (offset < record.length) {
+                int count = input.read(record, offset, record.length - offset);
+                if (count <= 0) throw new GeneralSecurityException("Identity record unavailable");
+                offset += count;
+            }
+            if (input.read() != -1) throw new GeneralSecurityException("Invalid identity record");
+        } catch (java.io.FileNotFoundException error) {
+            throw new GeneralSecurityException("Identity record unavailable");
+        }
+        if (!Arrays.equals(Arrays.copyOfRange(record, 0, 4), MAGIC))
             throw new GeneralSecurityException("Invalid identity record");
         java.security.Key stored = keyStore.getKey(alias, null);
         if (!(stored instanceof SecretKey)) throw new GeneralSecurityException("Hardware key unavailable");
@@ -90,6 +105,12 @@ public final class HardwareSeedVault {
     public synchronized void deleteSeed(String handle) throws GeneralSecurityException {
         keyStore.deleteEntry(alias(handle));
         record(handle).delete();
+    }
+    private void requireUnlocked() throws GeneralSecurityException {
+        // Defense in depth for pre-Android-12 symmetric encryption behavior.
+        // Hardware-backed unwrap still enforces setUnlockedDeviceRequired(true).
+        if (keyguard == null || !keyguard.isDeviceSecure() || keyguard.isDeviceLocked())
+            throw new GeneralSecurityException("An unlocked device with secure screen lock is required");
     }
     @SuppressWarnings("deprecation")
     private void requireHardware(SecretKey key) throws GeneralSecurityException {

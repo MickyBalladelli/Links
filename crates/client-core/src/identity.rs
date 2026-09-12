@@ -41,8 +41,8 @@ pub use links_identity::{DeviceBinding, IdentitySeed};
 
 /// Native adapters must reject software-only wrapping keys. Ed25519 signing runs
 /// in process memory after hardware unwrap; do not claim the seed never leaves TEE.
-/// Apple/Android implementations live in native/. Bind these methods through the
-/// future client's FFI layer; no software fallback is supplied by this crate.
+/// Apple/Android implementations live in native/ and are wired by links-identity-ffi.
+/// No software fallback is supplied by this crate.
 pub trait HardwareSeedVault {
     fn store_seed(&mut self, seed: &[u8; 32]) -> Result<KeyHandle, CoreError>;
     fn load_seed(&self, handle: &KeyHandle) -> Result<Zeroizing<[u8; 32]>, CoreError>;
@@ -55,6 +55,21 @@ pub struct HardwareIdentityStore<V> {
 impl<V: HardwareSeedVault> HardwareIdentityStore<V> {
     pub fn new(vault: V) -> Self {
         Self { vault }
+    }
+
+    /// Check the persisted enrollment key against the same seed used for signing.
+    /// Never sign under a substituted handle or silently enroll a replacement key.
+    pub fn sign_checked(
+        &self,
+        key: &KeyHandle,
+        expected_public_key: &[u8; 32],
+        domain_separated_message: &[u8],
+    ) -> Result<[u8; 64], CoreError> {
+        let seed = IdentitySeed::from_vault(self.vault.load_seed(key)?);
+        if seed.public_key() != *expected_public_key {
+            return Err(CoreError::Authentication);
+        }
+        Ok(seed.sign(domain_separated_message))
     }
 }
 impl<V: HardwareSeedVault> IdentityStore for HardwareIdentityStore<V> {

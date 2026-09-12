@@ -1,0 +1,4 @@
+module CLinksIdentity {
+    header "links_identity.h"
+    export *
+}

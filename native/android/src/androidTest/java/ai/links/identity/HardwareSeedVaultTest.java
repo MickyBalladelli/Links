@@ -28,6 +28,26 @@ public class HardwareSeedVaultTest {
         } finally { Arrays.fill(seed, (byte)0); vault.deleteSeed(handle); }
         try { vault.loadSeed(handle); fail("Deleted identity was regenerated"); } catch (java.security.GeneralSecurityException expected) { }
     }
+    @Test public void swappedAndOversizedRecordsFailClosed() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        HardwareSeedVault vault = new HardwareSeedVault(context);
+        String first = vault.storeSeed(new byte[32]);
+        String second = null;
+        try {
+            second = vault.storeSeed(new byte[32]);
+            File firstFile = new File(context.getNoBackupFilesDir(), "links-identity/" + first + ".sealed");
+            File secondFile = new File(context.getNoBackupFilesDir(), "links-identity/" + second + ".sealed");
+            byte[] other = new byte[64];
+            try (RandomAccessFile input = new RandomAccessFile(secondFile, "r")) { input.readFully(other); }
+            try (RandomAccessFile output = new RandomAccessFile(firstFile, "rw")) { output.write(other); }
+            try { vault.loadSeed(first); fail("Swapped record accepted"); } catch (java.security.GeneralSecurityException expected) { }
+            try (RandomAccessFile output = new RandomAccessFile(firstFile, "rw")) { output.setLength(1024 * 1024); }
+            try { vault.loadSeed(first); fail("Oversized record accepted"); } catch (java.security.GeneralSecurityException expected) { }
+        } finally {
+            vault.deleteSeed(first);
+            if (second != null) vault.deleteSeed(second);
+        }
+    }
     @Test public void invalidInputIsRejected() throws Exception {
         HardwareSeedVault vault = new HardwareSeedVault(InstrumentationRegistry.getInstrumentation().getTargetContext());
         try { vault.storeSeed(new byte[31]); fail("Bad seed length accepted"); } catch (java.security.GeneralSecurityException expected) { }

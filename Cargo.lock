@@ -955,6 +955,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "links-identity-ffi"
+version = "0.1.0"
+dependencies = [
+ "links-client-core",
+ "links-identity",
+ "zeroize",
+]
+
+[[package]]
 name = "links-protocol"
 version = "0.1.0"
 dependencies = [

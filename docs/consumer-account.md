@@ -1,8 +1,10 @@
 # Standard consumer account
 
 OTP authentication and Ed25519/MLS credential enrollment are implemented and tested.
-Native seed vaults are implemented and compile-checked; hardware acceptance is
-still open. This is not a finished mobile onboarding UI or an audited E2EE system.
+Native seed vaults are wired to Rust through Swift/C and Android JNI wrappers;
+physical hardware acceptance is still open. See [hardware identity integration
+and acceptance](hardware-identity.md). This is not a finished mobile onboarding
+UI or an audited E2EE system.
 
 ## What is implemented
 
@@ -18,8 +20,9 @@ performed during implementation.
 request transcripts, verifies signatures strictly, and produces an RFC 9420 basic
 credential using TLS codec serialization. The core exposes `HardwareIdentityStore`
 and `HardwareSeedVault`; Swift and Java supply native wrap/load/delete operations.
-Mobile applications still need to wire these operations through their FFI layer
-in the Android/iOS client phases.
+`links-identity-ffi` connects those operations to the native `HardwareIdentityStore`
+APIs. Mobile onboarding UI and persistence of the public reference/account binding
+remain in the Android/iOS client phases.
 
 ## Security correction to the roadmap
 
@@ -151,7 +154,9 @@ for TEE/StrongBox enforcement and rejects software-only keys. It requires an
 unlocked device, uses provider-generated nonces and authenticates the handle as
 associated data. Encrypted records use AtomicFile in the app's no-backup directory.
 No raw seed is written to files/preferences or cloud backup. The Java vault
-requires API 28+; its build targets SDK 35.
+requires API 28+, a configured secure screen lock and an unlocked user profile;
+its build targets SDK 35. Older Android unlocked-device-required availability
+issues are documented in the [hardware integration guide](hardware-identity.md).
 
 **Only the wrapping key stays inside secure hardware.** The Ed25519 seed briefly
 returns to app memory for signing. Rust buffers zeroize on drop and Dalek zeroizes
@@ -175,7 +180,9 @@ cargo test --workspace --all-targets --locked
 cargo test --workspace --all-targets --locked -- --ignored
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo check -p links-client-core --target wasm32-unknown-unknown --locked
+cargo build -p links-identity-ffi --locked
 swift test --package-path native/apple
+bash native/android/tests/run-host-tests.sh
 # In an entitled hardware-capable Apple test environment:
 LINKS_TEST_SECURE_ENCLAVE=1 swift test --package-path native/apple
 # With the Android SDK and an unlocked physical TEE/StrongBox device:
@@ -188,15 +195,18 @@ expiry during provider I/O, supersession, restarts, revocation, account disablem
 and HTTP request/response behavior. Local HTTP mock tests exercise both delivery
 channels and provider response validation; they do not prove live delivery.
 
-The Apple package's non-hardware tests and iOS typecheck passed. The opt-in macOS
-Secure Enclave test reached key creation but returned OS status `-34018` (missing
-entitlement), so no hardware round-trip is claimed. Android production source
-compiled against Android API classes from Robolectric; a full Gradle build and
-physical-device tests were not run because the Android SDK/device harness is not
-available here. Hosted CI jobs were added, not executed in this session.
+The Apple package's six non-hardware tests and arm64 iOS link check passed.
+Three opt-in hardware tests remain unexecuted in an entitled physical test host.
+The earlier macOS Secure Enclave attempt returned OS status `-34018` (missing
+entitlement), so no hardware round-trip is claimed. The real JNI/Rust bridge passed
+host JVM tests; Android production Java compiled against Android API classes.
+Rust archives cross-built for both Android ABIs. A full Gradle/NDK build and
+physical-device tests still require the Android SDK/device harness. Hosted CI
+jobs were updated, not executed in this session.
 
-Before closing the hardware TODO, run signed physical iOS and Android round-trip,
-restart, deletion, locked-device, tamper and key-invalidation tests, then connect
-the native vault to each client's Rust identity worker. Live SMS and WhatsApp
-acceptance also require configured provider credentials and explicit test sends.
-No public release should proceed without the broader Phase 1 security review.
+Before closing the hardware TODO, record signed physical iOS and Android
+round-trip, process restart, deletion, locked-device, tamper and key-invalidation
+results using the [acceptance guide](hardware-identity.md). Native-to-Rust FFI
+wiring is implemented. Live SMS and WhatsApp acceptance separately requires
+configured provider credentials and explicit test sends. No public release
+should proceed without the broader Phase 1 security review.

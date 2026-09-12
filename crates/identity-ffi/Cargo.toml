@@ -1,0 +1,15 @@
+[package]
+name = "links-identity-ffi"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+links-client-core.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+links-identity = { path = "../identity" }
