@@ -34,7 +34,7 @@ public final class HardwareIdentityStore {
         public byte[] publicKey() { return publicKey.clone(); }
         private byte[] handleBytes() { return handle.getBytes(StandardCharsets.US_ASCII); }
     }
-    public KeyReference createIdentity() throws GeneralSecurityException {
+    public KeyReference createIdentity() throws GeneralSecurityException, IOException {
         synchronized (WORKER_LOCK) {
             byte[] reference = NativeIdentityBridge.create(vault);
             return new KeyReference(new String(reference, 0, 36, StandardCharsets.US_ASCII),
@@ -42,14 +42,14 @@ public final class HardwareIdentityStore {
         }
     }
     /** Restore/check only. Missing or invalidated keys never trigger creation. */
-    public void validateIdentity(KeyReference identity) throws GeneralSecurityException {
+    public void validateIdentity(KeyReference identity) throws GeneralSecurityException, IOException {
         synchronized (WORKER_LOCK) {
             if (!Arrays.equals(identity.publicKey,
                     NativeIdentityBridge.publicKey(vault, identity.handleBytes())))
                 throw new GeneralSecurityException("Identity authentication failed");
         }
     }
-    public byte[] sign(KeyReference identity, byte[] transcript) throws GeneralSecurityException {
+    public byte[] sign(KeyReference identity, byte[] transcript) throws GeneralSecurityException, IOException {
         if (transcript == null || transcript.length > 1024 * 1024)
             throw new GeneralSecurityException("Invalid identity transcript");
         synchronized (WORKER_LOCK) {
@@ -57,7 +57,7 @@ public final class HardwareIdentityStore {
         }
     }
     /** Explicit device removal only; never delete on a network retry/login. */
-    public void deleteIdentity(KeyReference identity) throws GeneralSecurityException {
+    public void deleteIdentity(KeyReference identity) throws GeneralSecurityException, IOException {
         synchronized (WORKER_LOCK) { NativeIdentityBridge.delete(vault, identity.handleBytes()); }
     }
 }

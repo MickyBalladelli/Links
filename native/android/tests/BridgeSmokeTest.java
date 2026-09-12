@@ -1,6 +1,7 @@
 package ai.links.identity;
 
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.Signature;
@@ -15,8 +16,9 @@ public final class BridgeSmokeTest {
     public static final class Vault {
         final Map<String, byte[]> seeds = new HashMap<>();
         byte[] lastStoreInput, lastLoadOutput;
-        boolean failStore, failLoad, failDelete;
+        boolean failStore, failLoad, failDelete, failIO;
         int stores, loads, deletes;
+        int returnedSeedSize = 32;
         public String storeSeed(byte[] seed) throws GeneralSecurityException {
             stores++;
             lastStoreInput = seed;
@@ -25,10 +27,11 @@ public final class BridgeSmokeTest {
             seeds.put(handle, seed.clone());
             return handle;
         }
-        public byte[] loadSeed(String handle) throws GeneralSecurityException {
+        public byte[] loadSeed(String handle) throws GeneralSecurityException, IOException {
             loads++;
+            if (failIO) throw new IOException("fixture storage failure");
             if (failLoad || !seeds.containsKey(handle)) throw new GeneralSecurityException("fixture load failure");
-            lastLoadOutput = seeds.get(handle).clone();
+            lastLoadOutput = Arrays.copyOf(seeds.get(handle), returnedSeedSize);
             return lastLoadOutput;
         }
         public void deleteSeed(String handle) throws GeneralSecurityException {
@@ -63,6 +66,16 @@ public final class BridgeSmokeTest {
         verifier.update(transcript);
         check(verifier.verify(signature));
         check(vault.loads == 3 && wiped(vault.lastLoadOutput));
+        vault.returnedSeedSize = 31;
+        reject(() -> NativeIdentityBridge.sign(vault, handle, publicKey, transcript));
+        check(wiped(vault.lastLoadOutput));
+        vault.returnedSeedSize = 32;
+        vault.failIO = true;
+        try {
+            NativeIdentityBridge.publicKey(vault, handle);
+            throw new AssertionError("Expected storage failure");
+        } catch (IOException expected) { check(expected.getMessage().equals("fixture storage failure")); }
+        vault.failIO = false;
         reject(() -> NativeIdentityBridge.sign(vault, handle, new byte[32], transcript));
         check(wiped(vault.lastLoadOutput));
         reject(() -> NativeIdentityBridge.sign(vault, handle, publicKey, new byte[1024 * 1024 + 1]));
