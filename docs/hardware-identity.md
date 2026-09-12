@@ -158,8 +158,9 @@ recreation is not a process restart; the following manual device checks remain:
 5. Record OS version, device model, signing/entitlement configuration, hardware
    security level and pass/fail outcomes. Verify minified Android packaging too.
 
-Keep the master hardware TODO open until this evidence is recorded. No public
-release should bypass the Phase 1 security review or eventual cryptographic audit.
+Keep the physical-device acceptance subtask open until this evidence is recorded.
+No public release should bypass the Phase 1 security review or eventual
+cryptographic audit.
 
 ## Platform references
 

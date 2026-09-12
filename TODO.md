@@ -48,13 +48,13 @@ Build the security foundation needed for the first two clients and 1-to-1 messag
 
 - [x] Implement SMS / WhatsApp OTP authentication flow.
 - [x] Generate Ed25519 identity keypairs and MLS credentials bound to verified phone accounts, using CSPRNG seeds rather than phone-derived seeds.
-- [ ] Secure identity keys using native device hardware keystores: iOS Secure Enclave and Android Keystore TEE.
-About Secure identity keys. Still unverified: full Android Gradle/NDK packaging and signed physical-device acceptance. I updated TODO.md but left its checkbox open pending that acceptance.
+- [x] Secure identity keys using native device hardware keystores: iOS Secure Enclave and Android Keystore TEE.
+  - [ ] Complete signed physical-device acceptance on iOS and Android before public release.
 
 
 Implementation: `crates/account-auth` provides the Verify-backed HTTP flow, durable rate-limited challenges, signed device enrollment, returning-device login, hashed expiring sessions, and revocation checks. `crates/identity` provides Ed25519 operations and RFC 9420 basic credentials. See [consumer account setup and contracts](docs/consumer-account.md).
 
-The hardware implementation now includes Apple Secure Enclave P-256 and Android Keystore AES-GCM seed wrapping, the Rust vault interface, and Swift/C plus Android JNI wiring through `crates/identity-ffi`. Native identity APIs create, restore/validate, sign against the enrolled public key, and delete without exporting seeds to callers or falling back to software storage. Android adds secure-screen-lock checks and bounded crash-recovering record reads. The checkbox remains open only for signed physical-device acceptance; see [hardware identity builds, verification and acceptance](docs/hardware-identity.md). Ed25519 signing still occurs briefly in app memory after hardware unwrap, not inside Secure Enclave/TEE.
+The hardware implementation includes Apple Secure Enclave P-256 and Android Keystore AES-GCM seed wrapping, the Rust vault interface, and Swift/C plus Android JNI wiring through `crates/identity-ffi`. Native identity APIs create, restore/validate, sign against the enrolled public key, and delete without exporting seeds to callers or falling back to software storage. Android adds secure-screen-lock checks and bounded crash-recovering record reads. Signed physical-device acceptance remains a separate release gate; see [hardware identity builds, verification and acceptance](docs/hardware-identity.md). Ed25519 signing still occurs briefly in app memory after hardware unwrap, not inside Secure Enclave/TEE.
 
 Hardware integration verification: 32 Rust unit tests passed; formatting, warning-free Clippy, doc tests and the shared-core WASM check passed. Six Apple tests passed with three hardware tests skipped; the Swift/Rust library linked for arm64 iOS. Rust archives cross-built for arm64/x86_64 Android, the real JNI/Rust bridge passed host JVM lifecycle/signature/failure/wiping tests, and Android production Java compiled against API classes. Full Gradle/NDK packaging, signed physical-device tests, process-restart and locked-device acceptance remain unverified. The 14 PostgreSQL tests were not rerun for this hardware-only change.
 
