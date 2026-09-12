@@ -13,6 +13,8 @@ pub enum AuthError {
     Denied,
     #[error("authentication rate limit exceeded")]
     RateLimited,
+    #[error("conflicting authentication write")]
+    Conflict,
     #[error("authentication temporarily unavailable")]
     Unavailable,
 }
@@ -24,5 +26,17 @@ impl From<sqlx::Error> for AuthError {
 impl From<links_identity::IdentityError> for AuthError {
     fn from(_: links_identity::IdentityError) -> Self {
         Self::Denied
+    }
+}
+impl From<links_server_store::StoreError> for AuthError {
+    fn from(error: links_server_store::StoreError) -> Self {
+        match error {
+            links_server_store::StoreError::Invalid
+            | links_server_store::StoreError::Protocol(_) => Self::Invalid,
+            links_server_store::StoreError::Conflict => Self::Conflict,
+            links_server_store::StoreError::Forbidden
+            | links_server_store::StoreError::NotFound => Self::Denied,
+            _ => Self::Unavailable,
+        }
     }
 }

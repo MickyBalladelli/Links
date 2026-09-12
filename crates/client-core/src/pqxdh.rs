@@ -9,7 +9,7 @@ use hkdf::Hkdf;
 use ml_kem::{
     kem::{Ciphertext, Decapsulate, Key, KeyExport},
     ml_kem_768::{DecapsulationKey, EncapsulationKey},
-    B32, MlKem768, Seed,
+    MlKem768, Seed, B32,
 };
 use sha2::Sha512;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -21,11 +21,7 @@ pub const ML_KEM_768_SEED_BYTES: usize = 64;
 pub const SESSION_KEY_BYTES: usize = 32;
 
 const EC_ENCODING_TAG: u8 = 1;
-const KEM_ENCODING_TAG: u8 = 2;
 const KDF_INFO: &[u8] = b"LinksV1_X25519_SHA-512_ML-KEM-768";
-const IDENTITY_BINDING_DOMAIN: &[u8] = b"links/pqxdh/identity-binding/v1\0";
-const SIGNED_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/signed-prekey/v1\0";
-const KEM_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/kem-prekey/v1\0";
 const ASSOCIATED_DATA_DOMAIN: &[u8] = b"links/pqxdh/ad/v1\0";
 
 /// Generate X25519 private material. Store it in a hardware-backed vault before
@@ -123,6 +119,10 @@ impl CurvePreKey {
             key: PublicKey::from(&self.secret).to_bytes(),
         }
     }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -161,6 +161,14 @@ impl KemPreKey {
             one_time: self.one_time,
         }
     }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn is_one_time(&self) -> bool {
+        self.one_time
+    }
 }
 
 /// Public keys fetched atomically from the prekey service.
@@ -179,14 +187,9 @@ impl PreKeyBundle {
         self.identity.verify_for(expected_signing_key)?;
         if self.signed_prekey.id == 0
             || !valid_public_key(&self.signed_prekey.key)
-            || self
-                .one_time_prekey
-                .as_ref()
-                .is_some_and(|key| {
-                    key.id == 0
-                        || key.id == self.signed_prekey.id
-                        || !valid_public_key(&key.key)
-                })
+            || self.one_time_prekey.as_ref().is_some_and(|key| {
+                key.id == 0 || key.id == self.signed_prekey.id || !valid_public_key(&key.key)
+            })
             || self.kem_prekey.id == 0
         {
             return Err(CoreError::Authentication);
@@ -386,11 +389,7 @@ pub fn respond(
         &initiator_ephemeral,
     )?;
     if let Some(one_time) = selected_one_time {
-        append_dh(
-            &mut key_material,
-            &one_time.secret,
-            &initiator_ephemeral,
-        )?;
+        append_dh(&mut key_material, &one_time.secret, &initiator_ephemeral)?;
     }
 
     let ciphertext = Ciphertext::<MlKem768>::try_from(message.kem_ciphertext.as_slice())
@@ -406,37 +405,28 @@ pub fn respond(
             associated_data: associated_data(&message.initiator_identity, responder_public),
         },
         used_one_time_curve_prekey_id: selected_one_time.map(|key| key.id),
-        used_one_time_kem_prekey_id: responder.kem_prekey.one_time.then_some(responder.kem_prekey.id),
+        used_one_time_kem_prekey_id: responder
+            .kem_prekey
+            .one_time
+            .then_some(responder.kem_prekey.id),
     })
 }
 
 pub fn identity_binding_transcript(dh_key: &[u8; 32]) -> Vec<u8> {
-    let mut transcript = IDENTITY_BINDING_DOMAIN.to_vec();
-    transcript.extend_from_slice(&encode_ec(dh_key));
-    transcript
+    links_identity::pqxdh_identity_binding_transcript(dh_key)
 }
 
-pub fn signed_prekey_transcript(
-    identity_dh_key: &[u8; 32],
-    prekey: &PublicCurvePreKey,
-) -> Vec<u8> {
-    let mut transcript = SIGNED_PREKEY_DOMAIN.to_vec();
-    transcript.extend_from_slice(&encode_ec(identity_dh_key));
-    transcript.extend_from_slice(&prekey.id.to_be_bytes());
-    transcript.extend_from_slice(&encode_ec(&prekey.key));
-    transcript
+pub fn signed_prekey_transcript(identity_dh_key: &[u8; 32], prekey: &PublicCurvePreKey) -> Vec<u8> {
+    links_identity::pqxdh_signed_prekey_transcript(identity_dh_key, prekey.id, &prekey.key)
 }
 
-pub fn kem_prekey_transcript(
-    identity_dh_key: &[u8; 32],
-    prekey: &PublicKemPreKey,
-) -> Vec<u8> {
-    let mut transcript = KEM_PREKEY_DOMAIN.to_vec();
-    transcript.extend_from_slice(&encode_ec(identity_dh_key));
-    transcript.extend_from_slice(&prekey.id.to_be_bytes());
-    transcript.push(u8::from(prekey.one_time));
-    transcript.extend_from_slice(&encode_kem(&prekey.key));
-    transcript
+pub fn kem_prekey_transcript(identity_dh_key: &[u8; 32], prekey: &PublicKemPreKey) -> Vec<u8> {
+    links_identity::pqxdh_kem_prekey_transcript(
+        identity_dh_key,
+        prekey.id,
+        prekey.one_time,
+        &prekey.key,
+    )
 }
 
 fn append_dh(
@@ -480,19 +470,13 @@ fn encode_ec(key: &[u8; 32]) -> [u8; 33] {
     encoded
 }
 
-fn encode_kem(key: &[u8]) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(1 + key.len());
-    encoded.push(KEM_ENCODING_TAG);
-    encoded.extend_from_slice(key);
-    encoded
-}
-
 fn valid_public_key(key: &[u8; 32]) -> bool {
     key.iter().any(|byte| *byte != 0)
 }
 
 fn decode_kem_key(bytes: &[u8]) -> Result<EncapsulationKey, CoreError> {
-    let encoded = Key::<EncapsulationKey>::try_from(bytes).map_err(|_| CoreError::Authentication)?;
+    let encoded =
+        Key::<EncapsulationKey>::try_from(bytes).map_err(|_| CoreError::Authentication)?;
     EncapsulationKey::new(&encoded).map_err(|_| CoreError::Authentication)
 }
 
@@ -517,13 +501,15 @@ mod tests {
         (private, identity, signing)
     }
 
-    fn responder(one_time_curve: bool, one_time_kem: bool) -> (ResponderPrivateKeys, PublicIdentity) {
+    fn responder(
+        one_time_curve: bool,
+        one_time_kem: bool,
+    ) -> (ResponderPrivateKeys, PublicIdentity) {
         let (identity_private, identity_public, signing) = authenticated_identity(17, 18);
         let signed_prekey = CurvePreKey::from_seed(11, Zeroizing::new([9; 32])).unwrap();
-        let one_time_prekey = one_time_curve
-            .then(|| CurvePreKey::from_seed(12, Zeroizing::new([10; 32])).unwrap());
-        let kem_prekey =
-            KemPreKey::from_seed(13, one_time_kem, Zeroizing::new([11; 64])).unwrap();
+        let one_time_prekey =
+            one_time_curve.then(|| CurvePreKey::from_seed(12, Zeroizing::new([10; 32])).unwrap());
+        let kem_prekey = KemPreKey::from_seed(13, one_time_kem, Zeroizing::new([11; 64])).unwrap();
         let signed_public = signed_prekey.public();
         let kem_public = kem_prekey.public();
         let responder = ResponderPrivateKeys {
@@ -535,7 +521,10 @@ mod tests {
         let bundle = responder
             .public_bundle(
                 identity_public.clone(),
-                signing.sign(&signed_prekey_transcript(&identity_public.dh_key, &signed_public)),
+                signing.sign(&signed_prekey_transcript(
+                    &identity_public.dh_key,
+                    &signed_public,
+                )),
                 signing.sign(&kem_prekey_transcript(&identity_public.dh_key, &kem_public)),
             )
             .unwrap();

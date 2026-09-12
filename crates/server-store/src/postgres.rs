@@ -1,6 +1,8 @@
 use crate::StoreError;
-use links_protocol::validate_handle;
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
+use links_protocol::{v1, validate_handle, validate_prekey_upload, MAX_ONE_TIME_PREKEYS};
+use prost::Message;
+use sha2::{Digest, Sha256};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +140,280 @@ impl RelationalStore {
             return Err(StoreError::NotFound);
         }
         Ok(())
+    }
+    pub async fn prekey_inventory(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<v1::PreKeyInventory, StoreError> {
+        let row = sqlx::query(
+            "SELECT p.profile_revision,
+                (SELECT count(*) FROM device_curve_one_time_prekeys c WHERE c.device_id=p.device_id) AS curve_count,
+                (SELECT count(*) FROM device_kem_one_time_prekeys k WHERE k.device_id=p.device_id) AS kem_count
+             FROM device_prekey_profiles p
+             JOIN devices d USING (device_id)
+             JOIN accounts a USING (user_id)
+             WHERE p.device_id=$1 AND d.user_id=$2 AND d.revoked_at IS NULL AND a.disabled_at IS NULL",
+        )
+        .bind(device_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            let owns_device: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM devices d JOIN accounts a USING (user_id) WHERE d.device_id=$1 AND d.user_id=$2 AND d.revoked_at IS NULL AND a.disabled_at IS NULL)",
+            )
+            .bind(device_id)
+            .bind(user_id)
+            .fetch_one(&self.pool)
+            .await?;
+            if !owns_device {
+                return Err(StoreError::Forbidden);
+            }
+            return Ok(v1::PreKeyInventory {
+                protocol_version: links_protocol::VERSION,
+                device_id: device_id.to_string(),
+                profile_revision: 0,
+                one_time_curve_prekeys: 0,
+                one_time_kem_prekeys: 0,
+            });
+        };
+        Ok(v1::PreKeyInventory {
+            protocol_version: links_protocol::VERSION,
+            device_id: device_id.to_string(),
+            profile_revision: row.get::<i64, _>("profile_revision") as u64,
+            one_time_curve_prekeys: row.get::<i64, _>("curve_count") as u32,
+            one_time_kem_prekeys: row.get::<i64, _>("kem_count") as u32,
+        })
+    }
+    pub async fn upload_prekeys(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        upload: &v1::PreKeyUpload,
+    ) -> Result<v1::PreKeyInventory, StoreError> {
+        validate_prekey_upload(upload)?;
+        if upload.device_id != device_id.to_string() {
+            return Err(StoreError::Forbidden);
+        }
+        let profile = upload.profile.as_ref().ok_or(StoreError::Invalid)?;
+        let identity = profile.identity.as_ref().ok_or(StoreError::Invalid)?;
+        let signed = profile.signed_prekey.as_ref().ok_or(StoreError::Invalid)?;
+        let signed_key = signed.prekey.as_ref().ok_or(StoreError::Invalid)?;
+        let last = profile
+            .last_resort_kem_prekey
+            .as_ref()
+            .ok_or(StoreError::Invalid)?;
+        let upload_id = Uuid::parse_str(&upload.upload_id).map_err(|_| StoreError::Invalid)?;
+        let upload_digest = Sha256::digest(upload.encode_to_vec());
+        let revision = upload.profile_revision as i64;
+        let mut tx = self.pool.begin().await?;
+        let enrolled_signing_key: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT d.identity_public_key FROM devices d JOIN accounts a USING (user_id) WHERE d.device_id=$1 AND d.user_id=$2 AND d.revoked_at IS NULL AND a.disabled_at IS NULL FOR UPDATE OF d",
+        )
+        .bind(device_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if enrolled_signing_key.as_deref() != Some(identity.signing_key.as_slice()) {
+            return Err(StoreError::Forbidden);
+        }
+
+        let current = sqlx::query("SELECT * FROM device_prekey_profiles WHERE device_id=$1")
+            .bind(device_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(current) = current {
+            let current_revision: i64 = current.get("profile_revision");
+            if current_revision > revision {
+                return Err(StoreError::Conflict);
+            }
+            if current_revision == revision
+                && (current.get::<Vec<u8>, _>("identity_dh_key") != identity.dh_key
+                    || current.get::<Vec<u8>, _>("identity_binding_signature")
+                        != identity.binding_signature
+                    || current.get::<i64, _>("signed_curve_prekey_id") != signed_key.id as i64
+                    || current.get::<Vec<u8>, _>("signed_curve_prekey") != signed_key.public_key
+                    || current.get::<Vec<u8>, _>("signed_curve_signature") != signed.signature
+                    || current.get::<i64, _>("last_resort_kem_prekey_id") != last.id as i64
+                    || current.get::<Vec<u8>, _>("last_resort_kem_prekey") != last.public_key
+                    || current.get::<Vec<u8>, _>("last_resort_kem_signature") != last.signature)
+            {
+                return Err(StoreError::Conflict);
+            }
+            if current_revision < revision {
+                sqlx::query("DELETE FROM device_prekey_uploads WHERE device_id=$1")
+                    .bind(device_id)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("DELETE FROM device_curve_one_time_prekeys WHERE device_id=$1")
+                    .bind(device_id)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("DELETE FROM device_kem_one_time_prekeys WHERE device_id=$1")
+                    .bind(device_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        let prior_digest: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT upload_digest FROM device_prekey_uploads WHERE device_id=$1 AND upload_id=$2 AND profile_revision=$3",
+        )
+        .bind(device_id)
+        .bind(upload_id)
+        .bind(revision)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(prior_digest) = prior_digest {
+            if prior_digest != upload_digest.as_slice() {
+                return Err(StoreError::Conflict);
+            }
+            let curve_count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM device_curve_one_time_prekeys WHERE device_id=$1",
+            )
+            .bind(device_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let kem_count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM device_kem_one_time_prekeys WHERE device_id=$1",
+            )
+            .bind(device_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(v1::PreKeyInventory {
+                protocol_version: links_protocol::VERSION,
+                device_id: device_id.to_string(),
+                profile_revision: upload.profile_revision,
+                one_time_curve_prekeys: curve_count as u32,
+                one_time_kem_prekeys: kem_count as u32,
+            });
+        }
+        sqlx::query(
+            "INSERT INTO device_prekey_profiles (device_id,profile_revision,identity_dh_key,identity_binding_signature,signed_curve_prekey_id,signed_curve_prekey,signed_curve_signature,last_resort_kem_prekey_id,last_resort_kem_prekey,last_resort_kem_signature)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+             ON CONFLICT (device_id) DO UPDATE SET profile_revision=EXCLUDED.profile_revision,identity_dh_key=EXCLUDED.identity_dh_key,identity_binding_signature=EXCLUDED.identity_binding_signature,signed_curve_prekey_id=EXCLUDED.signed_curve_prekey_id,signed_curve_prekey=EXCLUDED.signed_curve_prekey,signed_curve_signature=EXCLUDED.signed_curve_signature,last_resort_kem_prekey_id=EXCLUDED.last_resort_kem_prekey_id,last_resort_kem_prekey=EXCLUDED.last_resort_kem_prekey,last_resort_kem_signature=EXCLUDED.last_resort_kem_signature,updated_at=now()",
+        )
+        .bind(device_id)
+        .bind(revision)
+        .bind(&identity.dh_key)
+        .bind(&identity.binding_signature)
+        .bind(signed_key.id as i64)
+        .bind(&signed_key.public_key)
+        .bind(&signed.signature)
+        .bind(last.id as i64)
+        .bind(&last.public_key)
+        .bind(&last.signature)
+        .execute(&mut *tx)
+        .await?;
+
+        for key in &upload.one_time_curve_prekeys {
+            let result = sqlx::query("INSERT INTO device_curve_one_time_prekeys (device_id,prekey_id,public_key) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING")
+                .bind(device_id).bind(key.id as i64).bind(&key.public_key).execute(&mut *tx).await?;
+            if result.rows_affected() == 0 {
+                let same: bool = sqlx::query_scalar("SELECT public_key=$3 FROM device_curve_one_time_prekeys WHERE device_id=$1 AND prekey_id=$2")
+                    .bind(device_id).bind(key.id as i64).bind(&key.public_key).fetch_one(&mut *tx).await?;
+                if !same {
+                    return Err(StoreError::Conflict);
+                }
+            }
+        }
+        for key in &upload.one_time_kem_prekeys {
+            let result = sqlx::query("INSERT INTO device_kem_one_time_prekeys (device_id,prekey_id,public_key,signature) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING")
+                .bind(device_id).bind(key.id as i64).bind(&key.public_key).bind(&key.signature).execute(&mut *tx).await?;
+            if result.rows_affected() == 0 {
+                let same: bool = sqlx::query_scalar("SELECT public_key=$3 AND signature=$4 FROM device_kem_one_time_prekeys WHERE device_id=$1 AND prekey_id=$2")
+                    .bind(device_id).bind(key.id as i64).bind(&key.public_key).bind(&key.signature).fetch_one(&mut *tx).await?;
+                if !same {
+                    return Err(StoreError::Conflict);
+                }
+            }
+        }
+        let curve_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_curve_one_time_prekeys WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let kem_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_kem_one_time_prekeys WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if curve_count > MAX_ONE_TIME_PREKEYS as i64 || kem_count > MAX_ONE_TIME_PREKEYS as i64 {
+            return Err(StoreError::Invalid);
+        }
+        sqlx::query("INSERT INTO device_prekey_uploads (device_id,upload_id,profile_revision,upload_digest) VALUES ($1,$2,$3,$4)")
+            .bind(device_id).bind(upload_id).bind(revision).bind(upload_digest.as_slice()).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(v1::PreKeyInventory {
+            protocol_version: links_protocol::VERSION,
+            device_id: device_id.to_string(),
+            profile_revision: upload.profile_revision,
+            one_time_curve_prekeys: curve_count as u32,
+            one_time_kem_prekeys: kem_count as u32,
+        })
+    }
+    pub async fn claim_prekey_bundle(
+        &self,
+        target_device_id: Uuid,
+    ) -> Result<v1::PreKeyBundle, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT p.*,d.identity_public_key FROM device_prekey_profiles p JOIN devices d USING (device_id) JOIN accounts a USING (user_id) WHERE p.device_id=$1 AND d.revoked_at IS NULL AND a.disabled_at IS NULL FOR UPDATE OF p",
+        )
+        .bind(target_device_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+        let curve = sqlx::query("DELETE FROM device_curve_one_time_prekeys WHERE (device_id,prekey_id) IN (SELECT device_id,prekey_id FROM device_curve_one_time_prekeys WHERE device_id=$1 ORDER BY created_at,prekey_id LIMIT 1 FOR UPDATE) RETURNING prekey_id,public_key")
+            .bind(target_device_id).fetch_optional(&mut *tx).await?;
+        let kem = sqlx::query("DELETE FROM device_kem_one_time_prekeys WHERE (device_id,prekey_id) IN (SELECT device_id,prekey_id FROM device_kem_one_time_prekeys WHERE device_id=$1 ORDER BY created_at,prekey_id LIMIT 1 FOR UPDATE) RETURNING prekey_id,public_key,signature")
+            .bind(target_device_id).fetch_optional(&mut *tx).await?;
+        let identity = v1::PqxdhPublicIdentity {
+            signing_key: row.get("identity_public_key"),
+            dh_key: row.get("identity_dh_key"),
+            binding_signature: row.get("identity_binding_signature"),
+        };
+        let signed_prekey = v1::SignedCurvePreKey {
+            prekey: Some(v1::CurvePreKey {
+                id: row.get::<i64, _>("signed_curve_prekey_id") as u64,
+                public_key: row.get("signed_curve_prekey"),
+            }),
+            signature: row.get("signed_curve_signature"),
+        };
+        let last_resort = v1::KemPreKey {
+            id: row.get::<i64, _>("last_resort_kem_prekey_id") as u64,
+            public_key: row.get("last_resort_kem_prekey"),
+            one_time: false,
+            signature: row.get("last_resort_kem_signature"),
+        };
+        let one_time_curve_prekey = curve.map(|key| v1::CurvePreKey {
+            id: key.get::<i64, _>("prekey_id") as u64,
+            public_key: key.get("public_key"),
+        });
+        let kem_prekey = kem.map_or(last_resort.clone(), |key| v1::KemPreKey {
+            id: key.get::<i64, _>("prekey_id") as u64,
+            public_key: key.get("public_key"),
+            one_time: true,
+            signature: key.get("signature"),
+        });
+        let bundle = v1::PreKeyBundle {
+            protocol_version: links_protocol::VERSION,
+            device_id: target_device_id.to_string(),
+            profile_revision: row.get::<i64, _>("profile_revision") as u64,
+            profile: Some(v1::PreKeyProfile {
+                identity: Some(identity),
+                signed_prekey: Some(signed_prekey),
+                last_resort_kem_prekey: Some(last_resort),
+            }),
+            one_time_curve_prekey,
+            kem_prekey: Some(kem_prekey),
+        };
+        links_protocol::validate_prekey_bundle(&bundle)?;
+        tx.commit().await?;
+        Ok(bundle)
     }
     pub async fn create_group(
         &self,

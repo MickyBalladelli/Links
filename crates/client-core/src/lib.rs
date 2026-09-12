@@ -6,6 +6,7 @@ pub mod envelopes;
 pub mod identity;
 pub mod mls;
 pub mod pqxdh;
+pub mod prekeys;
 pub mod sync;
 pub use links_protocol as protocol;
 

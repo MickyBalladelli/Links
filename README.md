@@ -2,7 +2,8 @@
 
 Centralized-first encrypted messaging. The foundation includes phone OTP account
 authentication, Ed25519 device enrollment, hardware-backed identity custody and
-the Links X25519 + ML-KEM-768 PQXDH profile. **This is not yet a working messenger
+the Links X25519 + ML-KEM-768 PQXDH profile, and authenticated offline pre-key
+provisioning. **This is not yet a working messenger
 or a production post-quantum security claim.** MLS/envelope encryption, delivery
 gateways, and client applications remain in later phases. Native hardware vault
 acceptance and the cryptographic audit remain open.
@@ -11,7 +12,7 @@ acceptance and the cryptographic audit remain open.
 
 | Path | Responsibility |
 | --- | --- |
-| `proto/links/v1` | Versioned protobuf message, user, media, receipt, envelope, sync and transport contracts. |
+| `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors and boundary validation. |
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, envelope orchestration and durable sync validation. |
 | `crates/server-store` | PostgreSQL repository/migrations, encrypted payload-store contract, Redis-shaped state contract and memory reference adapter. |
@@ -23,6 +24,7 @@ acceptance and the cryptographic audit remain open.
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
 | `docs/storage.md` | PostgreSQL, payload-store and ephemeral-state guarantees and limits. |
 | `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
+| `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 
 ## Build and test
 

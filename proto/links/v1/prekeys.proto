@@ -1,0 +1,58 @@
+syntax = "proto3";
+package links.v1;
+
+message PqxdhPublicIdentity {
+  bytes signing_key = 1; // Enrolled Ed25519 device identity key.
+  bytes dh_key = 2; // Separately generated X25519 identity key.
+  bytes binding_signature = 3;
+}
+
+message CurvePreKey {
+  uint64 id = 1;
+  bytes public_key = 2;
+}
+
+message SignedCurvePreKey {
+  CurvePreKey prekey = 1;
+  bytes signature = 2;
+}
+
+message KemPreKey {
+  uint64 id = 1;
+  bytes public_key = 2; // FIPS 203 ML-KEM-768 encapsulation key.
+  bool one_time = 3;
+  bytes signature = 4;
+}
+
+message PreKeyProfile {
+  PqxdhPublicIdentity identity = 1;
+  SignedCurvePreKey signed_prekey = 2;
+  KemPreKey last_resort_kem_prekey = 3;
+}
+
+message PreKeyUpload {
+  uint32 protocol_version = 1;
+  string device_id = 2;
+  uint64 profile_revision = 3;
+  PreKeyProfile profile = 4;
+  repeated CurvePreKey one_time_curve_prekeys = 5;
+  repeated KemPreKey one_time_kem_prekeys = 6;
+  string upload_id = 7; // Retry idempotency; reuse with the exact same bytes.
+}
+
+message PreKeyInventory {
+  uint32 protocol_version = 1;
+  string device_id = 2;
+  uint64 profile_revision = 3;
+  uint32 one_time_curve_prekeys = 4;
+  uint32 one_time_kem_prekeys = 5;
+}
+
+message PreKeyBundle {
+  uint32 protocol_version = 1;
+  string device_id = 2;
+  uint64 profile_revision = 3;
+  PreKeyProfile profile = 4;
+  optional CurvePreKey one_time_curve_prekey = 5;
+  KemPreKey kem_prekey = 6; // One-time when available, otherwise last-resort.
+}

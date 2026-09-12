@@ -15,3 +15,5 @@ hkdf.workspace = true
 sha2.workspace = true
 x25519-dalek.workspace = true
 ml-kem.workspace = true
+async-trait.workspace = true
+uuid.workspace = true

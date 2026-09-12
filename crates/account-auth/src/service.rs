@@ -5,6 +5,8 @@ use crate::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
+use links_protocol::v1;
+use links_server_store::postgres::RelationalStore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -362,6 +364,36 @@ impl AccountAuth {
             device_id: row.get("device_id"),
         })
     }
+    pub async fn prekey_inventory(&self, token: &str) -> Result<v1::PreKeyInventory, AuthError> {
+        let account = self.authenticate(token).await?;
+        Ok(RelationalStore::from_pool(self.pool.clone())
+            .prekey_inventory(account.user_id, account.device_id)
+            .await?)
+    }
+    pub async fn upload_prekeys(
+        &self,
+        token: &str,
+        upload: v1::PreKeyUpload,
+    ) -> Result<v1::PreKeyInventory, AuthError> {
+        let account = self.authenticate(token).await?;
+        if upload.device_id != account.device_id.to_string() {
+            return Err(AuthError::Denied);
+        }
+        verify_prekey_upload(&upload)?;
+        Ok(RelationalStore::from_pool(self.pool.clone())
+            .upload_prekeys(account.user_id, account.device_id, &upload)
+            .await?)
+    }
+    pub async fn claim_prekey_bundle(
+        &self,
+        token: &str,
+        target_device_id: Uuid,
+    ) -> Result<v1::PreKeyBundle, AuthError> {
+        self.authenticate(token).await?;
+        Ok(RelationalStore::from_pool(self.pool.clone())
+            .claim_prekey_bundle(target_device_id)
+            .await?)
+    }
     pub async fn purge_expired(&self) -> Result<(), AuthError> {
         let now = self.now()?;
         sqlx::query("DELETE FROM auth_sessions WHERE expires_at_ms <= $1")
@@ -379,6 +411,61 @@ impl AccountAuth {
             .await?;
         Ok(())
     }
+}
+
+fn verify_prekey_upload(upload: &v1::PreKeyUpload) -> Result<(), AuthError> {
+    links_protocol::validate_prekey_upload(upload).map_err(|_| AuthError::Invalid)?;
+    let profile = upload.profile.as_ref().ok_or(AuthError::Invalid)?;
+    let identity = profile.identity.as_ref().ok_or(AuthError::Invalid)?;
+    let signing_key: [u8; 32] = identity
+        .signing_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| AuthError::Invalid)?;
+    let dh_key: [u8; 32] = identity
+        .dh_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| AuthError::Invalid)?;
+    verify(
+        &signing_key,
+        &links_identity::pqxdh_identity_binding_transcript(&dh_key),
+        &identity.binding_signature,
+    )?;
+    let signed = profile.signed_prekey.as_ref().ok_or(AuthError::Invalid)?;
+    let signed_key = signed.prekey.as_ref().ok_or(AuthError::Invalid)?;
+    let signed_public: [u8; 32] = signed_key
+        .public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| AuthError::Invalid)?;
+    verify(
+        &signing_key,
+        &links_identity::pqxdh_signed_prekey_transcript(&dh_key, signed_key.id, &signed_public),
+        &signed.signature,
+    )?;
+    let last = profile
+        .last_resort_kem_prekey
+        .as_ref()
+        .ok_or(AuthError::Invalid)?;
+    verify_kem_prekey(&signing_key, &dh_key, last)?;
+    for key in &upload.one_time_kem_prekeys {
+        verify_kem_prekey(&signing_key, &dh_key, key)?;
+    }
+    Ok(())
+}
+
+fn verify_kem_prekey(
+    signing_key: &[u8; 32],
+    dh_key: &[u8; 32],
+    key: &v1::KemPreKey,
+) -> Result<(), AuthError> {
+    verify(
+        signing_key,
+        &links_identity::pqxdh_kem_prekey_transcript(dh_key, key.id, key.one_time, &key.public_key),
+        &key.signature,
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

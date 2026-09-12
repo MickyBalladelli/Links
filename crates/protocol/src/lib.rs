@@ -12,6 +12,9 @@ pub const MAX_ENVELOPE_BYTES: usize = 256 * 1024;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_BATCH_ITEMS: usize = 100;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
+pub const MAX_ONE_TIME_PREKEYS: usize = 100;
+pub const ML_KEM_768_PUBLIC_KEY_BYTES: usize = 1184;
 pub const MAX_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub const MAX_CURSOR: u64 = i64::MAX as u64;
 
@@ -167,6 +170,152 @@ pub fn decode_message(bytes: &[u8]) -> Result<v1::Message, ProtocolError> {
     let message = v1::Message::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
     validate_message(&message)?;
     Ok(message)
+}
+
+pub fn validate_prekey_upload(upload: &v1::PreKeyUpload) -> Result<(), ProtocolError> {
+    if upload.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&upload.device_id)?;
+    validate_id(&upload.upload_id)?;
+    if upload.profile_revision == 0
+        || upload.profile_revision > MAX_CURSOR
+        || upload.encoded_len() > MAX_PREKEY_UPLOAD_BYTES
+        || upload.one_time_curve_prekeys.len() > MAX_ONE_TIME_PREKEYS
+        || upload.one_time_kem_prekeys.len() > MAX_ONE_TIME_PREKEYS
+    {
+        return Err(ProtocolError::Invalid("prekey upload"));
+    }
+    let profile = upload
+        .profile
+        .as_ref()
+        .ok_or(ProtocolError::Invalid("prekey profile"))?;
+    validate_prekey_profile(profile)?;
+    let signed_id = profile
+        .signed_prekey
+        .as_ref()
+        .and_then(|key| key.prekey.as_ref())
+        .map(|key| key.id)
+        .ok_or(ProtocolError::Invalid("signed prekey"))?;
+    let last_resort_id = profile
+        .last_resort_kem_prekey
+        .as_ref()
+        .map(|key| key.id)
+        .ok_or(ProtocolError::Invalid("last-resort KEM prekey"))?;
+    let mut curve_ids = std::collections::HashSet::new();
+    curve_ids.insert(signed_id);
+    for key in &upload.one_time_curve_prekeys {
+        validate_curve_prekey(key)?;
+        if !curve_ids.insert(key.id) {
+            return Err(ProtocolError::Invalid("duplicate curve prekey"));
+        }
+    }
+    let mut kem_ids = std::collections::HashSet::new();
+    kem_ids.insert(last_resort_id);
+    for key in &upload.one_time_kem_prekeys {
+        validate_kem_prekey(key, true)?;
+        if !kem_ids.insert(key.id) {
+            return Err(ProtocolError::Invalid("duplicate KEM prekey"));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_prekey_bundle(bundle: &v1::PreKeyBundle) -> Result<(), ProtocolError> {
+    if bundle.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&bundle.device_id)?;
+    if bundle.profile_revision == 0 || bundle.profile_revision > MAX_CURSOR {
+        return Err(ProtocolError::Invalid("prekey bundle"));
+    }
+    let profile = bundle
+        .profile
+        .as_ref()
+        .ok_or(ProtocolError::Invalid("prekey profile"))?;
+    validate_prekey_profile(profile)?;
+    let signed_id = profile
+        .signed_prekey
+        .as_ref()
+        .and_then(|key| key.prekey.as_ref())
+        .map(|key| key.id)
+        .ok_or(ProtocolError::Invalid("signed prekey"))?;
+    if let Some(key) = &bundle.one_time_curve_prekey {
+        validate_curve_prekey(key)?;
+        if key.id == signed_id {
+            return Err(ProtocolError::Invalid("duplicate curve prekey"));
+        }
+    }
+    let kem = bundle
+        .kem_prekey
+        .as_ref()
+        .ok_or(ProtocolError::Invalid("KEM prekey"))?;
+    validate_kem_prekey(kem, kem.one_time)?;
+    let last_resort = profile
+        .last_resort_kem_prekey
+        .as_ref()
+        .ok_or(ProtocolError::Invalid("last-resort KEM prekey"))?;
+    if (!kem.one_time && kem != last_resort) || (kem.one_time && kem.id == last_resort.id) {
+        return Err(ProtocolError::Invalid("KEM prekey selection"));
+    }
+    Ok(())
+}
+
+fn validate_prekey_profile(profile: &v1::PreKeyProfile) -> Result<(), ProtocolError> {
+    let identity = profile
+        .identity
+        .as_ref()
+        .ok_or(ProtocolError::Invalid("PQXDH identity"))?;
+    if identity.signing_key.len() != 32
+        || identity.dh_key.len() != 32
+        || identity.dh_key.iter().all(|byte| *byte == 0)
+        || identity.binding_signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("PQXDH identity"));
+    }
+    let signed = profile
+        .signed_prekey
+        .as_ref()
+        .ok_or(ProtocolError::Invalid("signed prekey"))?;
+    validate_curve_prekey(
+        signed
+            .prekey
+            .as_ref()
+            .ok_or(ProtocolError::Invalid("signed prekey"))?,
+    )?;
+    if signed.signature.len() != 64 {
+        return Err(ProtocolError::Invalid("signed prekey signature"));
+    }
+    validate_kem_prekey(
+        profile
+            .last_resort_kem_prekey
+            .as_ref()
+            .ok_or(ProtocolError::Invalid("last-resort KEM prekey"))?,
+        false,
+    )
+}
+
+fn validate_curve_prekey(key: &v1::CurvePreKey) -> Result<(), ProtocolError> {
+    if key.id == 0
+        || key.id > MAX_CURSOR
+        || key.public_key.len() != 32
+        || key.public_key.iter().all(|byte| *byte == 0)
+    {
+        return Err(ProtocolError::Invalid("curve prekey"));
+    }
+    Ok(())
+}
+
+fn validate_kem_prekey(key: &v1::KemPreKey, one_time: bool) -> Result<(), ProtocolError> {
+    if key.id == 0
+        || key.id > MAX_CURSOR
+        || key.one_time != one_time
+        || key.public_key.len() != ML_KEM_768_PUBLIC_KEY_BYTES
+        || key.signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("KEM prekey"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

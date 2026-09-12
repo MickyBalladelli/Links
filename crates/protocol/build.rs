@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "envelope",
         "sync",
         "transport",
+        "prekeys",
     ]
     .map(|name| format!("{root}/links/v1/{name}.proto"));
     for file in &files {

@@ -6,6 +6,12 @@ use tls_codec::{Serialize, TlsSerialize, TlsSize, VLBytes};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+const PQXDH_EC_ENCODING_TAG: u8 = 1;
+const PQXDH_KEM_ENCODING_TAG: u8 = 2;
+const PQXDH_IDENTITY_BINDING_DOMAIN: &[u8] = b"links/pqxdh/identity-binding/v1\0";
+const PQXDH_SIGNED_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/signed-prekey/v1\0";
+const PQXDH_KEM_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/kem-prekey/v1\0";
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
     #[error("invalid identity input")]
@@ -54,6 +60,43 @@ pub fn verify(key: &[u8; 32], transcript: &[u8], signature: &[u8]) -> Result<(),
     let signature = Signature::from_slice(signature).map_err(|_| IdentityError::Authentication)?;
     key.verify_strict(transcript, &signature)
         .map_err(|_| IdentityError::Authentication)
+}
+
+pub fn pqxdh_identity_binding_transcript(dh_key: &[u8; 32]) -> Vec<u8> {
+    let mut transcript = PQXDH_IDENTITY_BINDING_DOMAIN.to_vec();
+    transcript.push(PQXDH_EC_ENCODING_TAG);
+    transcript.extend_from_slice(dh_key);
+    transcript
+}
+
+pub fn pqxdh_signed_prekey_transcript(
+    identity_dh_key: &[u8; 32],
+    prekey_id: u64,
+    prekey: &[u8; 32],
+) -> Vec<u8> {
+    let mut transcript = PQXDH_SIGNED_PREKEY_DOMAIN.to_vec();
+    transcript.push(PQXDH_EC_ENCODING_TAG);
+    transcript.extend_from_slice(identity_dh_key);
+    transcript.extend_from_slice(&prekey_id.to_be_bytes());
+    transcript.push(PQXDH_EC_ENCODING_TAG);
+    transcript.extend_from_slice(prekey);
+    transcript
+}
+
+pub fn pqxdh_kem_prekey_transcript(
+    identity_dh_key: &[u8; 32],
+    prekey_id: u64,
+    one_time: bool,
+    prekey: &[u8],
+) -> Vec<u8> {
+    let mut transcript = PQXDH_KEM_PREKEY_DOMAIN.to_vec();
+    transcript.push(PQXDH_EC_ENCODING_TAG);
+    transcript.extend_from_slice(identity_dh_key);
+    transcript.extend_from_slice(&prekey_id.to_be_bytes());
+    transcript.push(u8::from(one_time));
+    transcript.push(PQXDH_KEM_ENCODING_TAG);
+    transcript.extend_from_slice(prekey);
+    transcript
 }
 
 /// Proof-of-possession before sending OTP. Phone is transport-only, never an MLS

@@ -1029,7 +1029,9 @@ dependencies = [
  "hmac",
  "http-body-util",
  "links-identity",
+ "links-protocol",
  "links-server-store",
+ "prost",
  "reqwest",
  "serde",
  "serde_json",
@@ -1046,6 +1048,7 @@ dependencies = [
 name = "links-client-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "getrandom 0.4.3",
  "hkdf",
  "links-identity",
@@ -1054,6 +1057,7 @@ dependencies = [
  "prost",
  "sha2",
  "thiserror",
+ "uuid",
  "x25519-dalek",
  "zeroize",
 ]
@@ -1098,6 +1102,7 @@ dependencies = [
  "async-trait",
  "links-protocol",
  "prost",
+ "sha2",
  "sqlx",
  "thiserror",
  "tokio",
