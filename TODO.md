@@ -46,9 +46,15 @@ Build the security foundation needed for the first two clients and 1-to-1 messag
 
 ### Standard consumer account
 
-- [ ] Implement SMS / WhatsApp OTP authentication flow.
-- [ ] Generate Ed25519 identity keypairs and MLS credentials bound to phone identity seeds.
+- [x] Implement SMS / WhatsApp OTP authentication flow.
+- [x] Generate Ed25519 identity keypairs and MLS credentials bound to verified phone accounts, using CSPRNG seeds rather than phone-derived seeds.
 - [ ] Secure identity keys using native device hardware keystores: iOS Secure Enclave and Android Keystore TEE.
+
+Implementation: `crates/account-auth` provides the Verify-backed HTTP flow, durable rate-limited challenges, signed device enrollment, returning-device login, hashed expiring sessions, and revocation checks. `crates/identity` provides Ed25519 operations and RFC 9420 basic credentials. See [consumer account setup and contracts](docs/consumer-account.md).
+
+The hardware item remains open: native Apple Secure Enclave P-256 and Android Keystore AES-GCM seed-wrapping adapters are implemented, along with the Rust vault interface, but signed physical-device acceptance and mobile FFI wiring are not yet complete. Ed25519 signing occurs in app memory after hardware unwrap; it is not advertised as Ed25519 signing inside Secure Enclave/TEE.
+
+Verification: 25 Rust unit tests and 14 PostgreSQL integration tests passed; formatting, Clippy, doc-test commands and WASM compilation passed. Three Apple non-hardware tests and iOS typechecking passed; Android production source compiled against Android API classes. The opt-in Secure Enclave round-trip test was blocked by missing Keychain entitlement (`-34018`). Full Android Gradle/device tests require the Android SDK and a physical TEE/StrongBox test harness. Live SMS/WhatsApp delivery was not exercised; provider credentials and explicit acceptance sends remain required.
 
 ### Post-quantum session security
 
