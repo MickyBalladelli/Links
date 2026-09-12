@@ -3,3 +3,8 @@
 /.env
 *.log
 .DS_Store
+/native/apple/.build/
+/native/apple/.swiftpm/
+/native/android/.gradle/
+/native/android/build/
+/native/android/local.properties

@@ -9,3 +9,4 @@ links-protocol.workspace = true
 prost.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
+links-identity = { path = "../identity" }

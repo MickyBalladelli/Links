@@ -1,5 +1,6 @@
 //! Platform-neutral client contracts and validated send/receive orchestration.
-//! No cryptographic implementation is supplied by Phase 0. Providers fail closed.
+//! Ed25519 identity operations are available through the identity module.
+//! MLS and envelope-encryption providers still fail closed until integrated.
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;
