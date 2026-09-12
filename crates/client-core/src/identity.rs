@@ -6,10 +6,14 @@ use zeroize::Zeroizing;
 pub struct KeyHandle(Zeroizing<Vec<u8>>);
 impl KeyHandle {
     pub fn new(reference: Vec<u8>) -> Result<Self, CoreError> {
-        if reference.is_empty() { return Err(CoreError::Authentication); }
+        if reference.is_empty() {
+            return Err(CoreError::Authentication);
+        }
         Ok(Self(Zeroizing::new(reference)))
     }
-    pub fn as_bytes(&self) -> &[u8] { &self.0 }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,8 +27,12 @@ impl LocalIdentity {
         validate_id(&device_id)?;
         Ok(Self { user_id, device_id })
     }
-    pub fn user_id(&self) -> &str { &self.user_id }
-    pub fn device_id(&self) -> &str { &self.device_id }
+    pub fn user_id(&self) -> &str {
+        &self.user_id
+    }
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
 }
 
 /// Platform adapters generate keys from a CSPRNG, not a phone number/OTP.

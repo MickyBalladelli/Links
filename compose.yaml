@@ -1,0 +1,19 @@
+# Local development only. No production services or credentials are provisioned.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: links
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: links
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - links-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U links -d links"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  links-postgres:

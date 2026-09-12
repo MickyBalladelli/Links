@@ -15,14 +15,29 @@ pub trait MlsEngine {
     fn create_group(&mut self, conversation_id: &str, credential: &[u8]) -> Result<(), CoreError>;
     fn join_group(&mut self, conversation_id: &str, welcome: &[u8]) -> Result<(), CoreError>;
     fn process_commit(&mut self, conversation_id: &str, commit: &[u8]) -> Result<(), CoreError>;
-    fn encrypt(&mut self, conversation_id: &str, sender_device_id: &str, plaintext: &[u8]) -> Result<Vec<u8>, CoreError>;
+    fn encrypt(
+        &mut self,
+        conversation_id: &str,
+        sender_device_id: &str,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, CoreError>;
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedApplication, CoreError>;
 }
 
 impl MlsEngine for crate::crypto::UnavailableCrypto {
-    fn create_group(&mut self, _: &str, _: &[u8]) -> Result<(), CoreError> { Err(CoreError::CryptoUnavailable) }
-    fn join_group(&mut self, _: &str, _: &[u8]) -> Result<(), CoreError> { Err(CoreError::CryptoUnavailable) }
-    fn process_commit(&mut self, _: &str, _: &[u8]) -> Result<(), CoreError> { Err(CoreError::CryptoUnavailable) }
-    fn encrypt(&mut self, _: &str, _: &str, _: &[u8]) -> Result<Vec<u8>, CoreError> { Err(CoreError::CryptoUnavailable) }
-    fn decrypt(&mut self, _: &[u8]) -> Result<AuthenticatedApplication, CoreError> { Err(CoreError::CryptoUnavailable) }
+    fn create_group(&mut self, _: &str, _: &[u8]) -> Result<(), CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+    fn join_group(&mut self, _: &str, _: &[u8]) -> Result<(), CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+    fn process_commit(&mut self, _: &str, _: &[u8]) -> Result<(), CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+    fn encrypt(&mut self, _: &str, _: &str, _: &[u8]) -> Result<Vec<u8>, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+    fn decrypt(&mut self, _: &[u8]) -> Result<AuthenticatedApplication, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
 }

@@ -1,4 +1,7 @@
-use crate::{protocol::{self, v1}, CoreError};
+use crate::{
+    protocol::{self, v1},
+    CoreError,
+};
 use prost::Message;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,43 +18,74 @@ pub struct SyncAdvance {
     next: u64,
 }
 impl SyncAdvance {
-    pub fn next_cursor(&self) -> u64 { self.next }
+    pub fn next_cursor(&self) -> u64 {
+        self.next
+    }
 }
 impl SyncState {
     pub fn restore(device_id: String, durable_cursor: u64) -> Result<Self, CoreError> {
         protocol::validate_id(&device_id)?;
-        if durable_cursor > protocol::MAX_CURSOR { return Err(CoreError::InvalidSync); }
-        Ok(Self { device_id, cursor: durable_cursor })
+        if durable_cursor > protocol::MAX_CURSOR {
+            return Err(CoreError::InvalidSync);
+        }
+        Ok(Self {
+            device_id,
+            cursor: durable_cursor,
+        })
     }
-    pub fn cursor(&self) -> u64 { self.cursor }
+    pub fn cursor(&self) -> u64 {
+        self.cursor
+    }
     pub fn prepare(&self, batch: &v1::SyncBatch) -> Result<SyncAdvance, CoreError> {
-        if batch.recipient_device_id != self.device_id || batch.after_cursor != self.cursor
-            || batch.items.len() > protocol::MAX_BATCH_ITEMS || batch.encoded_len() > protocol::MAX_FRAME_BYTES - 128
-            || batch.high_watermark > protocol::MAX_CURSOR || batch.next_cursor > batch.high_watermark
-        { return Err(CoreError::InvalidSync); }
+        if batch.recipient_device_id != self.device_id
+            || batch.after_cursor != self.cursor
+            || batch.items.len() > protocol::MAX_BATCH_ITEMS
+            || batch.encoded_len() > protocol::MAX_FRAME_BYTES - 128
+            || batch.high_watermark > protocol::MAX_CURSOR
+            || batch.next_cursor > batch.high_watermark
+        {
+            return Err(CoreError::InvalidSync);
+        }
         let mut cursor = self.cursor;
         for item in &batch.items {
             cursor = cursor.checked_add(1).ok_or(CoreError::InvalidSync)?;
-            if item.cursor != cursor { return Err(CoreError::InvalidSync); }
+            if item.cursor != cursor {
+                return Err(CoreError::InvalidSync);
+            }
             match &item.entry {
                 Some(v1::queue_item::Entry::Envelope(e)) => {
                     protocol::validate_envelope(e)?;
-                    if e.recipient_device_id != self.device_id { return Err(CoreError::InvalidSync); }
+                    if e.recipient_device_id != self.device_id {
+                        return Err(CoreError::InvalidSync);
+                    }
                 }
-                Some(v1::queue_item::Entry::Tombstone(t)) if matches!(v1::tombstone::Reason::try_from(t.reason), Ok(v1::tombstone::Reason::Expired | v1::tombstone::Reason::Acknowledged)) => {}
+                Some(v1::queue_item::Entry::Tombstone(t))
+                    if matches!(
+                        v1::tombstone::Reason::try_from(t.reason),
+                        Ok(v1::tombstone::Reason::Expired | v1::tombstone::Reason::Acknowledged)
+                    ) => {}
                 _ => return Err(CoreError::InvalidSync),
             }
         }
-        if cursor != batch.next_cursor || (batch.items.is_empty() && cursor != batch.high_watermark) {
+        if cursor != batch.next_cursor || (batch.items.is_empty() && cursor != batch.high_watermark)
+        {
             return Err(CoreError::InvalidSync);
         }
-        Ok(SyncAdvance { device_id: self.device_id.clone(), previous: self.cursor, next: cursor })
+        Ok(SyncAdvance {
+            device_id: self.device_id.clone(),
+            previous: self.cursor,
+            next: cursor,
+        })
     }
     /// Host calls this only AFTER its durable transaction succeeds.
     pub fn commit(&mut self, advance: SyncAdvance) -> Result<v1::QueueAck, CoreError> {
-        if advance.device_id != self.device_id || advance.previous != self.cursor { return Err(CoreError::InvalidSync); }
+        if advance.device_id != self.device_id || advance.previous != self.cursor {
+            return Err(CoreError::InvalidSync);
+        }
         self.cursor = advance.next;
-        Ok(v1::QueueAck { through_cursor: self.cursor })
+        Ok(v1::QueueAck {
+            through_cursor: self.cursor,
+        })
     }
 }
 
@@ -59,7 +93,18 @@ impl SyncState {
 mod tests {
     use super::*;
     fn batch() -> v1::SyncBatch {
-        v1::SyncBatch { recipient_device_id: "00000000-0000-4000-8000-000000000001".into(), after_cursor: 0, next_cursor: 1, high_watermark: 1, items: vec![v1::QueueItem { cursor: 1, entry: Some(v1::queue_item::Entry::Tombstone(v1::Tombstone { reason: 1 })) }] }
+        v1::SyncBatch {
+            recipient_device_id: "00000000-0000-4000-8000-000000000001".into(),
+            after_cursor: 0,
+            next_cursor: 1,
+            high_watermark: 1,
+            items: vec![v1::QueueItem {
+                cursor: 1,
+                entry: Some(v1::queue_item::Entry::Tombstone(v1::Tombstone {
+                    reason: 1,
+                })),
+            }],
+        }
     }
     #[test]
     fn checkpoints_only_advance_on_commit() {
@@ -89,7 +134,13 @@ mod tests {
     }
     #[test]
     fn idle_batch_is_valid() {
-        let mut b = batch(); b.items.clear(); b.next_cursor = 0; b.high_watermark = 0;
-        assert!(SyncState::restore(b.recipient_device_id.clone(), 0).unwrap().prepare(&b).is_ok());
+        let mut b = batch();
+        b.items.clear();
+        b.next_cursor = 0;
+        b.high_watermark = 0;
+        assert!(SyncState::restore(b.recipient_device_id.clone(), 0)
+            .unwrap()
+            .prepare(&b)
+            .is_ok());
     }
 }

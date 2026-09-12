@@ -22,15 +22,21 @@ Ship in small gates: reliable 1-to-1 text first, then media, groups, calls, chan
 
 Centralized v1 is the first release target. Decentralized support comes after the centralized protocol and client behavior are proven.
 
-- [ ] Define the v1 threat model, metadata privacy goals, supported platforms, and release gates.
-- [ ] Choose **Scenario A: Centralized Architecture** for v1.
-- [ ] Define Protocol Buffers schemas (`.proto`) for `Message`, `User`, `MediaMetadata`, and `Receipts`.
-- [ ] Create a shared client core library for identity, cryptography, MLS, envelopes, sync, and common protocol types.
-- [ ] Choose the initial bidirectional transport: **WebSockets / gRPC over HTTP/2**.
-- [ ] Design PostgreSQL schemas for user accounts, handle registry, device node mappings, and group membership RBAC.
-- [ ] Build the initial relational data store using PostgreSQL.
-- [ ] Define the encrypted payload storage interface for ScyllaDB / DynamoDB.
-- [ ] Build the in-memory state interface for Redis session sockets, routing tables, and rate-limit buckets.
+**Status: Complete — foundation implemented and verified.** See [scope and threat model](docs/phase-0.md), [protocol contracts](docs/contracts.md), and [storage contracts](docs/storage.md).
+
+- [x] Define the v1 threat model, metadata privacy goals, supported platforms, and release gates.
+- [x] Choose **Scenario A: Centralized Architecture** for v1.
+- [x] Define Protocol Buffers schemas (`.proto`) for `Message`, `User`, `MediaMetadata`, and `Receipts`.
+- [x] Create a shared client core library for identity, cryptography, MLS, envelopes, sync, and common protocol types.
+- [x] Choose the initial bidirectional transport: **WebSockets / gRPC over HTTP/2**. Selected WebSocket over TLS for clients; gRPC reserved for future internal RPCs.
+- [x] Design PostgreSQL schemas for user accounts, handle registry, device node mappings, and group membership RBAC.
+- [x] Build the initial relational data store using PostgreSQL.
+- [x] Define the encrypted payload storage interface for ScyllaDB / DynamoDB.
+- [x] Build the in-memory state interface for Redis session sockets, routing tables, and rate-limit buckets.
+
+Verification: 17 unit tests and 6 PostgreSQL 18.4 integration tests passed, including concurrent handle claims and last-owner RBAC protection. Formatting, warning-free Clippy, doc-test command, and the shared-core WASM compile check passed. CI and a local PostgreSQL Compose configuration are included; hosted CI and Docker Compose were not executed locally.
+
+Phase 0 supplies crypto/MLS provider contracts with fail-closed defaults, not production cryptography. Redis has a bounded local reference adapter; ScyllaDB/DynamoDB have a storage contract, not deployed adapters. Those implementations remain in Phases 1–2.
 
 ---
 

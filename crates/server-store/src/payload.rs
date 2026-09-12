@@ -11,10 +11,17 @@ pub struct AppendRequest {
 impl AppendRequest {
     pub fn new(envelope: v1::Envelope, now_ms: u64) -> Result<Self, StoreError> {
         links_protocol::validate_enqueue(&envelope, now_ms)?;
-        Ok(Self { envelope, accepted_at_ms: now_ms })
+        Ok(Self {
+            envelope,
+            accepted_at_ms: now_ms,
+        })
     }
-    pub fn envelope(&self) -> &v1::Envelope { &self.envelope }
-    pub fn accepted_at_ms(&self) -> u64 { self.accepted_at_ms }
+    pub fn envelope(&self) -> &v1::Envelope {
+        &self.envelope
+    }
+    pub fn accepted_at_ms(&self) -> u64 {
+        self.accepted_at_ms
+    }
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct AppendResult {
@@ -29,15 +36,38 @@ pub struct ReadRequest {
     now_ms: u64,
 }
 impl ReadRequest {
-    pub fn new(device_id: String, after_cursor: u64, limit: u32, now_ms: u64) -> Result<Self, StoreError> {
+    pub fn new(
+        device_id: String,
+        after_cursor: u64,
+        limit: u32,
+        now_ms: u64,
+    ) -> Result<Self, StoreError> {
         links_protocol::validate_id(&device_id)?;
-        if after_cursor > links_protocol::MAX_CURSOR || limit == 0 || limit > links_protocol::MAX_BATCH_ITEMS as u32 { return Err(StoreError::Invalid); }
-        Ok(Self { device_id, after_cursor, limit, now_ms })
+        if after_cursor > links_protocol::MAX_CURSOR
+            || limit == 0
+            || limit > links_protocol::MAX_BATCH_ITEMS as u32
+        {
+            return Err(StoreError::Invalid);
+        }
+        Ok(Self {
+            device_id,
+            after_cursor,
+            limit,
+            now_ms,
+        })
     }
-    pub fn device_id(&self) -> &str { &self.device_id }
-    pub fn after_cursor(&self) -> u64 { self.after_cursor }
-    pub fn limit(&self) -> u32 { self.limit }
-    pub fn now_ms(&self) -> u64 { self.now_ms }
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+    pub fn after_cursor(&self) -> u64 {
+        self.after_cursor
+    }
+    pub fn limit(&self) -> u32 {
+        self.limit
+    }
+    pub fn now_ms(&self) -> u64 {
+        self.now_ms
+    }
 }
 
 #[async_trait]
@@ -58,7 +88,12 @@ pub trait EncryptedPayloadStore: Send + Sync {
     /// Idempotent cumulative purge; reject acknowledgement beyond the high watermark.
     /// Only call for the authenticated device and after its durable local commit.
     /// Delete ciphertext, retain cursor tombstones/fingerprints for the replay window.
-    async fn acknowledge(&self, device_id: &str, through_cursor: u64, now_ms: u64) -> Result<(), StoreError>;
+    async fn acknowledge(
+        &self,
+        device_id: &str,
+        through_cursor: u64,
+        now_ms: u64,
+    ) -> Result<(), StoreError>;
 
     /// Enforce the <=30 day payload lifetime. Production requires scheduled GC and
     /// backup/replication policies, not a promise that backend TTL is instantaneous.
@@ -75,7 +110,13 @@ mod tests {
         assert!(ReadRequest::new(ID.into(), 0, 101, 1).is_err());
         assert!(ReadRequest::new(ID.into(), 0, 0, 1).is_err());
         assert!(ReadRequest::new(ID.into(), u64::MAX, 1, 1).is_err());
-        let envelope = v1::Envelope { protocol_version: 1, envelope_id: ID.into(), recipient_device_id: ID.into(), expires_at_ms: 10, sealed_payload: vec![1] };
+        let envelope = v1::Envelope {
+            protocol_version: 1,
+            envelope_id: ID.into(),
+            recipient_device_id: ID.into(),
+            expires_at_ms: 10,
+            sealed_payload: vec![1],
+        };
         assert!(AppendRequest::new(envelope.clone(), 1).is_ok());
         assert!(AppendRequest::new(envelope, 10).is_err());
     }
