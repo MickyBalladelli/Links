@@ -38,7 +38,9 @@ impl OtpProvider for Provider {
         if self.fail.load(Ordering::SeqCst) {
             return Err(AuthError::Unavailable);
         }
-        if self.reuse_sid.load(Ordering::SeqCst) { return Ok(format!("VE{}", "f".repeat(32))); }
+        if self.reuse_sid.load(Ordering::SeqCst) {
+            return Ok(format!("VE{}", "f".repeat(32)));
+        }
         Ok(format!("VE{}", Uuid::new_v4().simple()))
     }
     async fn check(&self, _: &str, code: &str) -> Result<bool, AuthError> {
@@ -277,7 +279,7 @@ async fn rate_limits_proof_and_five_attempt_lockout() {
         Err(AuthError::RateLimited)
     ));
     let mut forged = client.finish(&challenge, "123456");
-    forged.signature = encode(&[0;64]);
+    forged.signature = encode(&[0; 64]);
     assert!(f.auth.finish(forged).await.is_err());
     assert_eq!(f.provider.checks.load(Ordering::SeqCst), 0);
     for _ in 0..5 {
@@ -329,14 +331,22 @@ async fn concurrent_approval_issues_exactly_one_session() {
 #[ignore = "requires disposable PostgreSQL via LINKS_TEST_DATABASE_URL"]
 async fn provider_approval_cannot_be_reused_across_challenges() {
     let f = Fixture::new().await;
-    f.provider.reuse_sid.store(true,Ordering::SeqCst);
+    f.provider.reuse_sid.store(true, Ordering::SeqCst);
     let client = Client::new();
     let first = f.start(&client).await;
-    let session = f.auth.finish(client.finish(&first,"123456")).await.unwrap();
-    f.clock.0.fetch_add(60_000,Ordering::SeqCst);
+    let session = f
+        .auth
+        .finish(client.finish(&first, "123456"))
+        .await
+        .unwrap();
+    f.clock.0.fetch_add(60_000, Ordering::SeqCst);
     let second = f.start(&client).await;
-    assert!(f.auth.finish(client.finish(&second,"123456")).await.is_err());
-    assert_eq!(f.count("auth_sessions").await,1);
+    assert!(f
+        .auth
+        .finish(client.finish(&second, "123456"))
+        .await
+        .is_err());
+    assert_eq!(f.count("auth_sessions").await, 1);
     assert!(f.auth.authenticate(&session.access_token).await.is_ok());
     f.finish().await;
 }

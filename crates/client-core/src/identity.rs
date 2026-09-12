@@ -89,30 +89,50 @@ mod tests {
     use super::*;
     // Test-only adapter. Never available to a production build.
     #[derive(Default)]
-    struct FixtureVault { seed: Option<Zeroizing<[u8;32]>>, unavailable: bool }
+    struct FixtureVault {
+        seed: Option<Zeroizing<[u8; 32]>>,
+        unavailable: bool,
+    }
     impl HardwareSeedVault for FixtureVault {
-        fn store_seed(&mut self, seed: &[u8;32]) -> Result<KeyHandle,CoreError> {
-            if self.unavailable { return Err(CoreError::CryptoUnavailable); }
-            self.seed = Some(Zeroizing::new(*seed)); KeyHandle::new(b"test-handle".to_vec())
+        fn store_seed(&mut self, seed: &[u8; 32]) -> Result<KeyHandle, CoreError> {
+            if self.unavailable {
+                return Err(CoreError::CryptoUnavailable);
+            }
+            self.seed = Some(Zeroizing::new(*seed));
+            KeyHandle::new(b"test-handle".to_vec())
         }
-        fn load_seed(&self, _: &KeyHandle) -> Result<Zeroizing<[u8;32]>,CoreError> {
-            self.seed.as_ref().map(|seed| Zeroizing::new(**seed)).ok_or(CoreError::Authentication)
+        fn load_seed(&self, _: &KeyHandle) -> Result<Zeroizing<[u8; 32]>, CoreError> {
+            self.seed
+                .as_ref()
+                .map(|seed| Zeroizing::new(**seed))
+                .ok_or(CoreError::Authentication)
         }
-        fn delete_seed(&mut self, _: &KeyHandle) -> Result<(),CoreError> { self.seed = None; Ok(()) }
+        fn delete_seed(&mut self, _: &KeyHandle) -> Result<(), CoreError> {
+            self.seed = None;
+            Ok(())
+        }
     }
     #[test]
     fn vault_backed_signing_and_deletion() {
         let mut store = HardwareIdentityStore::new(FixtureVault::default());
         let handle = store.create_signing_key().unwrap();
-        let public_key: [u8;32] = store.public_key(&handle).unwrap().try_into().unwrap();
-        let signature = store.sign(&handle,b"links/test/v1").unwrap();
-        links_identity::verify(&public_key,b"links/test/v1",&signature).unwrap();
+        let public_key: [u8; 32] = store.public_key(&handle).unwrap().try_into().unwrap();
+        let signature = store.sign(&handle, b"links/test/v1").unwrap();
+        links_identity::verify(&public_key, b"links/test/v1", &signature).unwrap();
         store.delete_key(handle).unwrap();
-        assert!(store.public_key(&KeyHandle::new(b"test-handle".to_vec()).unwrap()).is_err());
+        assert!(store
+            .public_key(&KeyHandle::new(b"test-handle".to_vec()).unwrap())
+            .is_err());
     }
     #[test]
     fn unavailable_vault_has_no_software_fallback() {
-        let mut store = HardwareIdentityStore::new(FixtureVault { unavailable: true, ..Default::default() });
-        assert!(matches!(store.create_signing_key(), Err(CoreError::CryptoUnavailable)));
+        let mut store = HardwareIdentityStore::new(FixtureVault {
+            unavailable: true,
+            ..Default::default()
+        });
+        assert!(matches!(
+            store.create_signing_key(),
+            Err(CoreError::CryptoUnavailable)
+        ));
     }
 }

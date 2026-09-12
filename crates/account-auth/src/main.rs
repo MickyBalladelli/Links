@@ -19,8 +19,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .decode(key_text.as_bytes())
             .map_err(|_| "invalid AUTH_LOOKUP_KEY encoding")?,
     );
-    let key = Zeroizing::new(<[u8;32]>::try_from(key.as_slice())
-        .map_err(|_| "AUTH_LOOKUP_KEY must encode 32 bytes")?);
+    let key = Zeroizing::new(
+        <[u8; 32]>::try_from(key.as_slice()).map_err(|_| "AUTH_LOOKUP_KEY must encode 32 bytes")?,
+    );
     let provider = Arc::new(TwilioVerify::new(
         std::env::var("TWILIO_ACCOUNT_SID")?,
         std::env::var("TWILIO_AUTH_TOKEN")?,

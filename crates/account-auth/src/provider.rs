@@ -204,7 +204,7 @@ mod tests {
     #[tokio::test]
     async fn provider_errors_and_mismatched_approval_never_authenticate() {
         use axum::response::IntoResponse;
-        async fn handler(Form(form): Form<HashMap<String,String>>) -> axum::response::Response {
+        async fn handler(Form(form): Form<HashMap<String, String>>) -> axum::response::Response {
             match form["Code"].as_str() {
                 "404000" => StatusCode::NOT_FOUND.into_response(),
                 "429000" => StatusCode::TOO_MANY_REQUESTS.into_response(),
@@ -214,22 +214,46 @@ mod tests {
                     "sid":format!("VE{}", if code == "111111" { "f" } else { "a" }.repeat(32)),
                     "service_sid":format!("VA{}", "b".repeat(32)),
                     "status":if code == "222222" { "pending" } else { "approved" }, "valid":true
-                })).into_response(),
+                }))
+                .into_response(),
             }
         }
-        let service = format!("VA{}","b".repeat(32));
-        let app = Router::new().route(&format!("/Services/{service}/VerificationCheck"),post(handler));
+        let service = format!("VA{}", "b".repeat(32));
+        let app = Router::new().route(
+            &format!("/Services/{service}/VerificationCheck"),
+            post(handler),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let task = tokio::spawn(async move { axum::serve(listener,app).await.unwrap(); });
-        let provider = TwilioVerify { client:Client::new(), account_sid:format!("AC{}","c".repeat(32)),auth_token:Zeroizing::new("test-token-not-real".into()),service_sid:service,base_url:format!("http://{address}") };
-        let id = format!("VE{}","a".repeat(32));
-        assert!(!provider.check(&id,"404000").await.unwrap());
-        assert!(!provider.check(&id,"222222").await.unwrap());
-        assert!(matches!(provider.check(&id,"429000").await,Err(AuthError::RateLimited)));
-        assert!(matches!(provider.check(&id,"500000").await,Err(AuthError::Unavailable)));
-        assert!(matches!(provider.check(&id,"111111").await,Err(AuthError::Denied)));
-        assert!(matches!(provider.check(&id,"999999").await,Err(AuthError::Unavailable)));
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let provider = TwilioVerify {
+            client: Client::new(),
+            account_sid: format!("AC{}", "c".repeat(32)),
+            auth_token: Zeroizing::new("test-token-not-real".into()),
+            service_sid: service,
+            base_url: format!("http://{address}"),
+        };
+        let id = format!("VE{}", "a".repeat(32));
+        assert!(!provider.check(&id, "404000").await.unwrap());
+        assert!(!provider.check(&id, "222222").await.unwrap());
+        assert!(matches!(
+            provider.check(&id, "429000").await,
+            Err(AuthError::RateLimited)
+        ));
+        assert!(matches!(
+            provider.check(&id, "500000").await,
+            Err(AuthError::Unavailable)
+        ));
+        assert!(matches!(
+            provider.check(&id, "111111").await,
+            Err(AuthError::Denied)
+        ));
+        assert!(matches!(
+            provider.check(&id, "999999").await,
+            Err(AuthError::Unavailable)
+        ));
         task.abort();
     }
     #[test]
