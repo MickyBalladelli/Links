@@ -1,0 +1,11 @@
+[package]
+name = "links-client-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+links-protocol.workspace = true
+prost.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true

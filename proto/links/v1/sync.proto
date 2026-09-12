@@ -1,0 +1,29 @@
+syntax = "proto3";
+package links.v1;
+import "links/v1/envelope.proto";
+
+message QueueItem {
+  uint64 cursor = 1; // Contiguous, positive, per-device; never a conversation index.
+  oneof entry {
+    Envelope envelope = 2;
+    Tombstone tombstone = 3;
+  }
+}
+message Tombstone {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_EXPIRED = 1;
+    REASON_ACKNOWLEDGED = 2;
+  }
+  Reason reason = 1;
+}
+message SyncBatch {
+  string recipient_device_id = 1;
+  uint64 after_cursor = 2; // Must equal the requested durable checkpoint.
+  uint64 next_cursor = 3; // Last item cursor, or after_cursor if empty.
+  uint64 high_watermark = 4; // Highest assigned cursor, not a checkpoint.
+  repeated QueueItem items = 5;
+}
+message QueueAck {
+  uint64 through_cursor = 1; // Cumulative, only after local durable storage.
+}

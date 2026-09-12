@@ -1,0 +1,5 @@
+/target/
+/.local-tools/
+/.env
+*.log
+.DS_Store

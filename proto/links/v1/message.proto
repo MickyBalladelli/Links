@@ -1,0 +1,17 @@
+syntax = "proto3";
+package links.v1;
+import "links/v1/media.proto";
+import "links/v1/receipts.proto";
+
+// PRIVATE: serialize then encrypt on the client. Routing never sees this type.
+message Message {
+  string message_id = 1;
+  string conversation_id = 2;
+  string sender_device_id = 3;
+  uint64 sent_at_ms = 4;
+  oneof content {
+    string text = 5;
+    MediaMetadata media = 6;
+    Receipts receipts = 7;
+  }
+}

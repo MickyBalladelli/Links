@@ -1,0 +1,11 @@
+syntax = "proto3";
+package links.v1;
+
+// Routing-visible header. Never add sender, phone, conversation, or content fields.
+message Envelope {
+  uint32 protocol_version = 1;
+  string envelope_id = 2; // Idempotency key scoped to recipient_device_id.
+  string recipient_device_id = 3;
+  uint64 expires_at_ms = 4;
+  bytes sealed_payload = 5; // Sender-hiding wrapper around encrypted MLS bytes.
+}

@@ -1,0 +1,46 @@
+syntax = "proto3";
+package links.v1;
+import "links/v1/envelope.proto";
+import "links/v1/sync.proto";
+
+// One binary protobuf frame per WebSocket message; see docs/contracts.md.
+message ClientFrame {
+  string request_id = 1;
+  oneof body {
+    Hello hello = 2;
+    Envelope send = 3;
+    Replay replay = 4;
+    QueueAck ack = 5;
+  }
+}
+message Hello {
+  uint32 protocol_version = 1;
+  string device_id = 2;
+  bytes device_access_token = 3; // Short-lived bearer secret. Never log frames.
+  uint64 last_seen_cursor = 4;
+}
+message Replay { uint64 after_cursor = 1; uint32 limit = 2; }
+message ServerFrame {
+  string request_id = 1;
+  oneof body {
+    Welcome welcome = 2;
+    Accepted accepted = 3;
+    SyncBatch batch = 4;
+    ProtocolError error = 5;
+  }
+}
+message Welcome { uint32 protocol_version = 1; uint32 heartbeat_seconds = 2; }
+message Accepted { string envelope_id = 1; } // Durable enqueue, not peer delivery.
+message ProtocolError {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_INVALID_ARGUMENT = 1;
+    CODE_UNAUTHENTICATED = 2;
+    CODE_UNSUPPORTED_VERSION = 3;
+    CODE_RATE_LIMITED = 4;
+    CODE_CURSOR_EXPIRED = 5;
+    CODE_TEMPORARILY_UNAVAILABLE = 6;
+  }
+  Code code = 1;
+  uint32 retry_after_ms = 2;
+}

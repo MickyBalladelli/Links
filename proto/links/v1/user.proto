@@ -1,0 +1,17 @@
+syntax = "proto3";
+package links.v1;
+
+// Public directory record. Phone numbers and private key material are forbidden.
+message User {
+  string user_id = 1; // Canonical non-nil UUID.
+  optional string handle = 2; // Lowercase ASCII, 3-32 characters.
+  repeated Device devices = 3;
+}
+message Device {
+  string device_id = 1;
+  string user_id = 2;
+  bytes identity_public_key = 3;
+  bytes mls_credential = 4; // Public credential, not MLS private group state.
+  uint64 registered_at_ms = 5;
+  optional uint64 revoked_at_ms = 6;
+}

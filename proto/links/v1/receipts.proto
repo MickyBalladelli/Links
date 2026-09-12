@@ -1,0 +1,14 @@
+syntax = "proto3";
+package links.v1;
+
+// End-to-end receipt, distinct from the server queue acknowledgement.
+message Receipts {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_DELIVERED = 1;
+    KIND_READ = 2;
+  }
+  Kind kind = 1;
+  repeated string message_ids = 2;
+  uint64 observed_at_ms = 3;
+}
