@@ -6,6 +6,7 @@ use thiserror::Error;
 pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/links.v1.rs"));
 }
+pub mod contact_psi;
 pub mod sync_compression;
 pub use sync_compression::{
     compress_sync_batch, decompress_sync_batch, validate_sync_batch,

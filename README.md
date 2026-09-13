@@ -15,20 +15,21 @@ remain open.
 | Path | Responsibility |
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
-| `crates/protocol` | Generated common types, descriptors, boundary validation and bounded Zstd dictionary sync compression. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, and shared video profiles. |
+| `crates/protocol` | Generated common types, descriptors, boundary validation, bounded Zstd dictionary sync compression, and verifiable-OPRF contact PSI primitives. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, local Argon2id contact hashing, verifiable-OPRF contact PSI, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, and shared video profiles. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts and MLS basic credentials. |
-| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
+| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, and the internal Android text-messaging shell. |
 | `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `crates/server-store/migrations/0007_pseudonymous_accounts.sql` | Allows username-only accounts to omit phone-derived authentication subjects. |
+| `crates/server-store/migrations/0008_contact_psi.sql` | Stores opaque phone-directory OPRF tokens and challenge state without raw phone numbers. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
 | `docs/storage.md` | PostgreSQL, payload-store and ephemeral-state guarantees and limits. |

@@ -12,14 +12,20 @@ account, and non-revoked device rows in one public-key directory query. It
 returns only device IDs, MLS node IDs, identity public keys, and MLS
 credentials; pre-key claims remain a separate authenticated atomic operation.
 
-`accounts` stores a unique keyed 32-byte authentication-subject lookup digest, not
-a raw phone number, OTP, or unkeyed phone hash. Pseudonymous username accounts
+`accounts` stores a unique keyed 32-byte authentication-subject lookup digest and,
+for phone accounts, a unique 32-byte OPRF directory token, not a raw phone number,
+OTP, or unkeyed phone hash. Pseudonymous username accounts
 leave that subject NULL and set `account_kind='pseudonymous'`; their first-party
 device key proves registration and later login. The auth service owns the secret
-digest key and any separately encrypted contact record. `handles` enforces
+digest/OPRF key and any separately encrypted contact record. `handles` enforces
 lowercase ASCII `[a-z][a-z0-9_]{2,31}` and one active handle per user. Concurrent
 claims are arbitrated by unique constraints; changing/recycling a handle is not
 part of this API. Disabled accounts cannot claim, enroll, or change membership.
+
+The contact PSI token is derived during phone OTP enrollment from the canonical
+phone through a verifiable-OPRF-compatible server secret. It is opaque to the
+client and cannot be backfilled from the older authentication digest; existing
+phone accounts receive it on their next successful OTP enrollment/login.
 
 `devices` maps an account/device to a unique MLS node and public credentials.
 Revocation is idempotent and excludes the device from active routing queries;

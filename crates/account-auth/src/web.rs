@@ -1,7 +1,8 @@
 use crate::{
     service::{
-        AccountAuth, DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
-        PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, StartRequest,
+        AccountAuth, ContactPsiQueryRequest, DeviceRegistrationRequest, EncryptedKeyBackupRequest,
+        FinishRequest, PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest,
+        StartRequest,
     },
     AuthError,
 };
@@ -46,11 +47,19 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
     let directory_routes = Router::new()
         .route("/v1/directory/{handle}", get(directory_lookup))
         .layer(DefaultBodyLimit::max(4096));
+    let contact_psi_routes = Router::new()
+        .route(
+            "/v1/contact-discovery/parameters",
+            get(contact_psi_parameters),
+        )
+        .route("/v1/contact-discovery/query", post(contact_psi_query))
+        .layer(DefaultBodyLimit::max(64 * 1024));
     Router::new()
         .merge(auth_routes)
         .merge(passkey_routes)
         .merge(prekey_routes)
         .merge(directory_routes)
+        .merge(contact_psi_routes)
         .layer(middleware::from_fn(no_store))
         .with_state(auth)
 }
@@ -113,6 +122,31 @@ async fn directory_lookup(
         Some(directory) => Ok(Json(directory).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
+}
+async fn contact_psi_parameters(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.contact_psi_parameters(bearer(&headers)?, peer.ip())
+            .await?,
+    ))
+}
+async fn contact_psi_query(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    request: Result<Json<ContactPsiQueryRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.contact_psi_query(
+            bearer(&headers)?,
+            peer.ip(),
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
 }
 async fn me(
     State(auth): State<Arc<AccountAuth>>,

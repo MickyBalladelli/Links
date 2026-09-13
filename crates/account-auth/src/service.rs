@@ -6,7 +6,7 @@ use crate::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
-use links_protocol::{v1, validate_handle};
+use links_protocol::{self, v1, validate_handle};
 use links_server_store::postgres::RelationalStore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -95,6 +95,34 @@ pub struct UsernameDirectoryDeviceResponse {
     pub mls_node_id: Uuid,
     pub identity_public_key: String,
     pub mls_credential: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactPsiQueryRequest {
+    pub protocol_version: u32,
+    pub blinded_inputs: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ContactPsiEvaluationResponse {
+    pub evaluated_point: String,
+    pub proof: String,
+}
+
+#[derive(Serialize)]
+pub struct ContactPsiQueryResponse {
+    pub protocol_version: u32,
+    pub evaluations: Vec<ContactPsiEvaluationResponse>,
+}
+
+#[derive(Serialize)]
+pub struct ContactPsiParametersResponse {
+    pub protocol_version: u32,
+    pub server_public_key: String,
+    pub filter: String,
+    pub filter_hash_count: u8,
+    pub filter_item_count: u64,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Challenge {
@@ -252,6 +280,12 @@ fn random() -> Result<[u8; 32], AuthError> {
     Ok(bytes)
 }
 
+fn random_wide() -> Result<[u8; 64], AuthError> {
+    let mut bytes = [0; 64];
+    getrandom::getrandom(&mut bytes).map_err(|_| AuthError::Unavailable)?;
+    Ok(bytes)
+}
+
 pub struct AccountAuth {
     pool: PgPool,
     provider: Arc<dyn OtpProvider>,
@@ -353,6 +387,45 @@ impl AccountAuth {
             (handle_minute_key, 60_000_i64, 60_i32),
             (handle_hour_key, 3_600_000_i64, 1_000_i32),
             (ip_key, 3_600_000_i64, 300_i32),
+        ] {
+            let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
+                .bind(key.as_slice())
+                .bind(now)
+                .bind(window)
+                .bind(limit)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if count.is_none() {
+                limited = true;
+                break;
+            }
+        }
+        tx.commit().await?;
+        if limited {
+            return Err(AuthError::RateLimited);
+        }
+        Ok(())
+    }
+
+    async fn enforce_contact_psi_rate_limits(
+        &self,
+        user_id: Uuid,
+        peer_ip: IpAddr,
+        now: i64,
+    ) -> Result<(), AuthError> {
+        let user_minute_key =
+            self.digest(b"links/contact-psi-user-minute/v1\0", user_id.as_bytes());
+        let user_hour_key = self.digest(b"links/contact-psi-user-hour/v1\0", user_id.as_bytes());
+        let ip_key = self.digest(
+            b"links/contact-psi-ip-hour/v1\0",
+            peer_ip.to_string().as_bytes(),
+        );
+        let mut tx = self.pool.begin().await?;
+        let mut limited = false;
+        for (key, window, limit) in [
+            (user_minute_key, 60_000_i64, 10_i32),
+            (user_hour_key, 3_600_000_i64, 60_i32),
+            (ip_key, 3_600_000_i64, 100_i32),
         ] {
             let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
                 .bind(key.as_slice())
@@ -604,6 +677,9 @@ impl AccountAuth {
         )?;
         let now = self.now()?;
         let subject = self.digest(b"links/phone-lookup/v1\0", request.phone.as_bytes());
+        let contact_directory_token =
+            links_protocol::contact_psi::directory_token(&request.phone, &*self.phone_lookup_key)
+                .map_err(|_| AuthError::Unavailable)?;
         let cooldown = self.digest(b"links/otp-cooldown/v1\0", &subject);
         let per_phone = self.digest(b"links/otp-phone-hour/v1\0", &subject);
         let per_ip = self.digest(b"links/otp-ip-hour/v1\0", peer_ip.to_string().as_bytes());
@@ -647,8 +723,8 @@ impl AccountAuth {
         let expires = now + CHALLENGE_TTL_MS as i64;
         sqlx::query("UPDATE auth_challenges SET state='failed' WHERE subject_hash=$1 AND state IN ('reserved','pending','checking')")
             .bind(subject.as_slice()).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO auth_challenges (challenge_id,subject_hash,user_id,device_id,mls_node_id,public_key,nonce,enrolling,permitted,state,expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',$10)")
-            .bind(id).bind(subject.as_slice()).bind(user_id).bind(request.device_id).bind(request.mls_node_id).bind(public_key.as_slice()).bind(nonce.as_slice()).bind(enrolling).bind(permitted).bind(expires).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO auth_challenges (challenge_id,subject_hash,contact_directory_token,user_id,device_id,mls_node_id,public_key,nonce,enrolling,permitted,state,expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'reserved',$11)")
+            .bind(id).bind(subject.as_slice()).bind(contact_directory_token.as_slice()).bind(user_id).bind(request.device_id).bind(request.mls_node_id).bind(public_key.as_slice()).bind(nonce.as_slice()).bind(enrolling).bind(permitted).bind(expires).execute(&mut *tx).await?;
         tx.commit().await?; // Consume quota before sending; outages never bypass quotas.
         let provider_sid = match self.provider.start(&request.phone, request.channel).await {
             Ok(sid) if !sid.is_empty() && sid.len() <= 128 => sid,
@@ -748,9 +824,15 @@ impl AccountAuth {
             return Err(AuthError::Denied);
         }
         let subject: Vec<u8> = row.get("subject_hash");
+        let contact_directory_token: Vec<u8> = row
+            .get::<Option<Vec<u8>>, _>("contact_directory_token")
+            .ok_or(AuthError::Unavailable)?;
+        if contact_directory_token.len() != 32 {
+            return Err(AuthError::Unavailable);
+        }
         if row.get::<bool, _>("enrolling") {
-            let inserted = sqlx::query("INSERT INTO accounts (user_id,auth_subject_hash) VALUES ($1,$2) ON CONFLICT DO NOTHING")
-                .bind(binding.user_id).bind(&subject).execute(&mut *tx).await?;
+            let inserted = sqlx::query("INSERT INTO accounts (user_id,auth_subject_hash,contact_directory_token) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING")
+                .bind(binding.user_id).bind(&subject).bind(&contact_directory_token).execute(&mut *tx).await?;
             if inserted.rows_affected() != 1 {
                 return Err(AuthError::Denied);
             }
@@ -761,6 +843,16 @@ impl AccountAuth {
             .bind(binding.user_id).bind(subject).bind(binding.device_id).bind(binding.mls_node_id).bind(binding.public_key.as_slice()).bind(binding.mls_credential()?).fetch_optional(&mut *tx).await?;
         if allowed.is_none() {
             return Err(AuthError::Denied);
+        }
+        if !row.get::<bool, _>("enrolling") {
+            let updated = sqlx::query("UPDATE accounts SET contact_directory_token=COALESCE(contact_directory_token,$2) WHERE user_id=$1 AND (contact_directory_token IS NULL OR contact_directory_token=$2)")
+                .bind(binding.user_id)
+                .bind(&contact_directory_token)
+                .execute(&mut *tx)
+                .await?;
+            if updated.rows_affected() != 1 {
+                return Err(AuthError::Unavailable);
+            }
         }
         let token_bytes = Zeroizing::new(random()?);
         let token_hash = Sha256::digest(token_bytes.as_slice());
@@ -1157,6 +1249,79 @@ impl AccountAuth {
             .claim_prekey_bundle(target_device_id)
             .await?)
     }
+
+    pub async fn contact_psi_parameters(
+        &self,
+        token: &str,
+        peer_ip: IpAddr,
+    ) -> Result<ContactPsiParametersResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        self.enforce_contact_psi_rate_limits(account.user_id, peer_ip, self.now()?)
+            .await?;
+        let rows = sqlx::query(
+            "SELECT a.contact_directory_token FROM accounts a WHERE a.disabled_at IS NULL AND a.contact_directory_token IS NOT NULL AND EXISTS (SELECT 1 FROM devices d WHERE d.user_id=a.user_id AND d.revoked_at IS NULL) ORDER BY a.contact_directory_token",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.len() > links_protocol::contact_psi::MAX_DIRECTORY_TOKENS {
+            return Err(AuthError::Unavailable);
+        }
+        let mut directory_tokens = Vec::with_capacity(rows.len());
+        for row in rows {
+            let token: Vec<u8> = row.get("contact_directory_token");
+            if token.len() != links_protocol::contact_psi::TOKEN_BYTES {
+                return Err(AuthError::Unavailable);
+            }
+            directory_tokens.push(token.try_into().map_err(|_| AuthError::Unavailable)?);
+        }
+        let filter = links_protocol::contact_psi::ContactPsiFilter::from_tokens(&directory_tokens)
+            .map_err(|_| AuthError::Unavailable)?;
+        Ok(ContactPsiParametersResponse {
+            protocol_version: links_protocol::contact_psi::VERSION,
+            server_public_key: encode(&links_protocol::contact_psi::server_public_key(
+                &*self.phone_lookup_key,
+            )),
+            filter: encode(filter.bits()),
+            filter_hash_count: filter.hash_count(),
+            filter_item_count: filter.item_count(),
+        })
+    }
+
+    pub async fn contact_psi_query(
+        &self,
+        token: &str,
+        peer_ip: IpAddr,
+        request: ContactPsiQueryRequest,
+    ) -> Result<ContactPsiQueryResponse, AuthError> {
+        if request.protocol_version != links_protocol::contact_psi::VERSION
+            || request.blinded_inputs.is_empty()
+            || request.blinded_inputs.len() > links_protocol::contact_psi::MAX_QUERY_ITEMS
+        {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        self.enforce_contact_psi_rate_limits(account.user_id, peer_ip, self.now()?)
+            .await?;
+        let mut evaluations = Vec::with_capacity(request.blinded_inputs.len());
+        for encoded in request.blinded_inputs {
+            let blinded = decode::<{ links_protocol::contact_psi::POINT_BYTES }>(&encoded)?;
+            let evaluation = links_protocol::contact_psi::evaluate_blinded(
+                &*self.phone_lookup_key,
+                &blinded,
+                &random_wide()?,
+            )
+            .map_err(|_| AuthError::Invalid)?;
+            evaluations.push(ContactPsiEvaluationResponse {
+                evaluated_point: encode(&evaluation.evaluated_point),
+                proof: encode(&evaluation.proof),
+            });
+        }
+        Ok(ContactPsiQueryResponse {
+            protocol_version: links_protocol::contact_psi::VERSION,
+            evaluations,
+        })
+    }
+
     pub async fn purge_expired(&self) -> Result<(), AuthError> {
         let now = self.now()?;
         sqlx::query("DELETE FROM auth_sessions WHERE expires_at_ms <= $1")

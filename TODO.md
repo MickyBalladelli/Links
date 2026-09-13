@@ -465,7 +465,11 @@ Add discovery options after the basic phone-based account works.
   Shared client core validates canonical E.164 input, uses a random persistent
   16-byte per-client salt, and derives 32-byte Argon2id hashes locally without
   sending phone numbers or hashes to the server.
-- [ ] Build the server/network PSI zero-knowledge matching API without leaking full contact books.
+- [x] Build the server/network PSI zero-knowledge matching API without leaking full contact books.
+  Authenticated clients send blinded Ristretto queries; the server returns
+  verifiable DLEQ-backed OPRF evaluations, and clients match opaque directory
+  tokens locally. Raw contact numbers and local Argon2id hashes never cross the
+  network; query volume and account metadata remain visible to the service.
 
 ### Anti-spam
 

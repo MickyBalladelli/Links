@@ -1847,9 +1847,11 @@ dependencies = [
 name = "links-protocol"
 version = "0.1.0"
 dependencies = [
+ "curve25519-dalek 4.1.3",
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "sha2 0.10.9",
  "thiserror",
  "uuid",
  "zstd",

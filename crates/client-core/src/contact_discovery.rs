@@ -1,8 +1,11 @@
-//! Local address-book phone hashing for a future private contact-discovery
-//! protocol. This module never reads contacts or sends hashes to a server.
+//! Local address-book hashing and verifiable-OPRF contact discovery.
+//!
+//! This module never reads contacts. Local Argon2id hashes never leave the
+//! device; the optional network flow sends only blinded Ristretto points.
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use getrandom::fill;
+use links_protocol::contact_psi;
 use thiserror::Error;
 use zeroize::Zeroize;
 
@@ -24,6 +27,14 @@ pub enum ContactHashError {
     #[error("contact batch is too large")]
     TooManyContacts,
     #[error("contact hash provider unavailable")]
+    Provider,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ContactPsiClientError {
+    #[error(transparent)]
+    Protocol(#[from] contact_psi::ContactPsiError),
+    #[error("contact PSI randomness provider unavailable")]
     Provider,
 }
 
@@ -70,6 +81,105 @@ impl ContactPhoneHash {
 
     pub fn into_bytes(self) -> [u8; CONTACT_HASH_BYTES] {
         self.0
+    }
+}
+
+/// Blinded contact query state for one authenticated PSI request.
+#[derive(Debug)]
+pub struct ContactPsiClientState {
+    inputs: Vec<[u8; 32]>,
+    blinds: Vec<[u8; 32]>,
+    blinded_inputs: Vec<[u8; contact_psi::POINT_BYTES]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContactPsiQuery {
+    pub protocol_version: u32,
+    pub blinded_inputs: Vec<[u8; contact_psi::POINT_BYTES]>,
+}
+
+pub struct ContactPsiMatchResult {
+    pub matched: Vec<bool>,
+}
+
+impl ContactPsiClientState {
+    /// Build one bounded blinded query. Original phone strings are used only
+    /// during this call and are not retained in the returned state.
+    pub fn start<I, S>(phones_e164: I) -> Result<(Self, ContactPsiQuery), ContactPsiClientError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let phones = phones_e164.into_iter();
+        let (lower, upper) = phones.size_hint();
+        if lower > contact_psi::MAX_QUERY_ITEMS
+            || upper.is_some_and(|count| count > contact_psi::MAX_QUERY_ITEMS)
+        {
+            return Err(ContactPsiClientError::Protocol(
+                contact_psi::ContactPsiError::TooLarge,
+            ));
+        }
+        let mut inputs = Vec::with_capacity(lower);
+        let mut blinds = Vec::with_capacity(lower);
+        let mut blinded_inputs = Vec::with_capacity(lower);
+        for phone in phones {
+            if inputs.len() == contact_psi::MAX_QUERY_ITEMS {
+                return Err(ContactPsiClientError::Protocol(
+                    contact_psi::ContactPsiError::TooLarge,
+                ));
+            }
+            let input = contact_psi::contact_input(phone.as_ref())?;
+            let mut randomness = [0u8; 64];
+            fill(&mut randomness).map_err(|_| ContactPsiClientError::Provider)?;
+            let (blinded, blind) = contact_psi::blind_input(&input, &randomness)?;
+            inputs.push(input);
+            blinds.push(blind);
+            blinded_inputs.push(blinded);
+        }
+        if blinded_inputs.is_empty() {
+            return Err(ContactPsiClientError::Protocol(
+                contact_psi::ContactPsiError::TooLarge,
+            ));
+        }
+        let query = ContactPsiQuery {
+            protocol_version: contact_psi::VERSION,
+            blinded_inputs: blinded_inputs.clone(),
+        };
+        Ok((
+            Self {
+                inputs,
+                blinds,
+                blinded_inputs,
+            },
+            query,
+        ))
+    }
+
+    /// Verify, unblind, and locally match the server's opaque membership
+    /// filter. The server response must contain one evaluation per input.
+    pub fn finish(
+        &self,
+        server_public_key: &[u8; contact_psi::POINT_BYTES],
+        evaluations: &[contact_psi::OprfEvaluation],
+        directory_filter: &contact_psi::ContactPsiFilter,
+    ) -> Result<ContactPsiMatchResult, ContactPsiClientError> {
+        if evaluations.len() != self.inputs.len() {
+            return Err(ContactPsiClientError::Protocol(
+                contact_psi::ContactPsiError::TooLarge,
+            ));
+        }
+        let mut matched = Vec::with_capacity(evaluations.len());
+        for (index, evaluation) in evaluations.iter().enumerate() {
+            contact_psi::verify_evaluation(
+                server_public_key,
+                &self.blinded_inputs[index],
+                evaluation,
+            )?;
+            let unblinded = contact_psi::unblind(&evaluation.evaluated_point, &self.blinds[index])?;
+            let token = contact_psi::oprf_output(&self.inputs[index], &unblinded)?;
+            matched.push(directory_filter.contains(&token));
+        }
+        Ok(ContactPsiMatchResult { matched })
     }
 }
 

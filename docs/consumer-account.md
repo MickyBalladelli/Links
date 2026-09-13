@@ -82,6 +82,8 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /v1/auth/username/register` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Creates a pseudonymous account and returns its session, handle, and MLS credential. |
 | `POST /v1/auth/username/login` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Returns a session after the registered device key proves possession. |
 | `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's public identity key, MLS node ID and MLS credential. |
+| `GET /v1/contact-discovery/parameters` | Bearer session | OPRF public key and opaque active phone-directory membership filter. |
+| `POST /v1/contact-discovery/query` | Bearer session plus bounded blinded Ristretto points | One verifiable OPRF evaluation per blinded input. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
 | `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
 
@@ -94,6 +96,15 @@ revealing account-authentication state. The lookup does not consume one-time
 pre-keys: an authenticated sender claims each returned device's bundle through
 `POST /v1/prekeys/{device_id}/claim`, then verifies the signed bundle before
 starting PQXDH.
+
+Contact discovery uses an authenticated one-sided PSI flow. The client creates
+fresh blindings for local canonical E.164 contacts, posts only the blinded
+Ristretto points, verifies each server DLEQ proof against the configured OPRF
+public key, unblinds locally, and checks the resulting tokens against the opaque
+membership filter. The server sees the authenticated account, source address,
+query count, and timing, but not the phone values. The client sees opaque OPRF
+tokens, not the server's phone numbers. Queries are limited to 256 contacts per
+request and rate-limited per account and source address.
 
 The phone must already be canonical E.164: `+` followed by 8–15 ASCII digits, with
 a nonzero country-code prefix. This is format validation, not proof that a number
