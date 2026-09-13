@@ -3,6 +3,7 @@ use crate::{
     identity::LocalIdentity,
     mls::MlsEngine,
     protocol::{self, v1},
+    sequences::ConversationSequence,
     CoreError,
 };
 use prost::Message;
@@ -19,6 +20,35 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
             crypto,
             mls,
         }
+    }
+
+    /// Assign the next sender-local conversation sequence before MLS sealing.
+    /// Persist the returned message, envelope, MLS state and sequence counter
+    /// in one host transaction before retrying or reporting durable send.
+    pub fn seal_next_message(
+        &mut self,
+        mut message: v1::Message,
+        sequence: &mut ConversationSequence,
+        recipient_device_id: String,
+        envelope_id: String,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(v1::Message, v1::Envelope), CoreError> {
+        if message.conversation_id != sequence.conversation_id()
+            || message.sender_device_id != sequence.sender_device_id()
+            || message.sender_device_id != self.identity.device_id()
+        {
+            return Err(CoreError::Authentication);
+        }
+        message.sequence_id = sequence.reserve_next()?;
+        let envelope = self.seal_message(
+            &message,
+            recipient_device_id,
+            envelope_id,
+            expires_at_ms,
+            now_ms,
+        )?;
+        Ok((message, envelope))
     }
 
     /// Callers retain the returned bytes for retries: do not re-encrypt on retry.
@@ -112,6 +142,7 @@ mod tests {
             conversation_id: USER.into(),
             sender_device_id: DEVICE.into(),
             sent_at_ms: 1,
+            sequence_id: 1,
             content: Some(v1::message::Content::Text("secret".into())),
         };
         assert!(matches!(
@@ -184,6 +215,7 @@ mod tests {
                 conversation_id: USER.into(),
                 sender_device_id: DEVICE.into(),
                 sent_at_ms: 1,
+                sequence_id: 1,
                 content: Some(v1::message::Content::Text("private message".into())),
             },
             authenticated_sender: DEVICE.into(),

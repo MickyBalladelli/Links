@@ -83,6 +83,9 @@ pub fn validate_message(message: &v1::Message) -> Result<(), ProtocolError> {
     if message.sent_at_ms == 0 {
         return Err(ProtocolError::Invalid("sent_at_ms"));
     }
+    if message.sequence_id == 0 || message.sequence_id > MAX_CURSOR {
+        return Err(ProtocolError::Invalid("sequence_id"));
+    }
     if message.encoded_len() > MAX_MESSAGE_BYTES {
         return Err(ProtocolError::TooLarge);
     }
@@ -444,6 +447,7 @@ mod tests {
             conversation_id: envelope().recipient_device_id.clone(),
             sender_device_id: envelope().recipient_device_id,
             sent_at_ms: 1,
+            sequence_id: 1,
             content: Some(v1::message::Content::Text("hello".into())),
         };
         assert!(decode_message(&m.encode_to_vec()).unwrap() == m);

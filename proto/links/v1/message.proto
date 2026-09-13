@@ -9,6 +9,7 @@ message Message {
   string conversation_id = 2;
   string sender_device_id = 3;
   uint64 sent_at_ms = 4;
+  uint64 sequence_id = 8; // Sender-local monotonic counter inside the conversation.
   oneof content {
     string text = 5;
     MediaMetadata media = 6;

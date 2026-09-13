@@ -142,7 +142,11 @@ Make encrypted messages reliably move between devices before adding richer clien
 
 ### Synchronization and multi-device state
 
-- [ ] Assign strictly increasing `sequence_id` / `cursor_id` counters per conversation and user queue.
+- [x] Assign strictly increasing `sequence_id` / `cursor_id` counters per conversation and user queue.
+-  `sequence_id` is assigned inside E2EE per `(conversation_id, sender_device_id)`;
+   `cursor` is assigned transactionally per recipient-device mailbox by the
+   payload store. Both reject reuse and preserve replay ordering without
+   exposing conversation metadata to routing services.
 - [ ] Implement connection replay: the client sends `last_seen_cursor`, and the server returns the missing delta payloads.
 - [ ] Register every physical client as a distinct MLS identity node under the primary user account.
 - [ ] Fan out outbound encrypted envelopes to all active device queues for target users.

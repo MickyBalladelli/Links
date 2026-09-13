@@ -13,8 +13,8 @@ UTC Unix milliseconds. Queue cursors are unsigned on the wire, bounded by signed
 64-bit maximum for cross-store compatibility. JavaScript clients must use BigInt
 or decimal strings, not floating-point Number, for uint64 values.
 
-`Message` contains private sender/conversation metadata and one text, media, or
-receipt body. `MediaMetadata` carries secret media keys and belongs **inside**
+`Message` contains private sender/conversation metadata, a sender-local
+`sequence_id`, and one text, media, or receipt body. `MediaMetadata` carries secret media keys and belongs **inside**
 E2EE, never in a public upload request. `Receipts` communicates delivered/read
 status to peers. `QueueAck` only means ciphertext/state was durably committed on
 the receiving device; it is neither a read receipt nor proof of successful peer
@@ -92,9 +92,13 @@ envelope ID; the destination gateway does not append a duplicate mailbox row.
 
 Every recipient device has an independent mailbox. Appending allocates a strictly
 increasing positive cursor atomically with the record. No global/conversation
-counter is exposed in the routing envelope. Fanout allocates a separate mailbox
-entry per active recipient device; group/application ordering is authenticated
-inside the encrypted protocol rather than inferred from mailbox order.
+counter is exposed in the routing envelope. The encrypted Message carries a
+strictly increasing sender-local sequence for each `(conversation_id,
+sender_device_id)` scope. Fanout allocates a separate mailbox entry per active
+recipient device; group/application ordering is authenticated inside the
+encrypted protocol rather than inferred from mailbox order. `ConversationSequence`
+allocates and accepts these private sequence values; the host persists its state
+with the MLS/outbox transaction.
 
 Replay starts strictly after the last durable checkpoint. A SyncBatch declares
 the requested `after_cursor`, a snapshot high watermark, and the last included
