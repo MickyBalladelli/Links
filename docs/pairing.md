@@ -45,14 +45,17 @@ binding. A QR string is not trusted merely because it parsed.
 4. The authenticated mobile client decodes the QR image to URI text, calls
    `PairingPayload::from_uri()`, calls `verify()`, and confirms `user_id` before
    showing the approval UI.
-5. The mobile client submits the decoded public fields to `POST /v1/devices`.
+5. The mobile client submits `device_id`, `mls_node_id`, `public_key`, `nonce`,
+   and `signature` to `POST /v1/devices`. It uses the QR `user_id` only for the
+   local account check; the server derives account scope from the bearer token.
    The new device stores the returned MLS credential and becomes a distinct
    device node under the account.
 
 The shared approval coordinator is `approve_pairing(uri, approving_user_id,
 access_token, transport)`. It creates a `PairingRegistrationRequest` only after
 URI parsing, signature verification, and account matching. The transport sends
-the request to `POST /v1/devices`, parses the response with
+the five server fields (not the locally checked QR `user_id`) to
+`POST /v1/devices`, parses the response with
 `PairingRegistrationResponse::new`, and returns it to the coordinator. The
 coordinator then checks every returned identity field against the scanned
 request and checks that the returned credential is the expected Links MLS

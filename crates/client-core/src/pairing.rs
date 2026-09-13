@@ -18,8 +18,9 @@ pub const MAX_MLS_CREDENTIAL_BYTES: usize = 1024;
 pub const MAX_PAIRING_URI_BYTES: usize = 1024;
 
 /// Request sent by the authenticated mobile device to register the scanned
-/// Web/desktop identity. All fields are public; the access token stays in the
-/// transport call and is never part of this value.
+/// Web/desktop identity. All fields are non-secret; the QR `user_id` is used
+/// for local account matching and is not sent because the server derives it
+/// from the bearer session. The access token stays in the transport call.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PairingRegistrationRequest {
     user_id: Uuid,
@@ -168,9 +169,11 @@ impl PairingRegistrationResponse {
     }
 }
 
-/// HTTP/WebSocket adapters implement this boundary. The adapter must parse the
-/// JSON response into `PairingRegistrationResponse::new`; it must not expose or
-/// persist the bearer token in the returned device state.
+/// HTTP/WebSocket adapters implement this boundary. The adapter sends only
+/// `device_id`, `mls_node_id`, `public_key`, `nonce`, and `signature` to
+/// `POST /v1/devices`; it must parse the JSON response into
+/// `PairingRegistrationResponse::new`. It must not expose or persist the bearer
+/// token in the returned device state.
 #[async_trait::async_trait]
 pub trait PairingRegistrationTransport: Send {
     async fn register_device(
