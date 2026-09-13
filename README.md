@@ -1,7 +1,8 @@
 # Links
 
 Centralized-first encrypted messaging. The foundation includes phone OTP account
-authentication, Ed25519 device enrollment, hardware-backed identity custody, the
+authentication, Ed25519 device enrollment, hardware-backed identity custody,
+WebAuthn/Passkey PRF-encrypted identity backup, the
 Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
 provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
 messenger or a production post-quantum security claim.** One-to-one client
@@ -17,7 +18,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, envelope orchestration and durable sync validation. |
 | `crates/server-store` | PostgreSQL repository/migrations, encrypted payload-store contract, Redis-shaped state contract and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
-| `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, HTTP API and sessions. |
+| `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters and acceptance tests. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
@@ -26,6 +27,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 | `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
+| `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 
 ## Build and test
 

@@ -61,7 +61,7 @@ No custom signature or encryption algorithm is introduced.
 
 ## API contract
 
-All routes are under `/v1/auth`. JSON bodies are limited to 4 KiB. Binary fields
+Auth routes are under `/v1/auth`. JSON bodies are limited to 4 KiB. Binary fields
 are base64url without padding. UUIDs are UUID strings. Responses, including errors,
 have `Cache-Control: no-store`. Do not enable request/response-body logging at the
 application, proxy, provider SDK, or analytics layer.
@@ -94,6 +94,25 @@ pairing/recovery flow; **OTP alone cannot replace existing identity keys**.
 Ineligible requests receive provisional challenges without disclosing the real
 account UUID. They never receive a session even with a correct OTP. This is not
 a formal guarantee of enumeration resistance or of constant-time behavior.
+
+Passkey routes are disabled unless both `PASSKEY_RP_ID` and `PASSKEY_ORIGIN` are
+configured. They use the existing bearer session for account/device context:
+
+| Endpoint | Input | Result |
+| --- | --- | --- |
+| `POST /v1/passkeys/register/start` | Bearer session | Short-lived challenge, RP ID and account user ID. |
+| `POST /v1/passkeys/register/finish` | Challenge ID, credential ID, client data JSON and attestation object, base64url encoded | Registered ES256 public credential after `fmt=none`, UV and RP checks. |
+| `POST /v1/passkeys/assert/start` | Bearer session | Short-lived assertion challenge. |
+| `POST /v1/passkeys/assert/finish` | Challenge ID, credential ID, client data JSON, authenticator data and signature, base64url encoded | Verified passkey assertion and updated authenticator counter. |
+| `PUT /v1/passkey-backups` | Backup ID, current device ID, credential ID and encrypted envelope, base64url encoded | Stores opaque ciphertext; the PRF output is never sent. |
+| `GET /v1/passkey-backups/{backup_id}` | Bearer session | Returns the opaque envelope for local PRF decryption. |
+
+The verifier accepts ES256 P-256 credentials (`alg=-7`) and `fmt=none`
+attestation only. The client must request the WebAuthn PRF/`hmac-secret`
+extension separately; its 32-byte result is passed only to
+`HardwareIdentityStore::backup_with_passkey` or
+`HardwareIdentityStore::restore_from_passkey`. Passkey assertion is not yet a
+replacement for the separate new-device enrollment flow.
 
 ## Durable authentication rules
 
@@ -143,6 +162,8 @@ these variables through a secret manager or a private local environment:
 | `TWILIO_AUTH_TOKEN` | Provider credential; never commit or log it. |
 | `TWILIO_VERIFY_SERVICE_SID` | Verify service with SMS and, when needed, WhatsApp sender enabled. |
 | `AUTH_BIND` | Defaults to `127.0.0.1:8080`; non-loopback HTTP binding is rejected. |
+| `PASSKEY_RP_ID` | WebAuthn relying-party ID; must be paired with `PASSKEY_ORIGIN`. |
+| `PASSKEY_ORIGIN` | Exact web origin used by WebAuthn client data; must be paired with `PASSKEY_RP_ID`. |
 
 ```sh
 cargo run -p links-server-store --example migrate --locked
