@@ -1,0 +1,11 @@
+{
+  "name": "@links/web-client",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/LinksWebClient.ts"
+  },
+  "scripts": {
+    "build:wasm": "wasm-pack build ../crates/web-client --target web --out-dir ../../web/pkg"
+  }
+}

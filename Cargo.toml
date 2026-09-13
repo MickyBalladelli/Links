@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/protocol", "crates/client-core", "crates/server-store", "crates/identity", "crates/account-auth", "crates/identity-ffi", "crates/gateway", "crates/queue"]
+members = ["crates/protocol", "crates/client-core", "crates/server-store", "crates/identity", "crates/account-auth", "crates/identity-ffi", "crates/gateway", "crates/queue", "crates/web-client"]
 resolver = "2"
 
 [workspace.package]
@@ -14,6 +14,7 @@ bip39 = { version = "2.2.2", default-features = false, features = ["alloc", "zer
 prost = "0.14"
 thiserror = "2"
 uuid = "1"
+wasm-bindgen = "0.2.128"
 zeroize = "1"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 # OpenMLS RustCrypto still reaches getrandom 0.2 through elliptic-curve crates;
