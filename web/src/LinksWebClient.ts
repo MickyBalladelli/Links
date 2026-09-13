@@ -38,15 +38,9 @@ export interface WebClientSnapshot {
   registered: boolean
 }
 
-export { WebConnectionManager } from './WebConnectionManager'
-export type {
-  WebConnectionManagerOptions,
-  WebConnectionState
-} from './WebConnectionManager'
-
 const MAX_CREDENTIAL_BYTES = 1024
 
-function requireCanonicalUUID(value: string, field: string): string {
+export function requireCanonicalUUID(value: string, field: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) ||
       value === '00000000-0000-0000-0000-000000000000') {
     throw new Error(`Invalid ${field}`)

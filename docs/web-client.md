@@ -32,6 +32,17 @@ ping/pong callbacks; the manager therefore uses the browser's close/error events
 and periodic open-state checks for liveness. It never puts a bearer token in the
 endpoint URL.
 
+`WebTextMessaging` binds that connection to a `WebMessagingCore` adapter. The
+adapter is the boundary for the Rust client core and durable browser stores: it
+owns MLS epochs, Sealed Sender encryption/decryption, outbox state, inbox
+commit, cursor replay and delivery acknowledgements. Each Hello reads the
+current in-memory bearer and durable cursor, so reconnects resume from the last
+committed message. Incoming binary frames go directly to the core; the core
+must commit a decrypted message before the callback is invoked. Outbound text
+is validated by the host and then passed to the core, which creates and queues
+the encrypted envelope and device fanout. The browser never builds or inspects
+the encrypted payload.
+
 The seed never crosses the WASM/TypeScript boundary. Do not put it in
 `localStorage`, URLs, analytics, or logs. The current facade keeps it in memory;
 refresh or process loss requires a fresh explicit pairing until a durable,
@@ -44,5 +55,6 @@ Build the Web-facing WASM package from the `web` directory:
 npm run build:wasm
 ```
 
-This is the Web identity/pairing and connection foundation. Cursor replay,
-encrypted text orchestration, and browser UI are separate roadmap tasks.
+Browser storage policy and message UI remain host-application work. The shared
+Web sync shell covers encrypted one-to-one text transport and replay, but it
+does not choose a storage provider or render a particular interface.

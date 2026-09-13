@@ -41,6 +41,7 @@ remain open.
 | `docs/ios-text-milestone.md` | Internal iOS one-to-one text build scope and two-device acceptance gate. |
 | `docs/web-client.md` | Web/WASM client bootstrap, key custody boundary and current release limits. |
 | `web/src/WebConnectionManager.ts` | Browser `wss://` connection lifecycle for binary `links.v1`. |
+| `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
 
 ## Build and test
 

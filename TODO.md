@@ -323,14 +323,19 @@ These clients join an existing account as additional MLS device nodes. They do n
   `crates/web-client` exposes the shared Rust identity and pairing logic to
   WASM. The `web` TypeScript host creates a Web device identity, emits signed
   pairing URI text, and accepts only a matching validated MLS credential from
-  mobile approval. Browser storage, WebSocket sync, and text UI remain the
-  following Web client tasks.
+  mobile approval. Browser storage and text UI remain host-application work.
 - [x] Implement Web connection manager with exponential backoff, reconnect, and heartbeating.
   `web/src/WebConnectionManager.ts` uses binary `links.v1` WebSockets, sends
   Hello within five seconds, enforces the 1 MiB frame limit, reconnects with
   full jitter from 1 to 30 seconds, and keeps bearer tokens out of URLs. Browser
   ping/pong is handled by the platform; the manager checks socket liveness.
-- [ ] Implement encrypted 1-to-1 text sync across mobile and Web.
+- [x] Implement encrypted 1-to-1 text sync across mobile and Web.
+  `WebTextMessaging` reads the durable cursor from the shared-core adapter for
+  every Hello, forwards replay frames back into the core for Sealed Sender/MLS
+  decrypt and durable commit, and delegates outbound text encryption and
+  per-device fanout to the core. The browser handles only binary frames and
+  committed message callbacks; it never inspects plaintext before decryption
+  or constructs ciphertext itself.
 
 ### Desktop client
 

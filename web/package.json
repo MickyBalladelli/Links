@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/LinksWebClient.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/web-client --target web --out-dir pkg"

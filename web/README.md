@@ -15,5 +15,7 @@ that the response matches the Web device identity and expected Links credential.
 
 The Web host must keep the identity seed inside the WASM/provider boundary. Do
 not put it in `localStorage`, URLs, analytics, or logs. IndexedDB persistence,
-WebSocket reconnect, replay, and encrypted text UI are separate follow-up
-features in the roadmap.
+WebSocket reconnect and browser message UI remain host-application work. Use
+`WebTextMessaging` with a shared-core adapter for encrypted one-to-one sync;
+the adapter owns MLS, Sealed Sender, durable cursors and local inbox/outbox
+state.
