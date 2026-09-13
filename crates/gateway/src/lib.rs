@@ -226,6 +226,7 @@ pub struct GatewaySession {
     device_id: Uuid,
     session_id: String,
     last_ack_cursor: u64,
+    sync_compression: bool,
 }
 impl GatewaySession {
     pub fn user_id(&self) -> Uuid {
@@ -239,6 +240,9 @@ impl GatewaySession {
     }
     pub fn last_ack_cursor(&self) -> u64 {
         self.last_ack_cursor
+    }
+    pub fn uses_sync_compression(&self) -> bool {
+        self.sync_compression
     }
 }
 
@@ -292,6 +296,9 @@ where
         if hello.protocol_version != protocol::VERSION {
             return Err(GatewayError::UnsupportedVersion);
         }
+        let sync_compression = hello
+            .supported_sync_compression
+            .contains(&protocol::SYNC_COMPRESSION_ZSTD_DICTIONARY_V1);
         let device_id = Uuid::parse_str(&hello.device_id).map_err(|_| GatewayError::Invalid)?;
         let authenticated = self
             .authenticator
@@ -339,10 +346,7 @@ where
             })),
         })];
         if !batch.items.is_empty() {
-            actions.push(GatewayAction::Server(v1::ServerFrame {
-                request_id,
-                body: Some(v1::server_frame::Body::Batch(batch)),
-            }));
+            actions.push(sync_batch_action(request_id, batch, sync_compression)?);
         }
         Ok((
             GatewaySession {
@@ -350,6 +354,7 @@ where
                 device_id,
                 session_id,
                 last_ack_cursor: hello.last_seen_cursor,
+                sync_compression,
             },
             actions,
         ))
@@ -472,10 +477,11 @@ where
                 if batch.encoded_len() > protocol::MAX_FRAME_BYTES - 128 {
                     return Err(GatewayError::Invalid);
                 }
-                Ok(vec![GatewayAction::Server(v1::ServerFrame {
+                Ok(vec![sync_batch_action(
                     request_id,
-                    body: Some(v1::server_frame::Body::Batch(batch)),
-                })])
+                    batch,
+                    session.sync_compression,
+                )?])
             }
             v1::client_frame::Body::Ack(ack) => {
                 if ack.through_cursor > protocol::MAX_CURSOR
@@ -504,6 +510,9 @@ pub fn decode_client_frame(bytes: &[u8]) -> Result<v1::ClientFrame, GatewayError
 
 pub fn encode_server_frame(frame: &v1::ServerFrame) -> Result<Vec<u8>, GatewayError> {
     protocol::validate_id(&frame.request_id)?;
+    if let Some(v1::server_frame::Body::CompressedBatch(batch)) = frame.body.as_ref() {
+        protocol::decompress_sync_batch(batch)?;
+    }
     if frame.encoded_len() > protocol::MAX_FRAME_BYTES {
         return Err(GatewayError::Invalid);
     }
@@ -523,6 +532,13 @@ fn validate_request(frame: &v1::ClientFrame) -> Result<(), GatewayError> {
                 || hello.device_access_token.is_empty()
                 || hello.device_access_token.len() > MAX_ACCESS_TOKEN_BYTES
                 || hello.last_seen_cursor > protocol::MAX_CURSOR
+                || hello
+                    .supported_sync_compression
+                    .iter()
+                    .any(|compression| {
+                        *compression != 0
+                            && *compression != protocol::SYNC_COMPRESSION_ZSTD_DICTIONARY_V1
+                    })
             {
                 return Err(if hello.protocol_version != protocol::VERSION {
                     GatewayError::UnsupportedVersion
@@ -555,6 +571,36 @@ fn accepted(request_id: String, envelope: &v1::Envelope) -> v1::ServerFrame {
         body: Some(v1::server_frame::Body::Accepted(v1::Accepted {
             envelope_id: envelope.envelope_id.clone(),
         })),
+    }
+}
+
+fn sync_batch_action(
+    request_id: String,
+    batch: v1::SyncBatch,
+    use_compression: bool,
+) -> Result<GatewayAction, GatewayError> {
+    protocol::validate_sync_batch(&batch)?;
+    let plain = v1::ServerFrame {
+        request_id: request_id.clone(),
+        body: Some(v1::server_frame::Body::Batch(batch.clone())),
+    };
+    if !use_compression {
+        return Ok(GatewayAction::Server(plain));
+    }
+
+    let compressed = match protocol::compress_sync_batch(&batch) {
+        Ok(compressed) => compressed,
+        Err(protocol::ProtocolError::TooLarge) => return Ok(GatewayAction::Server(plain)),
+        Err(error) => return Err(error.into()),
+    };
+    let compressed_frame = v1::ServerFrame {
+        request_id,
+        body: Some(v1::server_frame::Body::CompressedBatch(compressed)),
+    };
+    if compressed_frame.encoded_len() < plain.encoded_len() {
+        Ok(GatewayAction::Server(compressed_frame))
+    } else {
+        Ok(GatewayAction::Server(plain))
     }
 }
 

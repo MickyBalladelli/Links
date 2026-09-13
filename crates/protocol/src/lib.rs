@@ -7,7 +7,11 @@ pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/links.v1.rs"));
 }
 pub mod sync_compression;
-pub use sync_compression::{compress_sync_batch, decompress_sync_batch, validate_sync_batch};
+pub use sync_compression::{
+    compress_sync_batch, decompress_sync_batch, validate_sync_batch,
+    SYNC_COMPRESSION_DICTIONARY_ID_V1, SYNC_COMPRESSION_LEVEL,
+    SYNC_COMPRESSION_ZSTD_DICTIONARY_V1, SYNC_ZSTD_DICTIONARY_V1,
+};
 pub const DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/links.bin"));
 pub const VERSION: u32 = 1;
 pub const MAX_ENVELOPE_BYTES: usize = 256 * 1024;

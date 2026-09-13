@@ -68,11 +68,14 @@ pub fn compress_sync_batch(
     )
     .map_err(|_| ProtocolError::Malformed)?;
     let compressed_payload = compressor
-        .compress(&bytes, crate::MAX_FRAME_BYTES - 128)
-        .map_err(|_| ProtocolError::TooLarge)?;
+        .compress(&bytes)
+        .map_err(|_| ProtocolError::Malformed)?;
+    if compressed_payload.len() > crate::MAX_FRAME_BYTES - 128 {
+        return Err(ProtocolError::TooLarge);
+    }
     let uncompressed_size = u32::try_from(bytes.len()).map_err(|_| ProtocolError::TooLarge)?;
     let compressed = v1::CompressedSyncBatch {
-        compression: SYNC_COMPRESSION_ZSTD_DICTIONARY_V1,
+        compression: SYNC_COMPRESSION_ZSTD_DICTIONARY_V1 as u32,
         dictionary_id: SYNC_COMPRESSION_DICTIONARY_ID_V1,
         uncompressed_size,
         compressed_payload,
@@ -86,7 +89,7 @@ pub fn compress_sync_batch(
 pub fn decompress_sync_batch(
     compressed: &v1::CompressedSyncBatch,
 ) -> Result<v1::SyncBatch, ProtocolError> {
-    if compressed.compression != SYNC_COMPRESSION_ZSTD_DICTIONARY_V1
+    if compressed.compression != SYNC_COMPRESSION_ZSTD_DICTIONARY_V1 as u32
         || compressed.dictionary_id != SYNC_COMPRESSION_DICTIONARY_ID_V1
         || compressed.compressed_payload.is_empty()
         || compressed.compressed_payload.len() > crate::MAX_FRAME_BYTES - 128
