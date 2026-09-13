@@ -70,7 +70,10 @@ public final class AndroidVideoTranscoder {
         private void validate() throws IOException {
             if (codec == null || bitrateBps <= 0 || frameRate <= 0
                     || !((width == 1_280 && height == 720)
-                    || (width == 1_920 && height == 1_080)))
+                    || (width == 1_920 && height == 1_080))
+                    || (width == 1_280 && bitrateBps != 1_500_000)
+                    || (width == 1_920 && bitrateBps != 3_000_000)
+                    || frameRate != 30)
                 throw new IOException("Invalid video profile");
         }
     }

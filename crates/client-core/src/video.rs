@@ -61,13 +61,12 @@ impl VideoProfile {
     }
 
     pub fn validate(self) -> Result<(), VideoError> {
-        let valid_size = (self.width, self.height) == (VIDEO_720P_WIDTH, VIDEO_720P_HEIGHT)
-            || (self.width, self.height) == (VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT);
-        if !valid_size
-            || self.frame_rate == 0
-            || self.frame_rate > 60
-            || self.bitrate_bps == 0
-        {
+        let expected_bitrate = match (self.width, self.height) {
+            (VIDEO_720P_WIDTH, VIDEO_720P_HEIGHT) => VIDEO_720P_BITRATE_BPS,
+            (VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT) => VIDEO_1080P_BITRATE_BPS,
+            _ => return Err(VideoError::InvalidProfile),
+        };
+        if self.frame_rate != VIDEO_FRAME_RATE || self.bitrate_bps != expected_bitrate {
             return Err(VideoError::InvalidProfile);
         }
         Ok(())

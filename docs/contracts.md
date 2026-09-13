@@ -59,6 +59,14 @@ decrypted image. Android, iOS, Web, and desktop adapters supply platform
 upload/download, cache, and rendering implementations; no server, CDN, or
 cache stores image keys or plaintext pixels.
 
+Video normalization is also local. Mobile hosts select the shared 720p or
+1080p profile, decode and scale with native hardware media paths, and emit an
+H.264 or HEVC MP4 before the later encrypted attachment flow. iOS requires a
+hardware-only VideoToolbox encoder; Android rejects software MediaCodec
+implementations and uses decoder/encoder surfaces with EGL scaling. Compatible
+AAC audio may be copied into the MP4. The server never receives the staging
+file, codec settings, or plaintext media.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer

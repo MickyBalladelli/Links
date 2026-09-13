@@ -45,7 +45,9 @@ public struct IOSVideoProfile: Sendable {
                 bitrateBps: Int, frameRate: Int = 30) throws {
         guard (width == 1_280 && height == 720)
                 || (width == 1_920 && height == 1_080),
-              bitrateBps > 0, (1...60).contains(frameRate) else {
+              ((width == 1_280 && bitrateBps == 1_500_000)
+                || (width == 1_920 && bitrateBps == 3_000_000)),
+              frameRate == 30 else {
             throw IOSVideoError.invalidProfile
         }
         self.codec = codec
@@ -82,7 +84,7 @@ public final class IOSVideoTranscoder {
               !FileManager.default.fileExists(atPath: destination.path) else {
             throw IOSVideoError.invalidInput
         }
-        guard Self.hasHardwareEncoder(profile.codec.codecType) else {
+        guard let specification = Self.hardwareEncoderSpecification(profile.codec.codecType) else {
             throw IOSVideoError.hardwareUnavailable
         }
 
@@ -126,12 +128,6 @@ public final class IOSVideoTranscoder {
 
         let context = VideoCompressionContext(input: videoInput)
         var session: VTCompressionSession?
-        var specification: CFDictionary?
-        if #available(iOS 17.4, *) {
-            specification = [
-                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: true
-            ] as CFDictionary
-        }
         let createStatus = VTCompressionSessionCreate(
             allocator: nil,
             width: Int32(profile.width),
@@ -239,21 +235,34 @@ public final class IOSVideoTranscoder {
         }
     }
 
-    private static func hasHardwareEncoder(_ codec: CMVideoCodecType) -> Bool {
+    private static func hardwareEncoderSpecification(_ codec: CMVideoCodecType) -> CFDictionary? {
         var encoders: CFArray?
         guard VTCopyVideoEncoderList(nil, &encoders) == noErr,
               let encoders = encoders as? [[String: Any]] else {
-            return false
+            return nil
         }
-        return encoders.contains { encoder in
+        for encoder in encoders {
             guard let codecType = (encoder[kVTVideoEncoderList_CodecType as String]
                 as? NSNumber)?.uint32Value,
                   let hardware = encoder[kVTVideoEncoderList_IsHardwareAccelerated as String]
                     as? NSNumber else {
-                return false
+                continue
             }
-            return codecType == codec && hardware.boolValue
+            guard codecType == codec, hardware.boolValue,
+                  let encoderID = encoder[kVTVideoEncoderList_EncoderID as String] as? String else {
+                continue
+            }
+            var specification: [String: Any] = [
+                kVTVideoEncoderSpecification_EncoderID as String: encoderID
+            ]
+            if #available(iOS 17.4, *) {
+                specification[
+                    kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String
+                ] = true
+            }
+            return specification as CFDictionary
         }
+        return nil
     }
 
     private func appendAudio(_ nextAudio: inout CMSampleBuffer?,

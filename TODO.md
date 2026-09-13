@@ -413,7 +413,10 @@ Add media after text delivery and multi-device sync are stable.
 
 ### Videos and large files
 
-- [ ] Transcode video with native hardware acceleration: iOS VideoToolbox and Android MediaCodec.
+- [x] Transcode video with native hardware acceleration: iOS VideoToolbox and Android MediaCodec.
+  Shared 720p/1080p profiles select H.264 or HEVC at 1.5/3 Mbps. iOS uses a
+  hardware-required VideoToolbox session; Android uses hardware MediaCodec
+  decoder/encoder surfaces with EGL scaling. Compatible AAC audio is preserved.
 - [ ] Use H.264/H.265 MP4 with target bitrates of 720p at 1.5 Mbps and 1080p at 3.0 Mbps.
 - [ ] Place the `moov` atom at the file start (`faststart`).
 - [ ] Implement WebRTC DataChannel P2P direct file streaming for uncapped large transfers.
