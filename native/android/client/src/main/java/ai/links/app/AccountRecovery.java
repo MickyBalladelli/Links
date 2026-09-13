@@ -35,6 +35,12 @@ public final class AccountRecovery {
         byte[] credentialId() { return credentialId.clone(); }
         byte[] clientDataJson() { return clientDataJson.clone(); }
         byte[] attestationObject() { return attestationObject.clone(); }
+
+        public void close() {
+            wipe(credentialId);
+            wipe(clientDataJson);
+            wipe(attestationObject);
+        }
     }
 
     public static final class Assertion {
@@ -64,6 +70,14 @@ public final class AccountRecovery {
         byte[] authenticatorData() { return authenticatorData.clone(); }
         byte[] signature() { return signature.clone(); }
         byte[] prfOutput() { return prfOutput.clone(); }
+
+        public void close() {
+            wipe(credentialId);
+            wipe(clientDataJson);
+            wipe(authenticatorData);
+            wipe(signature);
+            wipe(prfOutput);
+        }
     }
 
     private AccountRecovery() {}
@@ -75,8 +89,12 @@ public final class AccountRecovery {
         String token = session.accessToken();
         PasskeyClient.Options options = api.startRegistration(token);
         Registration response = provider.create(options);
-        return api.finishRegistration(token, options, response.credentialId(),
-                response.clientDataJson(), response.attestationObject());
+        try {
+            return api.finishRegistration(token, options, response.credentialId(),
+                    response.clientDataJson(), response.attestationObject());
+        } finally {
+            if (response != null) response.close();
+        }
     }
 
     /** Create and upload one opaque identity backup. */
@@ -108,6 +126,7 @@ public final class AccountRecovery {
             wipe(prf);
             wipe(credentialId);
             wipe(envelope);
+            if (response != null) response.close();
         }
     }
 
@@ -142,6 +161,7 @@ public final class AccountRecovery {
             wipe(prf);
             wipe(envelope);
             wipe(credentialId);
+            if (response != null) response.close();
         }
     }
 

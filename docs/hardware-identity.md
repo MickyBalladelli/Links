@@ -23,8 +23,8 @@ Managed runtimes, Swift Data copy-on-write, OS buffers and snapshots mean this i
 not a guarantee that every historical copy is erased. An attacker controlling the
 running unlocked app can still request signatures or obtain unwrapped seeds.
 
-No seed is cached between calls. The application-facing API exposes only identity
-creation, reference validation, checked signing and deletion. Creation reads back
+No seed is cached between calls. The application-facing API exposes identity
+creation, reference validation, checked signing, explicit recovery and deletion. Creation reads back
 the newly sealed seed before returning; failed readback attempts cleanup. Signing
 checks the expected enrolled public key against the very same unwrapped seed it
 uses to sign, avoiding a separate check/sign race. Missing, locked, tampered,
