@@ -35,10 +35,9 @@ after verification. Public credentials contain no phone number or phone digest.
 
 An [MLS basic credential](https://www.rfc-editor.org/info/rfc9420) is an application
 identity assertion, not a certificate or proof of phone verification by itself.
-Peers still require an authenticated directory/verification policy and signed MLS
-leaf/key-package processing. Those MLS engine and peer-verification features are
-not implemented here. The Ed25519 implementation uses ed25519-dalek; its behavior
-is checked against [RFC 8032, section 7.1](https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1).
+The shared client core now verifies signed MLS leaves and key packages through an
+authenticated directory hook. The Ed25519 implementation uses ed25519-dalek; its
+behavior is checked against [RFC 8032, section 7.1](https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1).
 No custom signature or encryption algorithm is introduced.
 
 ## API contract

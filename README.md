@@ -4,10 +4,10 @@ Centralized-first encrypted messaging. The foundation includes phone OTP account
 authentication, Ed25519 device enrollment, hardware-backed identity custody, the
 Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
 provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
-messenger or a production post-quantum security claim.** One-to-one group
-wiring, Sealed Sender envelopes, delivery gateways, and client applications
-remain in later phases. Native hardware acceptance and the cryptographic audit
-remain open.
+messenger or a production post-quantum security claim.** One-to-one client
+lifecycle wiring, Sealed Sender envelopes, delivery gateways, and client
+applications remain in later phases. Native hardware acceptance and the
+cryptographic audit remain open.
 
 ## Workspace
 

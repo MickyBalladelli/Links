@@ -6,7 +6,10 @@ use openmls_traits::{
     signatures::{Signer, SignerError},
     OpenMlsProvider as RawOpenMlsProvider,
 };
+use std::collections::HashMap;
 use uuid::Uuid;
+
+const DIRECT_MAX_USERS: usize = 2;
 
 /// OpenMLS's hybrid draft suite: ML-KEM-768 + X25519 for TreeKEM, with
 /// AES-128-GCM, SHA-256, and Ed25519 authentication.
@@ -171,8 +174,9 @@ where
     }
 }
 
-/// OpenMLS-backed MLS engine. OpenMLS owns the RFC 9420 TreeKEM tree and
-/// epoch ratchets; the host owns durable storage and credential trust checks.
+/// OpenMLS-backed direct-chat engine. OpenMLS owns the RFC 9420 TreeKEM tree
+/// and epoch ratchets; the host owns durable storage and credential trust
+/// checks. Current client conversations are restricted to two user identities.
 pub struct OpenMlsEngine<P, S, V> {
     provider: P,
     signer: OpenMlsSigner<S>,
@@ -237,6 +241,16 @@ where
             .map_err(|_| CoreError::Provider)
     }
 
+    /// Return whether a conversation is ready for one-to-one application
+    /// messages. Each physical device is a leaf, so this does not require two
+    /// leaves when either user has multiple devices.
+    pub fn direct_group_ready(&self, conversation_id: &str) -> Result<bool, CoreError> {
+        let group_id = group_id(conversation_id)?;
+        let group = self.load_group(&group_id)?;
+        let users = verified_group_user_counts(&self.verifier, &group)?;
+        Ok(users.len() == DIRECT_MAX_USERS && users.contains_key(&self.local_binding.user_id))
+    }
+
     /// Stage a TreeKEM member-add commit. Keep the returned bytes until the
     /// delivery service accepts the commit, then call `process_commit`.
     pub fn add_members(
@@ -253,6 +267,20 @@ where
             .map(|bytes| self.validate_key_package(bytes))
             .collect::<Result<Vec<_>, _>>()?;
         let mut group = self.load_group(&group_id)?;
+        let mut users = verified_group_user_counts(&self.verifier, &group)?;
+        ensure_direct_user_limit(&users)?;
+        let mut allowed_users = users.keys().copied().collect::<Vec<_>>();
+        for key_package in &key_packages {
+            let binding = verify_leaf(&self.verifier, key_package.leaf_node())?;
+            if !allowed_users.contains(&binding.user_id) {
+                if allowed_users.len() == DIRECT_MAX_USERS {
+                    return Err(CoreError::Authentication);
+                }
+                allowed_users.push(binding.user_id);
+            }
+            increment_user(&mut users, binding.user_id);
+        }
+        ensure_direct_user_limit(&users)?;
         let (commit, welcome, _) = group
             .add_members(&self.provider, &self.signer, &key_packages)
             .map_err(|_| CoreError::Provider)?;
@@ -368,8 +396,22 @@ where
         {
             return Err(CoreError::Authentication);
         }
-        for member in staged.members() {
-            verify_credential(&self.verifier, &member.credential, &member.signature_key)?;
+        let users = staged
+            .members()
+            .map(|member| {
+                verify_credential(&self.verifier, &member.credential, &member.signature_key)
+                    .map(|binding| binding.user_id)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if users
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != DIRECT_MAX_USERS
+            || !users.contains(&self.local_binding.user_id)
+        {
+            return Err(CoreError::Authentication);
         }
         staged
             .into_group(&self.provider)
@@ -392,9 +434,13 @@ where
             .process_message(&self.provider, message)
             .map_err(|_| CoreError::Authentication)?;
         verify_processed_sender(&self.verifier, &group, &processed)?;
+        let sender_index = match processed.sender() {
+            Sender::Member(index) => *index,
+            _ => return Err(CoreError::Authentication),
+        };
         match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
-                validate_staged_commit(&self.verifier, &staged)?;
+                validate_direct_staged_commit(&self.verifier, &group, sender_index, &staged)?;
                 group
                     .merge_staged_commit(&self.provider, *staged)
                     .map_err(|_| CoreError::Provider)
@@ -418,6 +464,7 @@ where
         }
         let group_id = group_id(conversation_id)?;
         let mut group = self.load_group(&group_id)?;
+        ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
         group
             .create_message(&self.provider, &self.signer, plaintext)
             .map_err(|_| CoreError::Provider)
@@ -431,6 +478,7 @@ where
         }
         let group_id = message.group_id().clone();
         let mut group = self.load_group(&group_id)?;
+        ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
         let processed = group
             .process_message(&self.provider, message)
             .map_err(|_| CoreError::Authentication)?;
@@ -542,18 +590,123 @@ fn verify_processed_sender<V: MlsCredentialVerifier>(
     verify_credential(verifier, &member.credential, &member.signature_key)
 }
 
-fn validate_staged_commit<V: MlsCredentialVerifier>(
+fn validate_direct_staged_commit<V: MlsCredentialVerifier>(
     verifier: &V,
+    group: &MlsGroup,
+    sender_index: LeafNodeIndex,
     staged: &StagedCommit,
 ) -> Result<(), CoreError> {
-    if let Some(leaf) = staged.update_path_leaf_node() {
-        verify_leaf(verifier, leaf)?;
+    let mut users = verified_group_user_counts(verifier, group)?;
+    ensure_direct_user_limit(&users)?;
+    let mut allowed_users = users.keys().copied().collect::<Vec<_>>();
+
+    for proposal in staged.queued_proposals() {
+        match proposal.proposal() {
+            Proposal::Add(_) | Proposal::Update(_) | Proposal::Remove(_) => {}
+            Proposal::SelfRemove => {
+                let index = match proposal.sender() {
+                    Sender::Member(index) => *index,
+                    _ => return Err(CoreError::Authentication),
+                };
+                let member = group.member_at(index).ok_or(CoreError::Authentication)?;
+                let binding =
+                    verify_credential(verifier, &member.credential, &member.signature_key)?;
+                decrement_user(&mut users, binding.user_id)?;
+            }
+            _ => return Err(CoreError::Authentication),
+        }
     }
+
+    for proposal in staged.remove_proposals() {
+        let index = proposal.remove_proposal().removed();
+        let member = group.member_at(index).ok_or(CoreError::Authentication)?;
+        let binding = verify_credential(verifier, &member.credential, &member.signature_key)?;
+        decrement_user(&mut users, binding.user_id)?;
+    }
+
     for proposal in staged.add_proposals() {
-        verify_leaf(verifier, proposal.add_proposal().key_package().leaf_node())?;
+        let binding = verify_leaf(verifier, proposal.add_proposal().key_package().leaf_node())?;
+        if !allowed_users.contains(&binding.user_id) {
+            if allowed_users.len() == DIRECT_MAX_USERS {
+                return Err(CoreError::Authentication);
+            }
+            allowed_users.push(binding.user_id);
+        }
+        increment_user(&mut users, binding.user_id);
     }
+
     for proposal in staged.update_proposals() {
-        verify_leaf(verifier, proposal.update_proposal().leaf_node())?;
+        let index = match proposal.sender() {
+            Sender::Member(index) => *index,
+            _ => return Err(CoreError::Authentication),
+        };
+        let member = group.member_at(index).ok_or(CoreError::Authentication)?;
+        let current = verify_credential(verifier, &member.credential, &member.signature_key)?;
+        let updated = verify_leaf(verifier, proposal.update_proposal().leaf_node())?;
+        if updated.user_id != current.user_id {
+            return Err(CoreError::Authentication);
+        }
+    }
+
+    if let Some(leaf) = staged.update_path_leaf_node() {
+        let member = group
+            .member_at(sender_index)
+            .ok_or(CoreError::Authentication)?;
+        let current = verify_credential(verifier, &member.credential, &member.signature_key)?;
+        let updated = verify_leaf(verifier, leaf)?;
+        if updated.user_id != current.user_id {
+            return Err(CoreError::Authentication);
+        }
+    }
+    ensure_direct_user_limit(&users)
+}
+
+fn verified_group_user_counts<V: MlsCredentialVerifier>(
+    verifier: &V,
+    group: &MlsGroup,
+) -> Result<HashMap<Uuid, usize>, CoreError> {
+    group
+        .members()
+        .map(|member| {
+            verify_credential(verifier, &member.credential, &member.signature_key)
+                .map(|binding| binding.user_id)
+        })
+        .try_fold(HashMap::new(), |mut users, user_id| {
+            increment_user(&mut users, user_id?);
+            Ok(users)
+        })
+}
+
+fn increment_user(users: &mut HashMap<Uuid, usize>, user_id: Uuid) {
+    *users.entry(user_id).or_insert(0) += 1;
+}
+
+fn decrement_user(users: &mut HashMap<Uuid, usize>, user_id: Uuid) -> Result<(), CoreError> {
+    let count = users.get_mut(&user_id).ok_or(CoreError::Authentication)?;
+    if *count == 1 {
+        users.remove(&user_id);
+    } else {
+        *count -= 1;
+    }
+    Ok(())
+}
+
+fn ensure_direct_user_limit(users: &HashMap<Uuid, usize>) -> Result<(), CoreError> {
+    if users.len() > DIRECT_MAX_USERS {
+        Err(CoreError::Authentication)
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_direct_group_ready<V: MlsCredentialVerifier>(
+    verifier: &V,
+    group: &MlsGroup,
+    local_user_id: &Uuid,
+) -> Result<(), CoreError> {
+    let users = verified_group_user_counts(verifier, group)?;
+    if users.len() != DIRECT_MAX_USERS || !users.contains_key(local_user_id) {
+        return Err(CoreError::Authentication);
     }
     Ok(())
 }

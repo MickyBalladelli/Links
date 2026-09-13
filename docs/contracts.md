@@ -117,6 +117,12 @@ sender-hiding wrapper and routing-header binding. Both unavailable implementatio
 return `CryptoUnavailable`; there is no production mock, homemade cipher, or
 plaintext fallback. Providers must authenticate peer key discovery and credentials.
 
+One-to-one conversations use a two-user MLS group invariant. The group must have
+exactly two distinct authenticated user identities before application messages
+can be encrypted or decrypted. Each physical device is a separate MLS leaf, so
+multi-device users do not violate this rule. Add and commit processing rejects a
+third user and leaf updates cannot transfer a leaf between users.
+
 Provider state mutations are not automatically transactional. Mobile/Web hosts
 must coordinate durable MLS state with inbox/outbox transactions before installing
 a real provider. `seal_message` is a single-recipient orchestration boundary, not

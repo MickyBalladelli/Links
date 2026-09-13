@@ -45,6 +45,19 @@ accepts the commit, call `process_commit()` with the accepted/fanned-back bytes.
 OpenMLS recognizes an own pending commit and merges it once; remote commits are
 verified, checked for newly introduced credentials, and then merged.
 
+## Direct-chat invariant
+
+The client core treats one-to-one conversations as direct MLS groups. A direct
+group is ready for application messages only when it has exactly two distinct
+`user_id` values. A user may have several device leaves, so multi-device
+pairing can produce more than two leaves without becoming a group chat.
+
+The core rejects a third user in add and commit processing, rejects leaf updates
+that transfer a leaf to another user, and fails closed for encryption or
+decryption while the group has fewer than two users. A direct group may be
+temporarily inactive after a member leaves; it cannot send or receive messages
+until it again has the two-user shape.
+
 The host storage implementation must make OpenMLS state writes durable and
 transaction-compatible with the application outbox. A process crash must not
 forget a pending commit or advance the application state without its accepted
@@ -57,8 +70,7 @@ OpenMLS TreeKEM updates derive and publish only the changed path, giving
 `O(log N)` member-update path work for a balanced tree. Message encryption and
 decryption use the current MLS epoch and sender ratchets.
 
-Still required before production use: a durable host storage adapter, one-to-one
-group lifecycle wiring, Sealed Sender integration, adversarial/interoperability
-vectors, signed physical-device acceptance, and an independent cryptographic
-audit. The draft ciphersuite is an implementation choice, not a production
-security claim.
+Still required before production use: a durable host storage adapter, Sealed
+Sender integration, adversarial/interoperability vectors, signed
+physical-device acceptance, and an independent cryptographic audit. The draft
+ciphersuite is an implementation choice, not a production security claim.
