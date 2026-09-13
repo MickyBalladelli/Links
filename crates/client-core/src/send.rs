@@ -98,8 +98,10 @@ pub trait DirectChatStore: Send {
         pending: &PendingCommit,
     ) -> Result<(), CoreError>;
 
-    async fn mark_pending_commit_accepted(&mut self, conversation_id: &str)
-        -> Result<(), CoreError>;
+    async fn mark_pending_commit_accepted(
+        &mut self,
+        conversation_id: &str,
+    ) -> Result<(), CoreError>;
 
     async fn persist_send(
         &mut self,
@@ -180,9 +182,7 @@ where
             .await?;
         core.mls_mut()
             .merge_pending_direct_commit(&conversation_id)?;
-        store
-            .mark_pending_commit_accepted(&conversation_id)
-            .await?;
+        store.mark_pending_commit_accepted(&conversation_id).await?;
     }
 
     let message = v1::Message {
@@ -193,13 +193,8 @@ where
         sequence_id: 0,
         content: Some(content),
     };
-    let (message, envelopes) = core.seal_next_message_for_devices(
-        message,
-        sequence,
-        &fanout,
-        expires_at_ms,
-        sent_at_ms,
-    )?;
+    let (message, envelopes) =
+        core.seal_next_message_for_devices(message, sequence, &fanout, expires_at_ms, sent_at_ms)?;
     store
         .persist_send(&message, &envelopes, sequence.last_sequence_id())
         .await?;

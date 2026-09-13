@@ -590,11 +590,13 @@ where
             packages.push((*bytes, binding.device_id));
         }
 
-        let existing = MlsGroup::load(self.provider.storage(), &group_id)
-            .map_err(|_| CoreError::Provider)?;
+        let existing =
+            MlsGroup::load(self.provider.storage(), &group_id).map_err(|_| CoreError::Provider)?;
         let Some(group) = existing else {
             self.create_group_with_id(group_id)?;
-            return self.add_members(conversation_id, key_package_bytes).map(Some);
+            return self
+                .add_members(conversation_id, key_package_bytes)
+                .map(Some);
         };
 
         let users = verified_group_user_counts(&self.verifier, &group)?;

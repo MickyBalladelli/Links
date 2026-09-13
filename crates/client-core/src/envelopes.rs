@@ -39,9 +39,7 @@ pub fn fanout_recipients_for_users(users: &[v1::User]) -> Result<Vec<FanoutRecip
         protocol::validate_user(user)?;
         for device in &user.devices {
             if device.revoked_at_ms.is_none() {
-                recipients.push(FanoutRecipient {
-                    ..FanoutRecipient::new(device.device_id.clone())?
-                });
+                recipients.push(FanoutRecipient::new(device.device_id.clone())?);
             }
         }
     }

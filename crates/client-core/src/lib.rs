@@ -10,6 +10,7 @@ pub mod mls;
 pub mod passkey_backup;
 pub mod pqxdh;
 pub mod prekeys;
+pub mod send;
 pub mod sequences;
 pub mod sync;
 pub use links_protocol as protocol;

@@ -219,11 +219,7 @@ impl EnvelopeCrypto for UnavailableCrypto {
 }
 
 impl RecipientKeyDirectory for UnavailableCrypto {
-    fn install_recipient_public_key(
-        &mut self,
-        _: &str,
-        _: [u8; 32],
-    ) -> Result<(), CoreError> {
+    fn install_recipient_public_key(&mut self, _: &str, _: [u8; 32]) -> Result<(), CoreError> {
         Err(CoreError::CryptoUnavailable)
     }
 }
