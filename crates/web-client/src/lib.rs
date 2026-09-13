@@ -220,6 +220,11 @@ impl WebSelfSovereignIdentity {
             .map_err(js_error)
     }
 
+    /// Stable WebAuthn PRF salt for passkey-derived identities.
+    pub fn passkey_identity_prf_salt() -> Vec<u8> {
+        links_identity::passkey_identity_prf_salt().to_vec()
+    }
+
     /// Restore an identity from a BIP-39 phrase. The phrase remains local.
     pub fn from_recovery_phrase(phrase: &str, passphrase: &str) -> Result<Self, JsValue> {
         let mnemonic = links_identity::RecoveryMnemonic::from_phrase(phrase).map_err(js_error)?;

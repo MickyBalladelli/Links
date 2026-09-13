@@ -44,6 +44,7 @@ int32_t links_identity_restore_from_mnemonic(const LinksVaultCallbacks *,
                                              const uint8_t *phrase, size_t phrase_len,
                                              const uint8_t *passphrase, size_t passphrase_len,
                                              uint8_t *handle36, uint8_t *public32);
+int32_t links_identity_passkey_prf_salt(uint8_t *output32);
 int32_t links_identity_generate_recovery_mnemonic(uint32_t word_count,
                                                   uint8_t *output, size_t output_capacity,
                                                   size_t *output_len);

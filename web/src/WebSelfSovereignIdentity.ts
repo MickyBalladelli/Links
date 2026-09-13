@@ -20,6 +20,7 @@ export interface WebSelfSovereignIdentityWasm {
 export interface WebSelfSovereignIdentityModule {
   new (): WebSelfSovereignIdentityWasm
   generate_recovery_phrase(wordCount: number): string
+  passkey_identity_prf_salt(): Uint8Array
   from_recovery_phrase(phrase: string, passphrase: string): WebSelfSovereignIdentityWasm
   from_passkey_prf(prfOutput: Uint8Array): WebSelfSovereignIdentityWasm
 }
@@ -48,6 +49,10 @@ export class WebSelfSovereignIdentity {
     wordCount: 12 | 24
   ): string {
     return wasm.WebSelfSovereignIdentity.generate_recovery_phrase(wordCount)
+  }
+
+  static passkeyIdentityPRFSalt(wasm: WebSelfSovereignWasmModule): Uint8Array {
+    return wasm.WebSelfSovereignIdentity.passkey_identity_prf_salt().slice()
   }
 
   static fromRecoveryPhrase(

@@ -79,6 +79,14 @@ public final class HardwareIdentityStore {
             handle: String(decoding: handle, as: UTF8.self), publicKey: Data(publicKey))
     }
 
+    /// Stable WebAuthn PRF salt for passkey-derived identities.
+    public func passkeyIdentityPRFSalt() throws -> Data {
+        var salt = [UInt8](repeating: 0, count: 32)
+        defer { wipe(&salt) }
+        try check(links_identity_passkey_prf_salt(&salt))
+        return Data(salt)
+    }
+
     /// Generate a local English 12- or 24-word recovery phrase.
     public func generateRecoveryMnemonic(wordCount: Int) throws -> String {
         guard wordCount == 12 || wordCount == 24 else { throw IdentityError.invalidInput }

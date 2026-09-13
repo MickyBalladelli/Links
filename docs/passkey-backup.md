@@ -6,6 +6,9 @@ PRF (`hmac-secret`) result using a fresh 32-byte salt. The PRF result never goes
 to Links. It can also be used once, locally, as the domain-separated root for a
 new self-sovereign Ed25519 identity before username registration; the platform
 wrapper immediately seals that identity in its hardware vault.
+For that flow, evaluate the passkey PRF with the stable
+`passkey_identity_prf_salt()` value. Random salts remain mandatory for backup
+envelopes and must not be reused as identity-derivation salts.
 
 `links-client-core::HardwareIdentityStore::backup_with_passkey` loads the seed
 from the native hardware vault for one call, derives an encryption key from the

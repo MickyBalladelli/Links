@@ -66,6 +66,14 @@ public final class HardwareIdentityStore {
         }
     }
 
+    /** Stable WebAuthn PRF salt for passkey-derived identities. */
+    public static byte[] passkeyIdentityPrfSalt() throws GeneralSecurityException {
+        byte[] salt = NativeIdentityBridge.passkeyIdentityPrfSalt();
+        if (salt == null || salt.length != 32)
+            throw new GeneralSecurityException("Invalid passkey identity salt");
+        return salt;
+    }
+
     /** Generate a local English 12- or 24-word recovery phrase. */
     public String generateRecoveryMnemonic(int wordCount) throws GeneralSecurityException {
         if (wordCount != 12 && wordCount != 24)

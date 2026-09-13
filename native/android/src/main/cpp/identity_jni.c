@@ -208,6 +208,15 @@ JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_restore
     release_variable(env, phrase_input, phrase);
     return result_array(env, status, reference, 68);
 }
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_passkeyIdentityPrfSalt(
+        JNIEnv *env, jclass cls) {
+    (void)cls;
+    uint8_t salt[32] = {0};
+    int32_t status = links_identity_passkey_prf_salt(salt);
+    jbyteArray result = result_array(env, status, salt, 32);
+    wipe_memory(salt, sizeof(salt));
+    return result;
+}
 JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_generateRecoveryMnemonic(
         JNIEnv *env, jclass cls, jint word_count) {
     (void)cls;

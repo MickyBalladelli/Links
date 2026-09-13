@@ -10,6 +10,7 @@ final class NativeIdentityBridge {
     static native byte[] create(Object vault) throws GeneralSecurityException, IOException;
     static native byte[] restoreFromRecovery(Object vault, byte[] phrase, byte[] passphrase)
             throws GeneralSecurityException, IOException;
+    static native byte[] passkeyIdentityPrfSalt() throws GeneralSecurityException;
     static native byte[] generateRecoveryMnemonic(int wordCount) throws GeneralSecurityException;
     static native byte[] createFromPasskeyPrf(Object vault, byte[] prfOutput)
             throws GeneralSecurityException, IOException;

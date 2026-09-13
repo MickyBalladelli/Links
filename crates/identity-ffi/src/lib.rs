@@ -191,6 +191,24 @@ unsafe fn write_bytes(
     Ok(())
 }
 
+/// Return the stable WebAuthn PRF salt for passkey-derived identities.
+/// Backup envelopes must use their own random per-backup salt.
+///
+/// # Safety
+/// `output` is writable for 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn links_identity_passkey_prf_salt(output: *mut u8) -> i32 {
+    if output.is_null() {
+        return INVALID;
+    }
+    unsafe { output.write_bytes(0, 32) };
+    boundary(|| {
+        let salt = links_identity::passkey_identity_prf_salt();
+        unsafe { output.copy_from_nonoverlapping(salt.as_ptr(), salt.len()) };
+        Ok(())
+    })
+}
+
 /// Generate an English 12- or 24-word BIP-39 phrase locally.
 ///
 /// The caller owns the output and must display or store it through a protected

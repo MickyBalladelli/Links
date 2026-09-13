@@ -19,6 +19,7 @@ const RECOVERY_KDF_SALT: &[u8] = b"links/recovery/v1/salt\0";
 const RECOVERY_IDENTITY_KDF_INFO: &[u8] = b"links/recovery/v1/ed25519-identity\0";
 const PASSKEY_IDENTITY_KDF_SALT: &[u8] = b"links/passkey-identity/v1/salt\0";
 const PASSKEY_IDENTITY_KDF_INFO: &[u8] = b"links/passkey-identity/v1/ed25519-identity\0";
+const PASSKEY_IDENTITY_PRF_SALT: &[u8; 32] = b"links/passkey-identity/v1\0\0\0\0\0\0\0";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
@@ -71,6 +72,12 @@ impl IdentitySeed {
     fn from_derived(bytes: Zeroizing<[u8; 32]>) -> Self {
         Self(bytes)
     }
+}
+
+/// Stable WebAuthn PRF salt for passkey-derived self-sovereign identities.
+/// Backup envelopes intentionally use a different random salt.
+pub fn passkey_identity_prf_salt() -> [u8; 32] {
+    *PASSKEY_IDENTITY_PRF_SALT
 }
 
 /// A validated BIP-39 mnemonic held in zeroizing memory.
@@ -471,5 +478,17 @@ mod tests {
             .public_key();
         assert_eq!(first, second);
         assert!(RecoveryMnemonic::generate(15).is_err());
+    }
+
+    #[test]
+    fn passkey_identity_derivation_is_stable_and_domain_separated() {
+        let first = IdentitySeed::from_passkey_prf(&[7; 32]).unwrap();
+        let second = IdentitySeed::from_passkey_prf(&[7; 32]).unwrap();
+        let different = IdentitySeed::from_passkey_prf(&[8; 32]).unwrap();
+        assert_eq!(first.public_key(), second.public_key());
+        assert_ne!(first.public_key(), different.public_key());
+        assert_eq!(passkey_identity_prf_salt().len(), 32);
+        assert!(IdentitySeed::from_passkey_prf(&[0; 32]).is_err());
+        assert!(IdentitySeed::from_passkey_prf(&[0; 31]).is_err());
     }
 }
