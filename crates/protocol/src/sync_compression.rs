@@ -57,6 +57,7 @@ pub fn validate_sync_batch(batch: &v1::SyncBatch) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn compress_sync_batch(
     batch: &v1::SyncBatch,
 ) -> Result<v1::CompressedSyncBatch, ProtocolError> {
@@ -84,6 +85,7 @@ pub fn compress_sync_batch(
     Ok(compressed)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn decompress_sync_batch(
     compressed: &v1::CompressedSyncBatch,
 ) -> Result<v1::SyncBatch, ProtocolError> {
@@ -119,4 +121,18 @@ pub fn decompress_sync_batch(
     let batch = v1::SyncBatch::decode(bytes.as_slice()).map_err(|_| ProtocolError::Malformed)?;
     validate_sync_batch(&batch)?;
     Ok(batch)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn compress_sync_batch(
+    _batch: &v1::SyncBatch,
+) -> Result<v1::CompressedSyncBatch, ProtocolError> {
+    Err(ProtocolError::Malformed)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn decompress_sync_batch(
+    _compressed: &v1::CompressedSyncBatch,
+) -> Result<v1::SyncBatch, ProtocolError> {
+    Err(ProtocolError::Malformed)
 }

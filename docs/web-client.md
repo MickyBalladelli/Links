@@ -38,8 +38,10 @@ owns MLS epochs, Sealed Sender encryption/decryption, outbox state, inbox
 commit, cursor replay and delivery acknowledgements. Each Hello reads the
 current in-memory bearer and durable cursor, so reconnects resume from the last
 committed message. Incoming binary frames go directly to the core; the core
-must decode plain or negotiated Zstd dictionary `CompressedSyncBatch` frames,
-then commit a decrypted message before the callback is invoked. Outbound text
+must commit a decrypted message before the callback is invoked. The current
+WASM build does not advertise Zstd and therefore receives plain `SyncBatch`
+frames; a future browser-native decoder may opt into `CompressedSyncBatch`.
+Outbound text
 is validated by the host and then passed to the core, which creates and queues
 the encrypted envelope and device fanout. The browser never builds or inspects
 the encrypted payload.
