@@ -31,6 +31,7 @@ public protocol SharedClientCore: AnyObject {
     var deviceID: String { get }
     func durableCursor() throws -> UInt64
     func createHello(accessToken: String, lastSeenCursor: UInt64) throws -> Data
+    /// Return recoveryComplete only after local inbox/MLS commit and QueueAck.
     @discardableResult
     func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
                            fullSync: Bool,

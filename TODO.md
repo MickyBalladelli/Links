@@ -279,7 +279,14 @@ Bring iOS to feature parity with Android. Validate hardware-backed keys and back
   delegates send sequencing, MLS encryption, Sealed Sender fanout, durable
   outbox state, replay decrypt, message commit, and delivery receipts to the
   shared core. Message UI and APNs scheduling remain separate tasks.
-- [ ] Add APNs background fetch and missing-message recovery.
+- [x] Add APNs background fetch and missing-message recovery.
+  `IOSAPNsWakeup` strictly parses the silent `aps.content-available` payload
+  and treats its cursor as a hint. `IOSMissingMessageRecovery` coalesces
+  duplicate wakeups, reconnects with the durable local cursor, runs bounded
+  replay through the shared core, and completes only after decrypt, durable
+  inbox/cursor commit, and QueueAck. `IOSAPNsBackgroundHandler` maps the result
+  to UIKit background fetch callbacks; physical APNs/background testing remains
+  a release gate.
 - [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.
 - [ ] Release an internal iOS text-messaging milestone before adding groups or calls.
 

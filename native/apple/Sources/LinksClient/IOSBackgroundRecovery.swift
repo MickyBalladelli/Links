@@ -88,6 +88,7 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
     private let recoveryQueue = DispatchQueue(
         label: "ai.links.ios.recovery", qos: .utility)
     private let runLock = NSLock()
+    private var running = false
     private var activeRun: Run?
     private var activeCore: (any SharedClientCore)?
     private weak var activeManager: IOSConnectionManager?
@@ -104,6 +105,18 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
 
     /// Call from an APNs/background worker callback, never the main thread.
     public func recover(_ wakeup: IOSAPNsWakeup) -> IOSRecoveryOutcome {
+        runLock.lock()
+        guard !running else {
+            runLock.unlock()
+            return .retry
+        }
+        running = true
+        runLock.unlock()
+        defer {
+            runLock.lock()
+            running = false
+            runLock.unlock()
+        }
         guard client.isAuthenticated, let localDeviceID = client.deviceID else {
             return .authenticationRequired
         }
@@ -114,6 +127,13 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
             sharedCore = try client.makeCore(using: factory)
         } catch {
             return client.isAuthenticated ? .retry : .authenticationRequired
+        }
+        do {
+            if !wakeup.fullSync, try sharedCore.durableCursor() >= wakeup.cursor {
+                return .complete
+            }
+        } catch {
+            return .retry
         }
 
         let run = Run()
@@ -133,6 +153,13 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
             return .retry
         }
 
+        runLock.lock()
+        activeRun = run
+        activeCore = sharedCore
+        activeManager = manager
+        activeFullSync = wakeup.fullSync
+        runLock.unlock()
+
         recoveryQueue.async {
             manager.start()
         }
@@ -140,6 +167,14 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
             _ = run.finish(.retry)
         }
         manager.shutdown()
+        runLock.lock()
+        if activeManager === manager {
+            activeRun = nil
+            activeCore = nil
+            activeManager = nil
+            activeFullSync = false
+        }
+        runLock.unlock()
         return run.result() ?? .retry
     }
 
@@ -147,9 +182,26 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
                                   didChange state: IOSConnectionManager.State) {}
 
     public func connectionManager(_ manager: IOSConnectionManager, didReceive frame: Data) {
-        // The run is identified by the current recovery manager callback. A
-        // fresh run gets a fresh core and manager, so no cursor is shared here.
-        // The active run is retained by the manager's delegate callback below.
+        runLock.lock()
+        let run = activeRun
+        let sharedCore = activeCore
+        let active = activeManager
+        let fullSync = activeFullSync
+        runLock.unlock()
+        guard let run, let sharedCore, active === manager else { return }
+        do {
+            let result = try sharedCore.handleServerFrame(
+                frame, transport: manager, fullSync: fullSync) { [weak self] message in
+                    self?.onTextMessage?(message)
+                }
+            if result == .recoveryComplete, run.finish(.complete) {
+                manager.stop()
+            }
+        } catch {
+            if run.finish(.retry) {
+                manager.stop()
+            }
+        }
     }
 
     public func connectionManagerDidFail(_ manager: IOSConnectionManager) {}

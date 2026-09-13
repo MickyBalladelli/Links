@@ -5,7 +5,7 @@ public protocol IOSCoreTransport: AnyObject {
     func send(_ frame: Data) -> Bool
 }
 
-public enum IOSCoreFrameResult: Sendable {
+public enum IOSCoreFrameResult: Equatable, Sendable {
     case pending
     case recoveryComplete
 }

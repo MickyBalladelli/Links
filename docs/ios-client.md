@@ -27,12 +27,21 @@ updates, Sealed Sender envelopes, durable outbox/inbox commits, replay cursors,
 and delivery receipts. Core work runs off the main queue; the host receives
 committed text events on its chosen callback queue.
 
+`IOSAPNsWakeup` accepts only the gateway's silent payload fields:
+`aps.content-available`, `recipient_device_id`, and the positive decimal
+`cursor`. `IOSMissingMessageRecovery` ignores the cursor as a checkpoint,
+coalesces concurrent wakeups, and replays from the core's durable cursor for up
+to 25 seconds. The shared core must return `recoveryComplete` only after local
+commit and QueueAck. On iOS, connect it from
+`application(_:didReceiveRemoteNotification:fetchCompletionHandler:)` through
+`IOSAPNsBackgroundHandler`; no message content goes through APNs.
+
 The factory boundary prevents a Swift protocol or crypto fork. Its production
 implementation must bind Rust `ClientCore`, MLS state, Sealed Sender key
 resolution, and durable inbox/outbox storage. Missing providers fail closed.
 
-This target is the iOS foundation, OTP, connection, and direct messaging layer.
-Message UI, APNs recovery, and account recovery remain the following Phase 4
+This target is the iOS foundation, OTP, connection, direct messaging, and APNs
+recovery layer. Message UI and account recovery remain the following Phase 4
 tasks. The iOS release gate still requires live OTP, Android interop,
 restart/replay, tamper, Secure Enclave, background, and battery evidence on
 physical devices.
