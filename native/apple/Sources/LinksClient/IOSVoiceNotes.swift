@@ -124,6 +124,7 @@ public enum IOSVoiceNoteError: Error {
     case coreUnavailable
 }
 
+#if os(iOS)
 /// AVAudioRecorder captures bounded temporary PCM. The shared Rust core turns
 /// those frames into the canonical Ogg Opus stream before encryption.
 public final class IOSVoiceNoteRecorder: NSObject {
@@ -367,6 +368,7 @@ public final class IOSVoiceNoteSession {
         return pcm
     }
 }
+#endif
 
 public extension SharedClientCore {
     func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data {
