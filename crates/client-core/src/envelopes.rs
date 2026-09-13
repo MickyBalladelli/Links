@@ -31,7 +31,7 @@ pub fn fanout_recipients_for_users(users: &[v1::User]) -> Result<Vec<FanoutRecip
             if device.revoked_at_ms.is_none() {
                 recipients.push(FanoutRecipient {
                     recipient_device_id: device.device_id.clone(),
-                    envelope_id: uuid::Uuid::new_v4().to_string(),
+                    envelope_id: random_envelope_id()?,
                 });
             }
         }
@@ -209,6 +209,14 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
         }
         Ok(message)
     }
+}
+
+fn random_envelope_id() -> Result<String, CoreError> {
+    let mut bytes = [0; 16];
+    getrandom::fill(&mut bytes).map_err(|_| CoreError::Provider)?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(uuid::Uuid::from_bytes(bytes).to_string())
 }
 
 fn validate_fanout_recipients(recipients: &[FanoutRecipient]) -> Result<(), CoreError> {
