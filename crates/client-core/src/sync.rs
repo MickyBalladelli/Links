@@ -100,6 +100,23 @@ impl SyncState {
     }
 }
 
+/// Decode either a plain or negotiated compressed server sync body. The
+/// compressed path is bounded by the protocol layer before protobuf decode.
+pub fn decode_sync_batch_body(
+    body: &v1::server_frame::Body,
+) -> Result<v1::SyncBatch, CoreError> {
+    match body {
+        v1::server_frame::Body::Batch(batch) => {
+            protocol::validate_sync_batch(batch)?;
+            Ok(batch.clone())
+        }
+        v1::server_frame::Body::CompressedBatch(compressed) => {
+            Ok(protocol::decompress_sync_batch(compressed)?)
+        }
+        _ => Err(CoreError::InvalidSync),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
