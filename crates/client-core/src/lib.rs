@@ -7,6 +7,7 @@ pub mod attachments;
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;
+pub mod images;
 pub mod mls;
 pub mod pairing;
 pub mod passkey_backup;

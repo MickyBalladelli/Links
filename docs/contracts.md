@@ -35,6 +35,12 @@ client must verify that receipt before `send_voice_note` places the private
 `MediaMetadata` in MLS. Downloaded bytes must pass size/digest verification,
 shared-core AEAD decryption, and Opus validation before playback.
 
+Image hosts must apply the shared `MAX_IMAGE_EDGE` policy before encryption:
+preserve aspect ratio, never upscale, and cap the longest edge at 1600 pixels.
+Android uses `AndroidImageResizer`; iOS uses `IOSImageResizer` with ImageIO
+orientation-aware thumbnail creation. The resulting dimensions belong in the
+private `MediaMetadata`.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer

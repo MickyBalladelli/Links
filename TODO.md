@@ -388,7 +388,10 @@ Add media after text delivery and multi-device sync are stable.
 
 ### Images
 
-- [ ] Resize images client-side to a maximum 1600px longest edge.
+- [x] Resize images client-side to a maximum 1600px longest edge.
+  Shared dimension policy plus Android Bitmap and iOS ImageIO adapters preserve
+  aspect ratio, avoid upscaling, and cap the longest edge at 1600 pixels before
+  later image encryption/upload.
 - [ ] Strip EXIF location metadata.
 - [ ] Transcode to WebP / AVIF at approximately 80% lossy quality.
 - [ ] Embed low-resolution BlurHash placeholders in text payloads.
