@@ -1,4 +1,5 @@
 use crate::protocol::{self, v1};
+use std::sync::OnceLock;
 use thiserror::Error;
 
 pub const MAX_VOICE_NOTE_BYTES: usize = 16 * 1024 * 1024;
@@ -529,28 +530,32 @@ fn read_u64(bytes: &[u8]) -> Result<u64, VoiceError> {
 }
 
 fn ogg_crc(page: &[u8]) -> u32 {
+    let table = ogg_crc_table();
     let mut crc = 0u32;
     for (index, byte) in page.iter().copied().enumerate() {
         let byte = if (22..26).contains(&index) { 0 } else { byte };
-        crc = (crc << 8) ^ ogg_crc_table()[((crc >> 24) as u8 ^ byte) as usize];
+        crc = (crc << 8) ^ table[((crc >> 24) as u8 ^ byte) as usize];
     }
     crc
 }
 
-fn ogg_crc_table() -> [u32; 256] {
-    let mut table = [0u32; 256];
-    for (index, value) in table.iter_mut().enumerate() {
-        let mut crc = (index as u32) << 24;
-        for _ in 0..8 {
-            crc = if crc & 0x8000_0000 != 0 {
-                (crc << 1) ^ 0x04c1_1db7
-            } else {
-                crc << 1
-            };
+fn ogg_crc_table() -> &'static [u32; 256] {
+    static TABLE: OnceLock<[u32; 256]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [0u32; 256];
+        for (index, value) in table.iter_mut().enumerate() {
+            let mut crc = (index as u32) << 24;
+            for _ in 0..8 {
+                crc = if crc & 0x8000_0000 != 0 {
+                    (crc << 1) ^ 0x04c1_1db7
+                } else {
+                    crc << 1
+                };
+            }
+            *value = crc;
         }
-        *value = crc;
-    }
-    table
+        table
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
