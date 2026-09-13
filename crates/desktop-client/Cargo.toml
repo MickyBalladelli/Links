@@ -8,3 +8,4 @@ publish.workspace = true
 links-client-core.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 getrandom.workspace = true
+sha2.workspace = true

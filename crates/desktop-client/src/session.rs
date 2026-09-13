@@ -1,6 +1,10 @@
 use links_client_core::{protocol, CoreError};
+use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -11,6 +15,176 @@ pub const DESKTOP_MAX_BACKOFF_MS: u64 = 30_000;
 pub const DESKTOP_STABLE_CONNECTION_MS: u64 = 30_000;
 pub const DESKTOP_MAX_FRAME_BYTES: usize = protocol::MAX_FRAME_BYTES;
 pub const DESKTOP_MAX_TEXT_BYTES: usize = 64 * 1024;
+pub const DESKTOP_IMAGE_MAX_EDGE: u32 = 1_600;
+pub const DESKTOP_IMAGE_MAX_PLAINTEXT_BYTES: usize = 32 * 1024 * 1024;
+pub const DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES: usize = DESKTOP_IMAGE_MAX_PLAINTEXT_BYTES + 16;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopImageMetadata {
+    pub attachment_id: String,
+    pub mime_type: String,
+    pub ciphertext_size_bytes: u64,
+    pub content_key: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub ciphertext_sha256: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub blur_hash: String,
+}
+
+impl DesktopImageMetadata {
+    pub fn new(
+        attachment_id: impl Into<String>,
+        mime_type: impl Into<String>,
+        ciphertext_size_bytes: u64,
+        content_key: Vec<u8>,
+        nonce: Vec<u8>,
+        ciphertext_sha256: Vec<u8>,
+        width: u32,
+        height: u32,
+        blur_hash: impl Into<String>,
+    ) -> Result<Self, CoreError> {
+        let metadata = Self {
+            attachment_id: attachment_id.into(),
+            mime_type: mime_type.into(),
+            ciphertext_size_bytes,
+            content_key,
+            nonce,
+            ciphertext_sha256,
+            width,
+            height,
+            blur_hash: blur_hash.into(),
+        };
+        metadata.validate()?;
+        Ok(metadata)
+    }
+
+    pub fn validate(&self) -> Result<(), CoreError> {
+        protocol::validate_id(&self.attachment_id)?;
+        if !matches!(self.mime_type.as_str(), "image/webp" | "image/avif")
+            || !(17..=DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES as u64)
+                .contains(&self.ciphertext_size_bytes)
+            || self.content_key.len() != 32
+            || self.nonce.len() != 12
+            || self.ciphertext_sha256.len() != 32
+            || self.width == 0
+            || self.width > DESKTOP_IMAGE_MAX_EDGE
+            || self.height == 0
+            || self.height > DESKTOP_IMAGE_MAX_EDGE
+        {
+            return Err(CoreError::Authentication);
+        }
+        links_client_core::images::resized_dimensions(self.width, self.height)?;
+        protocol::validate_blur_hash(&self.blur_hash)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopEncryptedImage {
+    pub metadata: DesktopImageMetadata,
+    pub ciphertext: Vec<u8>,
+}
+
+impl DesktopEncryptedImage {
+    pub fn new(metadata: DesktopImageMetadata, ciphertext: Vec<u8>) -> Result<Self, CoreError> {
+        metadata.validate()?;
+        if ciphertext.len() < 17
+            || ciphertext.len() > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES
+            || metadata.ciphertext_size_bytes != ciphertext.len() as u64
+            || Sha256::digest(&ciphertext).as_slice() != metadata.ciphertext_sha256.as_slice()
+        {
+            return Err(CoreError::Authentication);
+        }
+        Ok(Self { metadata, ciphertext })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopImageUploadReceipt {
+    pub attachment_id: String,
+    pub ciphertext_size_bytes: u64,
+    pub ciphertext_sha256: Vec<u8>,
+}
+
+impl DesktopImageUploadReceipt {
+    pub fn matches(&self, metadata: &DesktopImageMetadata) -> bool {
+        self.attachment_id == metadata.attachment_id
+            && self.ciphertext_size_bytes == metadata.ciphertext_size_bytes
+            && self.ciphertext_sha256 == metadata.ciphertext_sha256
+    }
+}
+
+pub trait DesktopImageUploader: Send {
+    fn upload(
+        &mut self,
+        access_token: &str,
+        image: &DesktopEncryptedImage,
+    ) -> Result<DesktopImageUploadReceipt, CoreError>;
+    fn download(
+        &mut self,
+        access_token: &str,
+        metadata: &DesktopImageMetadata,
+    ) -> Result<Vec<u8>, CoreError>;
+}
+
+pub trait DesktopImageRenderer: Send {
+    /// The renderer must not retain plaintext after this call returns.
+    fn render(&mut self, plaintext: &[u8], metadata: &DesktopImageMetadata)
+        -> Result<(), CoreError>;
+}
+
+pub trait DesktopImageCache: Send {
+    fn read(&mut self, metadata: &DesktopImageMetadata) -> Result<Option<Vec<u8>>, CoreError>;
+    fn write(&mut self, image: &DesktopEncryptedImage) -> Result<(), CoreError>;
+}
+
+/// Ciphertext-only desktop cache. The UI chooses the directory, typically an
+/// OS cache directory. It never writes keys, metadata, or decrypted pixels.
+pub struct DesktopImageFileCache {
+    directory: PathBuf,
+}
+
+impl DesktopImageFileCache {
+    pub fn new(directory: impl Into<PathBuf>) -> Result<Self, CoreError> {
+        let directory = directory.into();
+        fs::create_dir_all(&directory).map_err(|_| CoreError::Provider)?;
+        Ok(Self { directory })
+    }
+
+    fn path_for(&self, attachment_id: &str) -> Result<PathBuf, CoreError> {
+        protocol::validate_id(attachment_id)?;
+        Ok(self.directory.join(format!("{attachment_id}.blob")))
+    }
+}
+
+impl DesktopImageCache for DesktopImageFileCache {
+    fn read(&mut self, metadata: &DesktopImageMetadata) -> Result<Option<Vec<u8>>, CoreError> {
+        metadata.validate()?;
+        let path = self.path_for(&metadata.attachment_id)?;
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let ciphertext = fs::read(path).map_err(|_| CoreError::Provider)?;
+        if ciphertext.len() < 17
+            || ciphertext.len() > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES
+            || metadata.ciphertext_size_bytes != ciphertext.len() as u64
+            || Sha256::digest(&ciphertext).as_slice() != metadata.ciphertext_sha256.as_slice()
+        {
+            return Ok(None);
+        }
+        Ok(Some(ciphertext))
+    }
+
+    fn write(&mut self, image: &DesktopEncryptedImage) -> Result<(), CoreError> {
+        image.metadata.validate()?;
+        let path = self.path_for(&image.metadata.attachment_id)?;
+        let temporary = path.with_extension("blob.tmp");
+        fs::write(&temporary, &image.ciphertext).map_err(|_| CoreError::Provider)?;
+        fs::rename(temporary, path).map_err(|_| CoreError::Provider)?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopConnectionState {
