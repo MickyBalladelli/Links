@@ -10,6 +10,11 @@ typedef struct {
     jmethodID store, load, delete_seed;
 } VaultContext;
 
+static void wipe_memory(void *memory, size_t length) {
+    volatile uint8_t *bytes = (volatile uint8_t *)memory;
+    while (length--) *bytes++ = 0;
+}
+
 /* Wipe managed seed arrays even with a pending Java exception. Preserve the
  * original exception after cleanup; no JNI critical/pinned arrays are used. */
 static void wipe_seed(JNIEnv *env, jbyteArray bytes) {
@@ -213,18 +218,25 @@ JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_backupW
     if (!read_fixed(env, handle_input, handle, 36)
             || !read_fixed(env, backup_input, backup, 16)
             || !read_fixed(env, device_input, device, 16)
-            || !read_fixed(env, salt_input, salt, 32)
-            || !read_fixed(env, prf_input, prf, 32)
             || !setup(env, vault, &ctx, &callbacks)) return NULL;
+    if (!read_fixed(env, salt_input, salt, 32)
+            || !read_fixed(env, prf_input, prf, 32)) {
+        wipe_memory(salt, sizeof(salt)); wipe_memory(prf, sizeof(prf));
+        return NULL;
+    }
     jbyte *credential = NULL; jsize credential_len = 0;
     if (!read_variable(env, credential_input, &credential, &credential_len,
-            LINKS_IDENTITY_MAX_CREDENTIAL_ID)) return NULL;
+            LINKS_IDENTITY_MAX_CREDENTIAL_ID)) {
+        wipe_memory(salt, sizeof(salt)); wipe_memory(prf, sizeof(prf));
+        return NULL;
+    }
     uint8_t envelope[LINKS_IDENTITY_MAX_BACKUP_ENVELOPE] = {0};
     size_t envelope_len = 0;
     int32_t status = links_identity_backup_with_passkey(&callbacks, handle, backup, device,
             (const uint8_t *)credential, (size_t)credential_len, salt, prf,
             envelope, sizeof(envelope), &envelope_len);
     release_variable(env, credential_input, credential);
+    wipe_memory(salt, sizeof(salt)); wipe_memory(prf, sizeof(prf));
     if (envelope_len > LINKS_IDENTITY_MAX_BACKUP_ENVELOPE) {
         throw_status(env, LINKS_PROVIDER);
         return NULL;
@@ -239,15 +251,22 @@ JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_restore
     uint8_t backup[16], device[16], prf[32];
     if (!read_fixed(env, backup_input, backup, 16)
             || !read_fixed(env, device_input, device, 16)
-            || !read_fixed(env, prf_input, prf, 32)
             || !setup(env, vault, &ctx, &callbacks)) return NULL;
+    if (!read_fixed(env, prf_input, prf, 32)) {
+        wipe_memory(prf, sizeof(prf));
+        return NULL;
+    }
     jbyte *credential = NULL, *envelope = NULL;
     jsize credential_len = 0, envelope_len = 0;
     if (!read_variable(env, credential_input, &credential, &credential_len,
-            LINKS_IDENTITY_MAX_CREDENTIAL_ID)) return NULL;
+            LINKS_IDENTITY_MAX_CREDENTIAL_ID)) {
+        wipe_memory(prf, sizeof(prf));
+        return NULL;
+    }
     if (!read_variable(env, envelope_input, &envelope, &envelope_len,
             LINKS_IDENTITY_MAX_BACKUP_ENVELOPE)) {
         release_variable(env, credential_input, credential);
+        wipe_memory(prf, sizeof(prf));
         return NULL;
     }
     uint8_t reference[68] = {0};
@@ -257,6 +276,7 @@ JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_restore
             reference, reference + 36);
     release_variable(env, envelope_input, envelope);
     release_variable(env, credential_input, credential);
+    wipe_memory(prf, sizeof(prf));
     return result_array(env, status, reference, 68);
 }
 JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_publicKey(JNIEnv *env, jclass cls, jobject vault, jbyteArray input) {

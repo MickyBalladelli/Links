@@ -211,9 +211,7 @@ public final class PasskeyClient {
     }
 
     private static void requireToken(String token) throws IOException {
-        if (token == null || token.isEmpty() || token.length() > 256
-                || token.indexOf('\r') >= 0 || token.indexOf('\n') >= 0)
-            throw new IOException("Invalid auth session");
+        decodeExact(token, 32, "auth session");
     }
 
     private static void requireOptions(Options options) throws IOException {
@@ -246,6 +244,7 @@ public final class PasskeyClient {
         private final long expiresAtMs;
 
         private Options(JSONObject response) throws IOException {
+            if (response == null) throw new IOException("Invalid passkey challenge");
             try {
                 challengeId = canonicalUuid(response.getString("challenge_id"), "challenge ID");
                 challenge = decodeExact(response.getString("challenge"), 32, "challenge");
@@ -273,6 +272,7 @@ public final class PasskeyClient {
         private final long signCount;
 
         private RegisteredPasskey(JSONObject response) throws IOException {
+            if (response == null) throw new IOException("Invalid passkey registration response");
             try {
                 credentialId = decodeBounded(response.getString("credential_id"),
                         MAX_CREDENTIAL_BYTES, "credential ID");
@@ -292,6 +292,7 @@ public final class PasskeyClient {
         private final long signCount;
 
         private Assertion(JSONObject response) throws IOException {
+            if (response == null) throw new IOException("Invalid passkey assertion response");
             try {
                 credentialId = decodeBounded(response.getString("credential_id"),
                         MAX_CREDENTIAL_BYTES, "credential ID");
@@ -313,6 +314,7 @@ public final class PasskeyClient {
         private final byte[] envelope;
 
         private Backup(JSONObject response) throws IOException {
+            if (response == null) throw new IOException("Invalid passkey backup response");
             try {
                 backupId = canonicalUuid(response.getString("backup_id"), "backup ID");
                 deviceId = canonicalUuid(response.getString("device_id"), "device ID");
