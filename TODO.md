@@ -232,7 +232,14 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   starts from the durable cursor. The host must configure the recovery and
   token adapters; memory-only bearer sessions still require re-authentication
   after process death.
-- [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.
+- [x] Add zero-knowledge account recovery using seed phrase and passkey flows.
+  Android JNI now exposes explicit BIP-39 restore plus passkey envelope seal/open
+  into the TEE-backed vault. `AccountRecovery` keeps mnemonic, PRF output and
+  decrypted identity material local; `PasskeyClient` uploads only the opaque
+  authenticated envelope. The host must provide a UV-enforcing Android
+  Credential Manager/WebAuthn adapter and an authenticated bootstrap session for
+  the current bearer-only backup routes. Recovery assigns a fresh physical
+  device/node and still requires normal device enrollment afterward.
 - [ ] Release an internal Android text-messaging milestone before adding groups or calls.
 
 ---

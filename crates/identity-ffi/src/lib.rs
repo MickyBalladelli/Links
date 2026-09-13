@@ -142,7 +142,7 @@ unsafe fn read_fixed<const N: usize>(input: *const u8) -> Result<[u8; N], i32> {
 }
 
 unsafe fn read_bytes<'a>(input: *const u8, length: usize) -> Result<&'a [u8], i32> {
-    read_bytes_limited(input, length, MAX_TRANSCRIPT, false)
+    unsafe { read_bytes_limited(input, length, MAX_TRANSCRIPT, false) }
 }
 
 unsafe fn read_bytes_limited<'a>(

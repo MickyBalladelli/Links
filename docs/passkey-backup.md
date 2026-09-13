@@ -50,3 +50,25 @@ same credential's PRF with the stored salt, calls
 `HardwareIdentityStore::restore_from_passkey`, then performs the separate
 authenticated device enrollment and regenerated PQXDH pre-key upload. No login
 retry or missing-key path may call restore automatically.
+
+## Android client flow
+
+`native/android/client` exposes the same boundary through `AccountRecovery`:
+
+1. `ClientSession.restoreFromRecovery` accepts an English BIP-39 phrase and
+   optional passphrase. JNI derives the identity in Rust and immediately seals
+   it with `HardwareSeedVault`; the phrase is not sent to Links.
+2. `AccountRecovery.registerPasskey` and `backupWithPasskey` run the authenticated
+   WebAuthn ceremony, request user verification plus a 32-byte PRF evaluation,
+   then upload only the encrypted envelope through `PasskeyClient`.
+3. `restoreFromPasskey` downloads the opaque envelope, reads its public PRF salt,
+   asks the platform passkey provider for the matching PRF result, and sends the
+   result only to the local JNI restore call. A fresh device ID and MLS node ID
+   are assigned after restore.
+
+The `PasskeyProvider` interface is the Android Credential Manager integration
+boundary. Its implementation must return the raw WebAuthn response fields and
+the 32-byte PRF result without logging or persisting them. The current account
+service requires a bearer session for passkey endpoints, so a separate
+authenticated bootstrap session is required before cloud restore; seed phrase
+restore remains fully local.

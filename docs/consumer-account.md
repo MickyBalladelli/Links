@@ -119,6 +119,17 @@ extension separately; its 32-byte result is passed only to
 `HardwareIdentityStore::restore_from_passkey`. Passkey assertion is not yet a
 replacement for the separate new-device enrollment flow.
 
+The Android client now wires these primitives through `AccountRecovery` and
+`PasskeyClient`. BIP-39 restore derives inside the Rust JNI call and seals the
+result directly into `HardwareSeedVault`. Passkey backup/restore uses a host
+`PasskeyProvider` that must request user verification and the WebAuthn PRF
+extension; the server receives only the opaque authenticated envelope. Restored
+Android clients receive a fresh physical device/node ID and must complete the
+existing authenticated device enrollment and PQXDH pre-key upload. The current
+bearer-only passkey routes require an authenticated bootstrap session for cloud
+restore; no server-side mnemonic, PRF output, seed, or unencrypted key state is
+introduced.
+
 ## Durable authentication rules
 
 Challenges last 10 minutes, permit five provider checks, and allow one check in

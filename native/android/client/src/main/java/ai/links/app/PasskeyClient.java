@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import javax.net.ssl.HttpsURLConnection;
@@ -98,6 +99,58 @@ public final class PasskeyClient {
 
     static String encode(byte[] bytes) {
         return Base64.encodeToString(bytes, BASE64_FLAGS);
+    }
+
+    /** Build the exact WebAuthn JSON consumed by an Android Credential Manager adapter. */
+    public static String registrationRequestJson(Options options) throws IOException {
+        requireOptions(options);
+        JSONObject rp = new JSONObject();
+        JSONObject user = new JSONObject();
+        JSONObject algorithm = new JSONObject();
+        JSONObject body = new JSONObject();
+        put(rp, "id", options.rpId);
+        put(rp, "name", options.rpId);
+        put(user, "id", encode(uuidBytes(UUID.fromString(options.userId))));
+        put(user, "name", options.userId);
+        put(user, "displayName", "Links account");
+        put(algorithm, "type", "public-key");
+        try {
+            algorithm.put("alg", -7);
+            body.put("challenge", encode(options.challenge));
+            body.put("rp", rp);
+            body.put("user", user);
+            body.put("pubKeyCredParams", new org.json.JSONArray().put(algorithm));
+            body.put("timeout", Math.max(1, options.expiresAtMs - System.currentTimeMillis()));
+            body.put("attestation", "none");
+            JSONObject selection = new JSONObject();
+            selection.put("userVerification", "required");
+            body.put("authenticatorSelection", selection);
+            return body.toString();
+        } catch (JSONException error) {
+            throw new IOException("Invalid passkey request", error);
+        }
+    }
+
+    /** Include PRF evaluation in the assertion request; PRF output stays in the provider. */
+    public static String assertionRequestJson(Options options, byte[] salt) throws IOException {
+        requireOptions(options);
+        requireBytes(salt, 32, 32, "passkey backup salt");
+        JSONObject body = new JSONObject();
+        JSONObject extensions = new JSONObject();
+        JSONObject prf = new JSONObject();
+        JSONObject eval = new JSONObject();
+        try {
+            eval.put("first", encode(salt));
+            prf.put("eval", eval);
+            extensions.put("prf", prf);
+            body.put("challenge", encode(options.challenge));
+            body.put("rpId", options.rpId);
+            body.put("userVerification", "required");
+            body.put("extensions", extensions);
+            return body.toString();
+        } catch (JSONException error) {
+            throw new IOException("Invalid passkey request", error);
+        }
     }
 
     private JSONObject request(String method, String path, String accessToken, JSONObject body)
@@ -306,5 +359,12 @@ public final class PasskeyClient {
         } catch (IllegalArgumentException error) {
             throw new IOException("Invalid " + name, error);
         }
+    }
+
+    private static byte[] uuidBytes(UUID value) {
+        return ByteBuffer.allocate(16)
+                .putLong(value.getMostSignificantBits())
+                .putLong(value.getLeastSignificantBits())
+                .array();
     }
 }
