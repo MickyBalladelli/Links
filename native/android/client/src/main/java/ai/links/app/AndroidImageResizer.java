@@ -13,6 +13,18 @@ public final class AndroidImageResizer {
     public static final int MAX_IMAGE_EDGE = 1_600;
     public static final int MAX_INPUT_BYTES = 32 * 1024 * 1024;
 
+    public static final class RgbPixels {
+        public final byte[] rgb;
+        public final int width;
+        public final int height;
+
+        private RgbPixels(byte[] rgb, int width, int height) {
+            this.rgb = rgb;
+            this.width = width;
+            this.height = height;
+        }
+    }
+
     public static final class Result {
         public final byte[] encoded;
         public final String mimeType;
@@ -30,9 +42,7 @@ public final class AndroidImageResizer {
     private AndroidImageResizer() {}
 
     public static Result resize(byte[] encodedImage) throws IOException {
-        if (encodedImage == null || encodedImage.length == 0
-                || encodedImage.length > MAX_INPUT_BYTES)
-            throw new IOException("Invalid image input");
+        validateInput(encodedImage);
 
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
@@ -75,6 +85,54 @@ public final class AndroidImageResizer {
             if (oriented != decoded) oriented.recycle();
             decoded.recycle();
         }
+    }
+
+    /** Decode normalized image pixels for shared-core BlurHash generation. */
+    public static RgbPixels decodeRgb(byte[] encodedImage) throws IOException {
+        validateInput(encodedImage);
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(encodedImage, 0, encodedImage.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0
+                || bounds.outWidth > MAX_IMAGE_EDGE || bounds.outHeight > MAX_IMAGE_EDGE)
+            throw new IOException("Invalid normalized image dimensions");
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inScaled = false;
+        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        Bitmap decoded = BitmapFactory.decodeByteArray(encodedImage, 0, encodedImage.length,
+                options);
+        if (decoded == null) throw new IOException("Unable to decode normalized image");
+        long pixelCount = (long) decoded.getWidth() * decoded.getHeight();
+        if (pixelCount <= 0 || pixelCount > (long) MAX_IMAGE_EDGE * MAX_IMAGE_EDGE
+                || pixelCount > Integer.MAX_VALUE / 3) {
+            decoded.recycle();
+            throw new IOException("Normalized image is too large");
+        }
+
+        int[] argb = new int[(int) pixelCount];
+        byte[] rgb = new byte[(int) pixelCount * 3];
+        try {
+            decoded.getPixels(argb, 0, decoded.getWidth(), 0, 0,
+                    decoded.getWidth(), decoded.getHeight());
+            for (int index = 0; index < argb.length; index++) {
+                int color = argb[index];
+                int offset = index * 3;
+                rgb[offset] = (byte) ((color >> 16) & 0xff);
+                rgb[offset + 1] = (byte) ((color >> 8) & 0xff);
+                rgb[offset + 2] = (byte) (color & 0xff);
+            }
+            return new RgbPixels(rgb, decoded.getWidth(), decoded.getHeight());
+        } finally {
+            java.util.Arrays.fill(argb, 0);
+            decoded.recycle();
+        }
+    }
+
+    private static void validateInput(byte[] encodedImage) throws IOException {
+        if (encodedImage == null || encodedImage.length == 0
+                || encodedImage.length > MAX_INPUT_BYTES)
+            throw new IOException("Invalid image input");
     }
 
     /** Re-encoding removes input EXIF, including GPS location tags. */

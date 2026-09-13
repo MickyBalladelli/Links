@@ -6,7 +6,7 @@
 //! envelope path; this crate never treats one as the other.
 
 use crate::{
-    attachments::EncryptedVoiceNote,
+    attachments::{EncryptedImage, EncryptedVoiceNote},
     crypto::{EnvelopeCrypto, RecipientKeyDirectory},
     envelopes::{ClientCore, FanoutRecipient},
     mls::{MlsEngine, PendingCommit},
@@ -265,6 +265,48 @@ where
     O: DirectChatStore,
 {
     let _validated = EncryptedVoiceNote::new(
+        attachment.media.clone(),
+        attachment.ciphertext.clone(),
+    )?;
+    send_message(
+        core,
+        sequence,
+        directory,
+        transport,
+        store,
+        conversation_id,
+        recipient_user_id,
+        message_id,
+        v1::message::Content::Media(attachment.media.clone()),
+        sent_at_ms,
+        expires_at_ms,
+    )
+    .await
+}
+
+/// Upload the encrypted image first, then send only its private media
+/// metadata through the normal MLS/Sealed Sender path.
+pub async fn send_image<C, M, D, T, O>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    recipient_user_id: String,
+    message_id: String,
+    attachment: &EncryptedImage,
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<DirectSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: DirectChatDirectory,
+    T: DirectChatTransport,
+    O: DirectChatStore,
+{
+    let _validated = EncryptedImage::new(
         attachment.media.clone(),
         attachment.ciphertext.clone(),
     )?;

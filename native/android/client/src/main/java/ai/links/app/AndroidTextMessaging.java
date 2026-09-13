@@ -29,16 +29,38 @@ public final class AndroidTextMessaging {
                 throws Exception {
             throw new IOException("Voice core unavailable");
         }
+        /** Encode normalized RGB pixels with the shared BlurHash contract. */
+        default String encodeImageBlurHash(byte[] rgbPixels, int width, int height)
+                throws Exception {
+            throw new IOException("Image core unavailable");
+        }
+        /** Encrypt transcoded image bytes; media metadata stays inside MLS. */
+        default AndroidImages.EncryptedImage encryptImage(byte[] imageBytes,
+                String attachmentId, String mimeType, int width, int height, String blurHash)
+                throws Exception {
+            throw new IOException("Image core unavailable");
+        }
         /** Verify metadata, digest, AEAD and Opus framing before playback. */
         default byte[] decryptVoiceNote(AndroidVoiceNotes.Metadata metadata, byte[] ciphertext)
                 throws Exception {
             throw new IOException("Voice core unavailable");
+        }
+        /** Verify image metadata and decrypt bytes before rendering. */
+        default byte[] decryptImage(AndroidImages.Metadata metadata, byte[] ciphertext)
+                throws Exception {
+            throw new IOException("Image core unavailable");
         }
         /** Upload has already been accepted; now send private MediaMetadata in MLS. */
         default void sendVoiceNote(String conversationId, String recipientUserId,
                 AndroidVoiceNotes.Metadata metadata, AndroidVoiceNotes.UploadReceipt receipt,
                 ConnectionManager connection) throws Exception {
             throw new IOException("Voice core unavailable");
+        }
+        /** Send private image metadata only after its ciphertext upload receipt. */
+        default void sendImage(String conversationId, String recipientUserId,
+                AndroidImages.Metadata metadata, AndroidImages.UploadReceipt receipt,
+                ConnectionManager connection) throws Exception {
+            throw new IOException("Image core unavailable");
         }
     }
 
@@ -159,10 +181,40 @@ public final class AndroidTextMessaging {
         return activeBridge.encryptVoiceNote(opusContainer, attachmentId, durationMs, profile);
     }
 
+    /** Generate the shared low-resolution placeholder from normalized RGB pixels. */
+    public String encodeImageBlurHash(byte[] rgbPixels, int width, int height) throws Exception {
+        CoreBridge activeBridge;
+        synchronized (lock) {
+            activeBridge = bridge;
+            if (state != State.READY || coreFailed())
+                throw new IOException("Image session is not ready");
+        }
+        return activeBridge.encodeImageBlurHash(rgbPixels, width, height);
+    }
+
+    /** Encrypt normalized image bytes through the shared Rust core. */
+    public AndroidImages.EncryptedImage encryptImage(byte[] imageBytes, String attachmentId,
+            String mimeType, int width, int height, String blurHash) throws Exception {
+        CoreBridge activeBridge;
+        synchronized (lock) {
+            activeBridge = bridge;
+            if (state != State.READY || coreFailed())
+                throw new IOException("Image session is not ready");
+        }
+        return activeBridge.encryptImage(
+                imageBytes, attachmentId, mimeType, width, height, blurHash);
+    }
+
     /** Decrypt one downloaded attachment through the shared core before playback. */
     public byte[] decryptVoiceNote(AndroidVoiceNotes.Metadata metadata, byte[] ciphertext)
             throws Exception {
         return bridge.decryptVoiceNote(metadata, ciphertext);
+    }
+
+    /** Decrypt verified image ciphertext through the shared core. */
+    public byte[] decryptImage(AndroidImages.Metadata metadata, byte[] ciphertext)
+            throws Exception {
+        return bridge.decryptImage(metadata, ciphertext);
     }
 
     /** Send private media metadata after the opaque attachment upload succeeds. */
@@ -180,6 +232,23 @@ public final class AndroidTextMessaging {
                 throw new IOException("Voice session is not connected");
         }
         bridge.sendVoiceNote(conversationId, recipientUserId, metadata, receipt, active);
+    }
+
+    /** Send private image metadata only after the exact ciphertext upload receipt. */
+    public void sendImage(String conversationId, String recipientUserId,
+            AndroidImages.Metadata metadata, AndroidImages.UploadReceipt receipt)
+            throws Exception {
+        requireUuid(conversationId, "conversation ID");
+        requireUuid(recipientUserId, "recipient user ID");
+        if (metadata == null || receipt == null || !receipt.matches(metadata))
+            throw new IOException("Invalid image upload receipt");
+        ConnectionManager active;
+        synchronized (lock) {
+            active = connection;
+            if (state != State.READY || active == null || !active.isConnected())
+                throw new IOException("Image session is not connected");
+        }
+        bridge.sendImage(conversationId, recipientUserId, metadata, receipt, active);
     }
 
     public void stop() {

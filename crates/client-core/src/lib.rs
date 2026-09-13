@@ -27,6 +27,8 @@ pub enum CoreError {
     Protocol(#[from] protocol::ProtocolError),
     #[error(transparent)]
     Voice(#[from] voice::VoiceError),
+    #[error(transparent)]
+    Image(#[from] images::ImageError),
     #[error("cryptographic provider unavailable")]
     CryptoUnavailable,
     #[error("authentication failed")]
