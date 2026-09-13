@@ -17,6 +17,7 @@ pub mod receive;
 pub mod send;
 pub mod sequences;
 pub mod sync;
+pub mod video;
 pub mod voice;
 pub use links_protocol as protocol;
 
@@ -29,6 +30,8 @@ pub enum CoreError {
     Voice(#[from] voice::VoiceError),
     #[error(transparent)]
     Image(#[from] images::ImageError),
+    #[error(transparent)]
+    Video(#[from] video::VideoError),
     #[error("cryptographic provider unavailable")]
     CryptoUnavailable,
     #[error("authentication failed")]
