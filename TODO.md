@@ -339,7 +339,13 @@ These clients join an existing account as additional MLS device nodes. They do n
 
 ### Desktop client
 
-- [ ] Build the desktop client on top of the shared client core.
+- [x] Build the desktop client on top of the shared client core.
+  `crates/desktop-client` provides the platform-neutral desktop companion
+  boundary. It creates or restores a desktop identity, emits the shared
+  signed pairing URI, validates the returned MLS credential, and exposes only
+  `LocalIdentity`, the public credential, and cloneable signing handles to
+  `links-client-core`. UI, OS keychain persistence, registration transport,
+  sync, reconnect, and recovery remain the next desktop task.
 - [ ] Implement desktop device registration, encrypted sync, reconnect, and recovery behavior.
 
 ---

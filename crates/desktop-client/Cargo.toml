@@ -1,0 +1,10 @@
+[package]
+name = "links-desktop-client"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+links-client-core.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+getrandom.workspace = true

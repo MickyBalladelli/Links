@@ -18,6 +18,7 @@ remain open.
 | `crates/protocol` | Generated common types, descriptors and boundary validation. |
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt and durable sync validation. |
 | `crates/web-client` | WASM Web identity and paired-device bootstrap facade built on `links-client-core`. |
+| `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
 | `crates/server-store` | PostgreSQL repository/migrations, append-only encrypted payload store, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
@@ -42,6 +43,7 @@ remain open.
 | `docs/web-client.md` | Web/WASM client bootstrap, key custody boundary and current release limits. |
 | `web/src/WebConnectionManager.ts` | Browser `wss://` connection lifecycle for binary `links.v1`. |
 | `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
+| `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
 
 ## Build and test
 
