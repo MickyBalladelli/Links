@@ -17,6 +17,8 @@ const PQXDH_KEM_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/kem-prekey/v1\0";
 const DEVICE_IDENTITY_DOMAIN: &[u8] = b"links/device/v1\0";
 const RECOVERY_KDF_SALT: &[u8] = b"links/recovery/v1/salt\0";
 const RECOVERY_IDENTITY_KDF_INFO: &[u8] = b"links/recovery/v1/ed25519-identity\0";
+const PASSKEY_IDENTITY_KDF_SALT: &[u8] = b"links/passkey-identity/v1/salt\0";
+const PASSKEY_IDENTITY_KDF_INFO: &[u8] = b"links/passkey-identity/v1/ed25519-identity\0";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
@@ -41,6 +43,20 @@ impl IdentitySeed {
     /// Only for bytes recovered from the device vault, never from phone numbers.
     pub fn from_vault(bytes: Zeroizing<[u8; 32]>) -> Self {
         Self(bytes)
+    }
+
+    /// Derive a stable identity from a WebAuthn PRF output. The PRF result is
+    /// local-only and is immediately converted through a domain-separated KDF;
+    /// callers must wipe their input after this call.
+    pub fn from_passkey_prf(prf_output: &[u8]) -> Result<Self, IdentityError> {
+        if prf_output.len() != 32 || prf_output.iter().all(|byte| *byte == 0) {
+            return Err(IdentityError::Authentication);
+        }
+        let hkdf = Hkdf::<Sha512>::new(Some(PASSKEY_IDENTITY_KDF_SALT), prf_output);
+        let mut identity = Zeroizing::new([0u8; 32]);
+        hkdf.expand(PASSKEY_IDENTITY_KDF_INFO, identity.as_mut())
+            .expect("fixed passkey identity output length is valid");
+        Ok(Self::from_derived(identity))
     }
     pub fn expose_for_wrapping(&self) -> &[u8; 32] {
         &self.0

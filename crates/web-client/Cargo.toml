@@ -9,5 +9,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 links-client-core.workspace = true
+links-identity = { path = "../identity" }
 uuid.workspace = true
 wasm-bindgen.workspace = true

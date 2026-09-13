@@ -115,7 +115,11 @@ For username-only registration, the client signs
 device/node IDs, canonical handle, nonce, and signature. Returning clients sign
 `links_identity::username_login_transcript`. A username is not a password and
 does not authenticate a copied device ID; the registered Ed25519 key is required.
-Passkey or seed-phrase recovery remains the path for a lost device.
+For self-sovereign creation, clients generate an English 12- or 24-word BIP-39
+phrase locally or derive the identity from a user-verified passkey PRF. The
+derived key is sealed in the platform vault before username registration. The
+phrase and PRF output never enter the server API. Passkey or seed-phrase recovery
+remains the path for a lost device.
 Ineligible requests receive provisional challenges without disclosing the real
 account UUID. They never receive a session even with a correct OTP. This is not
 a formal guarantee of enumeration resistance or of constant-time behavior.

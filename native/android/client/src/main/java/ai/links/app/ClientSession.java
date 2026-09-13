@@ -104,6 +104,20 @@ public final class ClientSession {
         return adoptRecoveredIdentity(recovered);
     }
 
+    /** Generate a local phrase for the explicit recovery-screen confirmation. */
+    public synchronized String generateRecoveryMnemonic(int wordCount)
+            throws GeneralSecurityException {
+        return identityStore.generateRecoveryMnemonic(wordCount);
+    }
+
+    /** Create a first identity from a user-approved passkey PRF result. */
+    public synchronized HardwareIdentityStore.KeyReference createFromPasskeyPrf(
+            byte[] prfOutput) throws GeneralSecurityException, IOException {
+        requireNoIdentityForRecovery();
+        HardwareIdentityStore.KeyReference created = identityStore.createFromPasskeyPrf(prfOutput);
+        return adoptRecoveredIdentity(created);
+    }
+
     /** Create the opaque passkey backup after the server assertion succeeds. */
     public synchronized byte[] createPasskeyBackup(UUID backupId, byte[] credentialId,
             byte[] salt, byte[] prfOutput) throws GeneralSecurityException, IOException {

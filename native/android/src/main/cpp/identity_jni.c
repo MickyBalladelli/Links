@@ -208,6 +208,36 @@ JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_restore
     release_variable(env, phrase_input, phrase);
     return result_array(env, status, reference, 68);
 }
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_generateRecoveryMnemonic(
+        JNIEnv *env, jclass cls, jint word_count) {
+    (void)cls;
+    uint8_t phrase[LINKS_IDENTITY_MAX_RECOVERY_PHRASE] = {0};
+    size_t phrase_len = 0;
+    int32_t status = links_identity_generate_recovery_mnemonic((uint32_t)word_count,
+            phrase, sizeof(phrase), &phrase_len);
+    if (phrase_len > sizeof(phrase)) {
+        wipe_memory(phrase, sizeof(phrase));
+        throw_status(env, LINKS_PROVIDER);
+        return NULL;
+    }
+    jbyteArray result = result_array(env, status, phrase, (jsize)phrase_len);
+    wipe_memory(phrase, sizeof(phrase));
+    return result;
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_createFromPasskeyPrf(
+        JNIEnv *env, jclass cls, jobject vault, jbyteArray prf_input) {
+    (void)cls;
+    VaultContext ctx = {0}; LinksVaultCallbacks callbacks;
+    uint8_t prf[32], reference[68] = {0};
+    if (!read_fixed(env, prf_input, prf, 32) || !setup(env, vault, &ctx, &callbacks)) {
+        wipe_memory(prf, sizeof(prf));
+        return NULL;
+    }
+    int32_t status = links_identity_create_from_passkey_prf(&callbacks, prf,
+            reference, reference + 36);
+    wipe_memory(prf, sizeof(prf));
+    return result_array(env, status, reference, 68);
+}
 JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_backupWithPasskey(
         JNIEnv *env, jclass cls, jobject vault, jbyteArray handle_input,
         jbyteArray backup_input, jbyteArray device_input, jbyteArray credential_input,

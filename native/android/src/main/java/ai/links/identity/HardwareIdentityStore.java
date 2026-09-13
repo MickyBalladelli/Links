@@ -65,6 +65,35 @@ public final class HardwareIdentityStore {
             wipe(passphraseBytes);
         }
     }
+
+    /** Generate a local English 12- or 24-word recovery phrase. */
+    public String generateRecoveryMnemonic(int wordCount) throws GeneralSecurityException {
+        if (wordCount != 12 && wordCount != 24)
+            throw new GeneralSecurityException("Recovery phrase must contain 12 or 24 words");
+        byte[] phrase = NativeIdentityBridge.generateRecoveryMnemonic(wordCount);
+        if (phrase == null || phrase.length == 0)
+            throw new GeneralSecurityException("Invalid recovery phrase");
+        try {
+            return new String(phrase, StandardCharsets.UTF_8);
+        } finally {
+            wipe(phrase);
+        }
+    }
+
+    /** Derive and hardware-seal a new identity from a local passkey PRF result. */
+    public KeyReference createFromPasskeyPrf(byte[] prfOutput)
+            throws GeneralSecurityException, IOException {
+        if (prfOutput == null || prfOutput.length != 32)
+            throw new GeneralSecurityException("Invalid passkey identity input");
+        byte[] prf = prfOutput.clone();
+        try {
+            synchronized (WORKER_LOCK) {
+                return reference(NativeIdentityBridge.createFromPasskeyPrf(vault, prf));
+            }
+        } finally {
+            wipe(prf);
+        }
+    }
     /** Seal the identity with a WebAuthn PRF result. Only the opaque envelope returns. */
     public byte[] backupWithPasskey(KeyReference identity, UUID backupId, UUID deviceId,
             byte[] credentialId, byte[] salt, byte[] prfOutput)

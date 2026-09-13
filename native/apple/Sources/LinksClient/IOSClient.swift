@@ -140,6 +140,33 @@ public final class IOSClient: SharedCoreIdentitySigner {
     public func createIdentity() throws -> IdentityKeyReference {
         guard identity == nil else { throw IOSClientError.identityAlreadyEnrolled }
         let created = try identityStore.createIdentity()
+        return try adoptNewIdentity(created)
+    }
+
+    /// Generate a local recovery phrase for the UI. Display and confirm it
+    /// before calling restoreFromRecovery; the phrase never enters the server.
+    public func generateRecoveryMnemonic(wordCount: Int) throws -> String {
+        try identityStore.generateRecoveryMnemonic(wordCount: wordCount)
+    }
+
+    /// Derive and seal a first identity from an explicit BIP-39 phrase.
+    @discardableResult
+    public func restoreFromRecovery(_ phrase: String, passphrase: String) throws -> IdentityKeyReference {
+        guard identity == nil else { throw IOSClientError.identityAlreadyEnrolled }
+        let recovered = try identityStore.restoreFromRecovery(phrase, passphrase: passphrase)
+        return try adoptNewIdentity(recovered)
+    }
+
+    /// Derive and seal a first identity from a locally evaluated passkey PRF.
+    @discardableResult
+    public func createFromPasskeyPRF(_ prfOutput: Data) throws -> IdentityKeyReference {
+        guard identity == nil else { throw IOSClientError.identityAlreadyEnrolled }
+        let created = try identityStore.createFromPasskeyPRF(prfOutput)
+        return try adoptNewIdentity(created)
+    }
+
+    private func adoptNewIdentity(_ created: IdentityKeyReference) throws -> IdentityKeyReference {
+        guard identity == nil else { throw IOSClientError.identityAlreadyEnrolled }
         let createdDeviceID = UUID().uuidString.lowercased()
         let createdMLSNodeID = UUID().uuidString.lowercased()
         do {
@@ -156,6 +183,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
         identity = created
         deviceID = createdDeviceID
         mlsNodeID = createdMLSNodeID
+        userID = nil
+        authenticated = nil
         return created
     }
 

@@ -449,7 +449,10 @@ Add discovery options after the basic phone-based account works.
   Username registration and login use signed Ed25519 device-key transcripts,
   atomic pseudonymous account/handle/device/session writes, and per-handle/IP
   rate limits. Phone-derived subjects remain NULL for these accounts.
-- [ ] Support self-sovereign key generation with passkeys / BIP-39 mnemonic seed phrases.
+- [x] Support self-sovereign key generation with passkeys / BIP-39 mnemonic seed phrases.
+  Shared identity APIs derive Ed25519 keys locally from generated 12/24-word
+  mnemonics or user-verified WebAuthn PRF output. WASM, Apple, and Android
+  wrappers expose the same local-only flow and hardware-seal the result.
 - [ ] Deploy global key directory lookup for `@usernames`.
 
 ### Private contact discovery

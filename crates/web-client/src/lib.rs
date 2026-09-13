@@ -196,6 +196,112 @@ fn canonical_uuid(value: &str) -> Result<Uuid, CoreError> {
     Uuid::parse_str(value).map_err(|_| CoreError::Authentication)
 }
 
+/// Browser-local self-sovereign identity. The seed is held inside WASM and is
+/// never returned to JavaScript; only public keys, signatures and recovery
+/// phrases explicitly requested by the host cross the binding.
+#[wasm_bindgen]
+pub struct WebSelfSovereignIdentity {
+    identity: IdentitySeed,
+}
+
+#[wasm_bindgen]
+impl WebSelfSovereignIdentity {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<Self, JsValue> {
+        Ok(Self {
+            identity: IdentitySeed::generate().map_err(js_error)?,
+        })
+    }
+
+    /// Generate a local English 12- or 24-word recovery phrase.
+    pub fn generate_recovery_phrase(word_count: u32) -> Result<String, JsValue> {
+        links_identity::generate_recovery_mnemonic(word_count as usize)
+            .map(|mnemonic| mnemonic.as_str().to_owned())
+            .map_err(js_error)
+    }
+
+    /// Restore an identity from a BIP-39 phrase. The phrase remains local.
+    pub fn from_recovery_phrase(phrase: &str, passphrase: &str) -> Result<Self, JsValue> {
+        let mnemonic = links_identity::RecoveryMnemonic::from_phrase(phrase).map_err(js_error)?;
+        Ok(Self {
+            identity: mnemonic
+                .derive_identity_seed(passphrase)
+                .map_err(js_error)?,
+        })
+    }
+
+    /// Derive an identity from a local WebAuthn PRF result. The PRF must come
+    /// from a user-verified passkey operation and must never be sent to Links.
+    pub fn from_passkey_prf(prf_output: &[u8]) -> Result<Self, JsValue> {
+        Ok(Self {
+            identity: IdentitySeed::from_passkey_prf(prf_output).map_err(js_error)?,
+        })
+    }
+
+    pub fn public_key(&self) -> Vec<u8> {
+        self.identity.public_key().to_vec()
+    }
+
+    /// Sign a transcript built by the shared protocol helpers.
+    pub fn sign(&self, transcript: &[u8]) -> Vec<u8> {
+        self.identity.sign(transcript).to_vec()
+    }
+
+    pub fn username_registration_signature(
+        &self,
+        handle: &str,
+        device_id: &str,
+        mls_node_id: &str,
+        nonce: &[u8],
+    ) -> Result<Vec<u8>, JsValue> {
+        self.username_signature(false, handle, device_id, mls_node_id, nonce)
+    }
+
+    pub fn username_login_signature(
+        &self,
+        handle: &str,
+        device_id: &str,
+        mls_node_id: &str,
+        nonce: &[u8],
+    ) -> Result<Vec<u8>, JsValue> {
+        self.username_signature(true, handle, device_id, mls_node_id, nonce)
+    }
+
+    fn username_signature(
+        &self,
+        login: bool,
+        handle: &str,
+        device_id: &str,
+        mls_node_id: &str,
+        nonce: &[u8],
+    ) -> Result<Vec<u8>, JsValue> {
+        let device_id = canonical_uuid(device_id).map_err(js_error)?;
+        let mls_node_id = canonical_uuid(mls_node_id).map_err(js_error)?;
+        let nonce: [u8; 32] = nonce
+            .try_into()
+            .map_err(|_| js_error(CoreError::Authentication))?;
+        let transcript = if login {
+            links_identity::username_login_transcript(
+                handle,
+                device_id,
+                mls_node_id,
+                &self.identity.public_key(),
+                &nonce,
+            )
+        } else {
+            links_identity::username_registration_transcript(
+                handle,
+                device_id,
+                mls_node_id,
+                &self.identity.public_key(),
+                &nonce,
+            )
+        }
+        .map_err(js_error)?;
+        Ok(self.identity.sign(&transcript).to_vec())
+    }
+}
+
 /// Web device identity kept inside the WASM instance.
 ///
 /// The seed is intentionally not exposed to JavaScript. A host may persist

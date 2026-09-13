@@ -1863,6 +1863,7 @@ name = "links-web-client"
 version = "0.1.0"
 dependencies = [
  "links-client-core",
+ "links-identity",
  "uuid",
  "wasm-bindgen",
 ]

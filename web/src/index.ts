@@ -1,4 +1,5 @@
 export * from './LinksWebClient'
+export * from './WebSelfSovereignIdentity'
 export * from './WebTextMessaging'
 export * from './WebImages'
 export * from './WebRtcFileTransfer'

@@ -48,6 +48,69 @@ public final class HardwareIdentityStore {
         }
         return try IdentityKeyReference(handle: String(decoding: handle, as: UTF8.self), publicKey: Data(publicKey))
     }
+
+    /// Derive and hardware-seal an identity from an explicit local BIP-39 phrase.
+    public func restoreFromRecovery(_ phrase: String, passphrase: String) throws -> IdentityKeyReference {
+        var phraseBytes = Array(phrase.utf8)
+        var passphraseBytes = Array(passphrase.utf8)
+        defer {
+            wipe(&phraseBytes)
+            wipe(&passphraseBytes)
+        }
+        guard !phraseBytes.isEmpty,
+              phraseBytes.count <= Int(LINKS_IDENTITY_MAX_RECOVERY_PHRASE),
+              passphraseBytes.count <= Int(LINKS_IDENTITY_MAX_RECOVERY_PASSPHRASE) else {
+            throw IdentityError.invalidInput
+        }
+        var handle = [UInt8](repeating: 0, count: 36)
+        var publicKey = [UInt8](repeating: 0, count: 32)
+        try withVault { callbacks in
+            try phraseBytes.withUnsafeBufferPointer { phraseBuffer in
+                try passphraseBytes.withUnsafeBufferPointer { passphraseBuffer in
+                    try check(links_identity_restore_from_mnemonic(
+                        callbacks,
+                        phraseBuffer.baseAddress, phraseBuffer.count,
+                        passphraseBuffer.baseAddress, passphraseBuffer.count,
+                        &handle, &publicKey))
+                }
+            }
+        }
+        return try IdentityKeyReference(
+            handle: String(decoding: handle, as: UTF8.self), publicKey: Data(publicKey))
+    }
+
+    /// Generate a local English 12- or 24-word recovery phrase.
+    public func generateRecoveryMnemonic(wordCount: Int) throws -> String {
+        guard wordCount == 12 || wordCount == 24 else { throw IdentityError.invalidInput }
+        var output = [UInt8](repeating: 0, count: Int(LINKS_IDENTITY_MAX_RECOVERY_PHRASE))
+        var outputLength = 0
+        let status = links_identity_generate_recovery_mnemonic(
+            UInt32(wordCount), &output, output.count, &outputLength)
+        defer { wipe(&output) }
+        try check(status)
+        guard outputLength > 0, outputLength <= output.count else {
+            throw IdentityError.providerFailure
+        }
+        return String(decoding: output[0..<outputLength], as: UTF8.self)
+    }
+
+    /// Derive and hardware-seal a new identity from a local passkey PRF result.
+    public func createFromPasskeyPRF(_ prfOutput: Data) throws -> IdentityKeyReference {
+        guard prfOutput.count == 32 else { throw IdentityError.invalidInput }
+        var handle = [UInt8](repeating: 0, count: 36)
+        var publicKey = [UInt8](repeating: 0, count: 32)
+        var prf = prfOutput
+        defer { prf.resetBytes(in: 0..<prf.count) }
+        try withVault { callbacks in
+            try prf.withUnsafeBytes { prfBuffer in
+                try check(links_identity_create_from_passkey_prf(
+                    callbacks, prfBuffer.bindMemory(to: UInt8.self).baseAddress,
+                    &handle, &publicKey))
+            }
+        }
+        return try IdentityKeyReference(
+            handle: String(decoding: handle, as: UTF8.self), publicKey: Data(publicKey))
+    }
     /// Check a saved reference after restart. A failure never creates a replacement.
     public func validateIdentity(_ identity: IdentityKeyReference) throws {
         let handle = Array(identity.handle.utf8)
@@ -187,6 +250,9 @@ private func vault(_ context: UnsafeMutableRawPointer?) -> SeedVault {
 }
 private func handleString(_ bytes: UnsafePointer<UInt8>) -> String {
     String(decoding: UnsafeBufferPointer(start: bytes, count: 36), as: UTF8.self)
+}
+private func wipe(_ bytes: inout [UInt8]) {
+    for index in bytes.indices { bytes[index] = 0 }
 }
 private func vaultStatus(_ error: Error) -> Int32 {
     guard let error = error as? HardwareSeedVault.VaultError else { return Int32(LINKS_PROVIDER) }

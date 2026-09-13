@@ -167,22 +167,60 @@ unsafe fn write_transcript(
     output_capacity: usize,
     output_length: *mut usize,
 ) -> Result<(), i32> {
+    let transcript = transcript.map_err(|_| INVALID)?;
+    unsafe { write_bytes(&transcript, output, output_capacity, output_length) }
+}
+
+unsafe fn write_bytes(
+    bytes: &[u8],
+    output: *mut u8,
+    output_capacity: usize,
+    output_length: *mut usize,
+) -> Result<(), i32> {
     if output.is_null() || output_length.is_null() {
         return Err(INVALID);
     }
-    let transcript = transcript.map_err(|_| INVALID)?;
-    if transcript.is_empty()
-        || transcript.len() > output_capacity
-        || transcript.len() > MAX_TRANSCRIPT
-    {
+    if bytes.is_empty() || bytes.len() > output_capacity || bytes.len() > MAX_TRANSCRIPT {
         return Err(INVALID);
     }
     // SAFETY: output capacity was checked against the generated transcript.
     unsafe {
-        output.copy_from_nonoverlapping(transcript.as_ptr(), transcript.len());
-        output_length.write(transcript.len());
+        output.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
+        output_length.write(bytes.len());
     }
     Ok(())
+}
+
+/// Generate an English 12- or 24-word BIP-39 phrase locally.
+///
+/// The caller owns the output and must display or store it through a protected
+/// recovery flow. This function never persists or transmits the phrase.
+///
+/// # Safety
+/// `output` is writable for `output_capacity` bytes and `output_length` is live.
+#[no_mangle]
+pub unsafe extern "C" fn links_identity_generate_recovery_mnemonic(
+    word_count: u32,
+    output: *mut u8,
+    output_capacity: usize,
+    output_length: *mut usize,
+) -> i32 {
+    if output_length.is_null() {
+        return INVALID;
+    }
+    unsafe { output_length.write(0) };
+    boundary(|| {
+        let mnemonic =
+            links_identity::generate_recovery_mnemonic(word_count as usize).map_err(|_| INVALID)?;
+        unsafe {
+            write_bytes(
+                mnemonic.as_str().as_bytes(),
+                output,
+                output_capacity,
+                output_length,
+            )
+        }
+    })
 }
 
 /// Build the exact phone proof transcript used by AccountAuth.
@@ -343,25 +381,57 @@ pub unsafe extern "C" fn links_identity_restore_from_mnemonic(
         out_public_key.write_bytes(0, 32);
     }
     boundary(|| {
-        let phrase = unsafe {
-            read_bytes_limited(phrase, phrase_len, MAX_RECOVERY_PHRASE, false)?
-        };
+        let phrase = unsafe { read_bytes_limited(phrase, phrase_len, MAX_RECOVERY_PHRASE, false)? };
         let passphrase = unsafe {
-            read_bytes_limited(
-                passphrase,
-                passphrase_len,
-                MAX_RECOVERY_PASSPHRASE,
-                true,
-            )?
+            read_bytes_limited(passphrase, passphrase_len, MAX_RECOVERY_PASSPHRASE, true)?
         };
         let phrase = str::from_utf8(phrase).map_err(|_| INVALID)?;
         let passphrase = str::from_utf8(passphrase).map_err(|_| INVALID)?;
-        let mnemonic = links_identity::RecoveryMnemonic::from_phrase(phrase)
-            .map_err(|_| AUTHENTICATION)?;
+        let mnemonic =
+            links_identity::RecoveryMnemonic::from_phrase(phrase).map_err(|_| AUTHENTICATION)?;
         let mut store = unsafe { store(callbacks)? };
         let key = store
             .restore_from_recovery(&mnemonic, passphrase)
             .map_err(status)?;
+        let public_key = match store.public_key(&key) {
+            Ok(public_key) => public_key,
+            Err(error) => {
+                let _ = store.delete_key(key);
+                return Err(status(error));
+            }
+        };
+        unsafe {
+            out_handle.copy_from_nonoverlapping(key.as_bytes().as_ptr(), HANDLE_LEN);
+            out_public_key.copy_from_nonoverlapping(public_key.as_ptr(), 32);
+        }
+        Ok(())
+    })
+}
+
+/// Derive and seal a self-sovereign identity from a local WebAuthn PRF result.
+/// The PRF is never persisted or sent to the server.
+///
+/// # Safety
+/// The PRF input is readable for 32 bytes. Output buffers are distinct and
+/// writable for 36 and 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn links_identity_create_from_passkey_prf(
+    callbacks: *const VaultCallbacks,
+    prf_output: *const u8,
+    out_handle: *mut u8,
+    out_public_key: *mut u8,
+) -> i32 {
+    if out_handle.is_null() || out_public_key.is_null() {
+        return INVALID;
+    }
+    unsafe {
+        out_handle.write_bytes(0, HANDLE_LEN);
+        out_public_key.write_bytes(0, 32);
+    }
+    boundary(|| {
+        let prf_output = unsafe { read_fixed::<32>(prf_output)? };
+        let mut store = unsafe { store(callbacks)? };
+        let key = store.create_from_passkey_prf(&prf_output).map_err(status)?;
         let public_key = match store.public_key(&key) {
             Ok(public_key) => public_key,
             Err(error) => {
@@ -429,7 +499,8 @@ pub unsafe extern "C" fn links_identity_backup_with_passkey(
             return Err(INVALID);
         }
         unsafe {
-            output.copy_from_nonoverlapping(envelope.as_bytes().as_ptr(), envelope.as_bytes().len());
+            output
+                .copy_from_nonoverlapping(envelope.as_bytes().as_ptr(), envelope.as_bytes().len());
             output_length.write(envelope.as_bytes().len());
         }
         Ok(())
@@ -467,20 +538,13 @@ pub unsafe extern "C" fn links_identity_restore_from_passkey(
         let credential_id = unsafe {
             read_bytes_limited(credential_id, credential_id_len, MAX_CREDENTIAL_ID, false)?
         };
-        let envelope = unsafe {
-            read_bytes_limited(envelope, envelope_len, MAX_BACKUP_ENVELOPE, false)?
-        };
+        let envelope =
+            unsafe { read_bytes_limited(envelope, envelope_len, MAX_BACKUP_ENVELOPE, false)? };
         let prf_output = unsafe { read_fixed::<32>(prf_output)? };
         let envelope = PasskeyBackupEnvelope::try_from(envelope.to_vec()).map_err(status)?;
         let mut store = unsafe { store(callbacks)? };
         let key = store
-            .restore_from_passkey(
-                &envelope,
-                backup_id,
-                device_id,
-                credential_id,
-                &prf_output,
-            )
+            .restore_from_passkey(&envelope, backup_id, device_id, credential_id, &prf_output)
             .map_err(status)?;
         let public_key = match store.public_key(&key) {
             Ok(public_key) => public_key,

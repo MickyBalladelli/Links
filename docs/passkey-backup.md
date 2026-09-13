@@ -3,7 +3,9 @@
 The backup flow keeps the identity seed on the device. A passkey is registered
 with the account service, then the client asks the platform WebAuthn API for a
 PRF (`hmac-secret`) result using a fresh 32-byte salt. The PRF result never goes
-to Links.
+to Links. It can also be used once, locally, as the domain-separated root for a
+new self-sovereign Ed25519 identity before username registration; the platform
+wrapper immediately seals that identity in its hardware vault.
 
 `links-client-core::HardwareIdentityStore::backup_with_passkey` loads the seed
 from the native hardware vault for one call, derives an encryption key from the
@@ -65,6 +67,11 @@ retry or missing-key path may call restore automatically.
    asks the platform passkey provider for the matching PRF result, and sends the
    result only to the local JNI restore call. A fresh device ID and MLS node ID
    are assigned after restore.
+
+For first-device self-sovereign creation, Android also exposes
+`generateRecoveryMnemonic` and `createFromPasskeyPrf`. Apple and WASM expose
+matching local constructors. These return only a public key plus an opaque
+hardware reference; the phrase and PRF output never enter the server API.
 
 The `PasskeyProvider` interface is the Android Credential Manager integration
 boundary. Its implementation must return the raw WebAuthn response fields and

@@ -75,6 +75,31 @@ impl<V: HardwareSeedVault> HardwareIdentityStore<V> {
         self.vault.store_seed(seed.expose_for_wrapping())
     }
 
+    /// Generate a new self-sovereign identity from a local BIP-39 phrase.
+    /// Return the phrase so the host can show it once to the user; never send
+    /// it to a server or persist it in ordinary application metadata.
+    pub fn create_from_recovery(
+        &mut self,
+        word_count: usize,
+        passphrase: &str,
+    ) -> Result<(KeyHandle, RecoveryMnemonic), CoreError> {
+        let mnemonic =
+            generate_recovery_mnemonic(word_count).map_err(|_| CoreError::Authentication)?;
+        let seed = mnemonic
+            .derive_identity_seed(passphrase)
+            .map_err(|_| CoreError::Authentication)?;
+        let key = self.vault.store_seed(seed.expose_for_wrapping())?;
+        Ok((key, mnemonic))
+    }
+
+    /// Generate a new self-sovereign identity from a local WebAuthn PRF.
+    /// The PRF output never leaves the device or enters the server API.
+    pub fn create_from_passkey_prf(&mut self, prf_output: &[u8]) -> Result<KeyHandle, CoreError> {
+        let seed =
+            IdentitySeed::from_passkey_prf(prf_output).map_err(|_| CoreError::Authentication)?;
+        self.vault.store_seed(seed.expose_for_wrapping())
+    }
+
     /// Encrypt the existing hardware-backed identity with a WebAuthn PRF key.
     /// The vault seed is read only for this call; only the sealed envelope may
     /// leave the device.

@@ -61,8 +61,9 @@ seed-vault APIs are infrastructure APIs, not an application seed-export feature.
 
 Swift callers use `createIdentity()`, `validateIdentity(_:)`,
 `sign(_:transcript:)` and `deleteIdentity(_:)`. Java callers use the same names
-with `HardwareIdentityStore.KeyReference`. Android also exposes explicit
-`restoreFromRecovery`, `backupWithPasskey` and `restoreFromPasskey` calls. These
+with `HardwareIdentityStore.KeyReference`. Native clients also expose local
+`generateRecoveryMnemonic`, mnemonic restore, and passkey-PRF identity creation,
+plus the existing `backupWithPasskey` and `restoreFromPasskey` calls. These
 derive or open secrets inside the Rust boundary and return only a new opaque
 hardware handle/public key or encrypted envelope. Persist the handle and public key with
 the authenticated account/device/node binding before sending enrollment requests.
