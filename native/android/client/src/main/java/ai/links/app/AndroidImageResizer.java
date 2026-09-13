@@ -8,7 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-/** Decode, orient, proportionally downscale, and re-encode images before encryption. */
+/** Decode, orient, proportionally downscale, and transcode images before encryption. */
 public final class AndroidImageResizer {
     public static final int MAX_IMAGE_EDGE = 1_600;
     public static final int MAX_INPUT_BYTES = 32 * 1024 * 1024;
@@ -62,10 +62,10 @@ public final class AndroidImageResizer {
             if (oriented.getWidth() != target.width || oriented.getHeight() != target.height) {
                 resized = Bitmap.createScaledBitmap(oriented, target.width, target.height, true);
             }
-            Format format = outputFormat(bounds.outMimeType);
+            Format format = outputFormat();
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             if (!resized.compress(format.compressFormat, format.quality, output))
-                throw new IOException("Unable to encode resized image");
+                throw new IOException("Unable to encode WebP image");
             byte[] result = output.toByteArray();
             if (result.length == 0 || result.length > MAX_INPUT_BYTES)
                 throw new IOException("Resized image exceeds size limit");
@@ -151,12 +151,8 @@ public final class AndroidImageResizer {
         return sample;
     }
 
-    private static Format outputFormat(String inputMime) {
-        if ("image/jpeg".equalsIgnoreCase(inputMime))
-            return new Format(Bitmap.CompressFormat.JPEG, "image/jpeg", 95);
-        if ("image/webp".equalsIgnoreCase(inputMime))
-            return new Format(Bitmap.CompressFormat.WEBP, "image/webp", 95);
-        return new Format(Bitmap.CompressFormat.PNG, "image/png", 100);
+    private static Format outputFormat() {
+        return new Format(Bitmap.CompressFormat.WEBP, "image/webp", 80);
     }
 
     private static final class Dimensions {

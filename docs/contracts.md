@@ -39,8 +39,10 @@ Image hosts must apply the shared `MAX_IMAGE_EDGE` policy before encryption:
 preserve aspect ratio, never upscale, and cap the longest edge at 1600 pixels.
 Android uses `AndroidImageResizer`; iOS uses `IOSImageResizer` with ImageIO
 orientation-aware thumbnail creation. Both adapters remove EXIF GPS location
-metadata before encryption; Android preserves the displayed orientation while
-re-encoding. The resulting dimensions belong in the private `MediaMetadata`.
+metadata, transcode to lossy WebP or AVIF at approximately 80% quality, and
+preserve the displayed orientation before encryption. Android emits WebP;
+iOS tries AVIF and falls back to WebP when the platform encoder is unavailable.
+The resulting dimensions and MIME type belong in the private `MediaMetadata`.
 
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field

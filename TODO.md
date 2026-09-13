@@ -395,7 +395,9 @@ Add media after text delivery and multi-device sync are stable.
 - [x] Strip EXIF location metadata.
   Android preserves EXIF orientation while re-encoding without input EXIF;
   iOS filters the ImageIO GPS dictionary before image encryption/upload.
-- [ ] Transcode to WebP / AVIF at approximately 80% lossy quality.
+- [x] Transcode to WebP / AVIF at approximately 80% lossy quality.
+  Android emits WebP at quality 80; iOS tries AVIF and falls back to WebP at
+  quality 0.8 when the platform encoder is available.
 - [ ] Embed low-resolution BlurHash placeholders in text payloads.
 - [ ] Deploy S3-compatible encrypted blob storage with Cloudflare / CloudFront CDN edge caching.
 - [ ] Add encrypted image send, receive, caching, and rendering to Android and iOS, then Web and desktop.
