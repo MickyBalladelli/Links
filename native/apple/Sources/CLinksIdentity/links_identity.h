@@ -9,6 +9,7 @@ extern "C" {
 enum { LINKS_OK = 0, LINKS_INVALID = 1, LINKS_UNAVAILABLE = 2,
        LINKS_AUTHENTICATION = 3, LINKS_PROVIDER = 4 };
 #define LINKS_IDENTITY_MAX_MESSAGE (1024 * 1024)
+#define LINKS_IDENTITY_MAX_TRANSCRIPT 1024
 
 /* ABI v1, synchronous only, called on the entering thread. No pointers retained.
  * Native callbacks must enforce hardware backing and catch all exceptions.
@@ -40,6 +41,17 @@ int32_t links_identity_sign(const LinksVaultCallbacks *, const uint8_t *handle36
                             const uint8_t *expected_public32, const uint8_t *message,
                             size_t message_len, uint8_t *signature64);
 int32_t links_identity_delete(const LinksVaultCallbacks *, const uint8_t *handle36);
+int32_t links_phone_auth_transcript(const uint8_t *phone, size_t phone_len,
+                                    const uint8_t *channel, size_t channel_len,
+                                    const uint8_t *device16, const uint8_t *node16,
+                                    const uint8_t *public32, uint8_t *output,
+                                    size_t output_capacity, size_t *output_len);
+int32_t links_enrollment_transcript(const uint8_t *user16, const uint8_t *device16,
+                                    const uint8_t *node16, const uint8_t *public32,
+                                    const uint8_t *challenge16, const uint8_t *nonce32,
+                                    uint64_t expires_at_ms, const uint8_t *credential,
+                                    size_t credential_len, uint8_t *output,
+                                    size_t output_capacity, size_t *output_len);
 #ifdef __cplusplus
 }
 #endif

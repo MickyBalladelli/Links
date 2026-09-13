@@ -124,6 +124,21 @@ static int read_fixed(JNIEnv *env, jbyteArray input, uint8_t *output, jsize size
     (*env)->GetByteArrayRegion(env, input, 0, size, (jbyte *)output);
     return !(*env)->ExceptionCheck(env);
 }
+static int read_bounded(JNIEnv *env, jbyteArray input, uint8_t *output, jsize maximum, jsize *length) {
+    if (!input) {
+        throw_status(env, LINKS_INVALID);
+        return 0;
+    }
+    jsize actual = (*env)->GetArrayLength(env, input);
+    if (actual > maximum) {
+        throw_status(env, LINKS_INVALID);
+        return 0;
+    }
+    if (actual) (*env)->GetByteArrayRegion(env, input, 0, actual, (jbyte *)output);
+    if ((*env)->ExceptionCheck(env)) return 0;
+    *length = actual;
+    return 1;
+}
 static jbyteArray result_array(JNIEnv *env, int32_t status, const uint8_t *data, jsize size) {
     throw_status(env, status);
     if (status != LINKS_OK || (*env)->ExceptionCheck(env)) return NULL;
@@ -177,4 +192,53 @@ JNIEXPORT void JNICALL Java_ai_links_identity_NativeIdentityBridge_delete(JNIEnv
     uint8_t handle[36];
     if (!read_fixed(env, input, handle, 36) || !setup(env, vault, &ctx, &callbacks)) return;
     throw_status(env, links_identity_delete(&callbacks, handle));
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_phoneAuthTranscript(
+        JNIEnv *env, jclass cls, jbyteArray phone_input, jbyteArray channel_input,
+        jbyteArray device_input, jbyteArray node_input, jbyteArray public_input) {
+    (void)cls;
+    uint8_t phone[16], channel[8], device[16], node[16], public_key[32];
+    jsize phone_len, channel_len;
+    if (!read_bounded(env, phone_input, phone, 16, &phone_len)
+            || !read_bounded(env, channel_input, channel, 8, &channel_len)
+            || !read_fixed(env, device_input, device, 16)
+            || !read_fixed(env, node_input, node, 16)
+            || !read_fixed(env, public_input, public_key, 32)) return NULL;
+    uint8_t output[LINKS_IDENTITY_MAX_TRANSCRIPT];
+    size_t output_len = 0;
+    int32_t status = links_phone_auth_transcript(phone, (size_t)phone_len, channel,
+            (size_t)channel_len, device, node, public_key, output,
+            sizeof(output), &output_len);
+    if (output_len > LINKS_IDENTITY_MAX_TRANSCRIPT) {
+        throw_status(env, LINKS_PROVIDER);
+        return NULL;
+    }
+    return result_array(env, status, output, (jsize)output_len);
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_enrollmentTranscript(
+        JNIEnv *env, jclass cls, jbyteArray user_input, jbyteArray device_input,
+        jbyteArray node_input, jbyteArray public_input, jbyteArray challenge_input,
+        jbyteArray nonce_input, jlong expires_at_ms, jbyteArray credential_input) {
+    (void)cls;
+    uint8_t user[16], device[16], node[16], public_key[32], challenge[16], nonce[32];
+    if (!read_fixed(env, user_input, user, 16)
+            || !read_fixed(env, device_input, device, 16)
+            || !read_fixed(env, node_input, node, 16)
+            || !read_fixed(env, public_input, public_key, 32)
+            || !read_fixed(env, challenge_input, challenge, 16)
+            || !read_fixed(env, nonce_input, nonce, 32)) return NULL;
+    uint8_t credential[LINKS_IDENTITY_MAX_TRANSCRIPT];
+    jsize credential_len;
+    if (!read_bounded(env, credential_input, credential, LINKS_IDENTITY_MAX_TRANSCRIPT,
+            &credential_len)) return NULL;
+    uint8_t output[LINKS_IDENTITY_MAX_TRANSCRIPT];
+    size_t output_len = 0;
+    int32_t status = links_enrollment_transcript(user, device, node, public_key,
+            challenge, nonce, (uint64_t)expires_at_ms, credential,
+            (size_t)credential_len, output, sizeof(output), &output_len);
+    if (output_len > LINKS_IDENTITY_MAX_TRANSCRIPT) {
+        throw_status(env, LINKS_PROVIDER);
+        return NULL;
+    }
+    return result_array(env, status, output, (jsize)output_len);
 }

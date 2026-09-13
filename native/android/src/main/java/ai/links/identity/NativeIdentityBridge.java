@@ -11,4 +11,9 @@ final class NativeIdentityBridge {
     static native byte[] publicKey(Object vault, byte[] handle) throws GeneralSecurityException, IOException;
     static native byte[] sign(Object vault, byte[] handle, byte[] publicKey, byte[] transcript) throws GeneralSecurityException, IOException;
     static native void delete(Object vault, byte[] handle) throws GeneralSecurityException, IOException;
+    static native byte[] phoneAuthTranscript(byte[] phone, byte[] channel,
+            byte[] deviceId, byte[] mlsNodeId, byte[] publicKey) throws GeneralSecurityException;
+    static native byte[] enrollmentTranscript(byte[] userId, byte[] deviceId,
+            byte[] mlsNodeId, byte[] publicKey, byte[] challengeId, byte[] nonce,
+            long expiresAtMs, byte[] mlsCredential) throws GeneralSecurityException;
 }

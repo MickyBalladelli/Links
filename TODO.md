@@ -195,9 +195,14 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   `native/android/client` is the first Android application module. It uses the
   Rust-backed `HardwareIdentityStore`, keeps only public identity metadata in
   app preferences, restores existing identities fail-closed, and provides the
-  off-main-thread first-run shell. OTP, transport, messaging UI and background
+  off-main-thread first-run shell. Transport, messaging UI and background
   scheduling remain the following Android tasks.
-- [ ] Add phone OTP onboarding and Android Keystore key storage.
+- [x] Add phone OTP onboarding and Android Keystore key storage.
+  `native/android/client` uses HTTPS `/v1/auth/start` and `/v1/auth/finish`,
+  signs both proofs through the Rust identity bridge, stores only the account
+  binding, and keeps the bearer token in memory. Android Keystore requires TEE
+  or StrongBox-backed wrapping; provider delivery and physical-device acceptance
+  remain release gates.
 - [ ] Implement Android connection manager with exponential backoff, reconnect, and heartbeating.
 - [ ] Implement the 1-to-1 send flow: query recipient pre-key bundle, establish/resume MLS group, encrypt payload, and send envelope.
 - [ ] Implement the 1-to-1 receive flow: fetch envelope, decrypt Sealed Sender wrapper, process MLS epoch update, render message, and return delivery receipt.

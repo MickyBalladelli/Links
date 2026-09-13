@@ -2,6 +2,7 @@ package ai.links.identity;
 
 import android.content.Context;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
@@ -56,8 +57,45 @@ public final class HardwareIdentityStore {
             return NativeIdentityBridge.sign(vault, identity.handleBytes(), identity.publicKey, transcript);
         }
     }
+    /** Build the exact phone-auth proof signed by the identity key. */
+    public byte[] phoneAuthTranscript(KeyReference identity, String phone, String channel,
+            UUID deviceId, UUID mlsNodeId) throws GeneralSecurityException {
+        if (identity == null || phone == null || channel == null || deviceId == null || mlsNodeId == null)
+            throw new GeneralSecurityException("Invalid phone-auth input");
+        byte[] phoneBytes = phone.getBytes(StandardCharsets.UTF_8);
+        byte[] channelBytes = channel.getBytes(StandardCharsets.UTF_8);
+        if (phoneBytes.length > 16 || channelBytes.length > 8)
+            throw new GeneralSecurityException("Invalid phone-auth input");
+        byte[] transcript = NativeIdentityBridge.phoneAuthTranscript(phoneBytes, channelBytes,
+                uuidBytes(deviceId), uuidBytes(mlsNodeId), identity.publicKey());
+        if (transcript == null || transcript.length == 0)
+            throw new GeneralSecurityException("Invalid phone-auth transcript");
+        return transcript;
+    }
+    /** Build the nonce- and MLS-credential-bound enrollment proof. */
+    public byte[] enrollmentTranscript(KeyReference identity, UUID userId, UUID deviceId,
+            UUID mlsNodeId, UUID challengeId, byte[] nonce, long expiresAtMs,
+            byte[] mlsCredential) throws GeneralSecurityException {
+        if (identity == null || userId == null || deviceId == null || mlsNodeId == null
+                || challengeId == null || nonce == null || nonce.length != 32
+                || mlsCredential == null || mlsCredential.length > 1024 || expiresAtMs <= 0)
+            throw new GeneralSecurityException("Invalid enrollment input");
+        byte[] transcript = NativeIdentityBridge.enrollmentTranscript(uuidBytes(userId),
+                uuidBytes(deviceId), uuidBytes(mlsNodeId), identity.publicKey(),
+                uuidBytes(challengeId), nonce.clone(), expiresAtMs, mlsCredential.clone());
+        if (transcript == null || transcript.length == 0)
+            throw new GeneralSecurityException("Invalid enrollment transcript");
+        return transcript;
+    }
     /** Explicit device removal only; never delete on a network retry/login. */
     public void deleteIdentity(KeyReference identity) throws GeneralSecurityException, IOException {
         synchronized (WORKER_LOCK) { NativeIdentityBridge.delete(vault, identity.handleBytes()); }
+    }
+
+    private static byte[] uuidBytes(UUID value) {
+        return ByteBuffer.allocate(16)
+                .putLong(value.getMostSignificantBits())
+                .putLong(value.getLeastSignificantBits())
+                .array();
     }
 }

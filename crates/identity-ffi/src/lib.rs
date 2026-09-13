@@ -7,7 +7,8 @@ use links_client_core::{
     identity::{HardwareIdentityStore, HardwareSeedVault, IdentityStore, KeyHandle},
     CoreError,
 };
-use std::{ffi::c_void, panic::AssertUnwindSafe, slice};
+use std::{ffi::c_void, panic::AssertUnwindSafe, slice, str};
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 pub const OK: i32 = 0;
@@ -16,6 +17,7 @@ pub const UNAVAILABLE: i32 = 2;
 pub const AUTHENTICATION: i32 = 3;
 pub const PROVIDER: i32 = 4;
 pub const MAX_MESSAGE: usize = 1024 * 1024;
+pub const MAX_TRANSCRIPT: usize = 1024;
 const HANDLE_LEN: usize = 36;
 
 #[repr(C)]
@@ -122,6 +124,145 @@ fn boundary(work: impl FnOnce() -> Result<(), i32>) -> i32 {
         Ok(Err(code)) => code,
         Err(_) => PROVIDER,
     }
+}
+
+unsafe fn read_fixed<const N: usize>(input: *const u8) -> Result<[u8; N], i32> {
+    if input.is_null() {
+        return Err(INVALID);
+    }
+    let mut output = [0; N];
+    // SAFETY: callers of the exported functions provide N readable bytes.
+    output.copy_from_slice(unsafe { slice::from_raw_parts(input, N) });
+    Ok(output)
+}
+
+unsafe fn read_bytes<'a>(input: *const u8, length: usize) -> Result<&'a [u8], i32> {
+    if input.is_null() || length > MAX_TRANSCRIPT {
+        return Err(INVALID);
+    }
+    // SAFETY: callers provide a readable buffer of the declared length.
+    Ok(unsafe { slice::from_raw_parts(input, length) })
+}
+
+unsafe fn write_transcript(
+    transcript: Result<Vec<u8>, links_identity::IdentityError>,
+    output: *mut u8,
+    output_capacity: usize,
+    output_length: *mut usize,
+) -> Result<(), i32> {
+    if output.is_null() || output_length.is_null() {
+        return Err(INVALID);
+    }
+    let transcript = transcript.map_err(|_| INVALID)?;
+    if transcript.is_empty()
+        || transcript.len() > output_capacity
+        || transcript.len() > MAX_TRANSCRIPT
+    {
+        return Err(INVALID);
+    }
+    // SAFETY: output capacity was checked against the generated transcript.
+    unsafe {
+        output.copy_from_nonoverlapping(transcript.as_ptr(), transcript.len());
+        output_length.write(transcript.len());
+    }
+    Ok(())
+}
+
+/// Build the exact phone proof transcript used by AccountAuth.
+///
+/// # Safety
+/// All input pointers reference their declared readable lengths. The output
+/// buffer is writable for `output_capacity` bytes and `output_length` is live.
+#[no_mangle]
+pub unsafe extern "C" fn links_phone_auth_transcript(
+    phone: *const u8,
+    phone_len: usize,
+    channel: *const u8,
+    channel_len: usize,
+    device_id: *const u8,
+    mls_node_id: *const u8,
+    public_key: *const u8,
+    output: *mut u8,
+    output_capacity: usize,
+    output_length: *mut usize,
+) -> i32 {
+    if output_length.is_null() {
+        return INVALID;
+    }
+    unsafe { output_length.write(0) };
+    boundary(|| {
+        let phone = unsafe { read_bytes(phone, phone_len)? };
+        let channel = unsafe { read_bytes(channel, channel_len)? };
+        let phone = str::from_utf8(phone).map_err(|_| INVALID)?;
+        let channel = str::from_utf8(channel).map_err(|_| INVALID)?;
+        let device_id = Uuid::from_bytes(unsafe { read_fixed(device_id)? });
+        let mls_node_id = Uuid::from_bytes(unsafe { read_fixed(mls_node_id)? });
+        let public_key = unsafe { read_fixed(public_key)? };
+        unsafe {
+            write_transcript(
+                links_identity::phone_auth_transcript(
+                    phone,
+                    channel,
+                    device_id,
+                    mls_node_id,
+                    &public_key,
+                ),
+                output,
+                output_capacity,
+                output_length,
+            )
+        }
+    })
+}
+
+/// Build the nonce-bound enrollment transcript used by AccountAuth.finish.
+///
+/// # Safety
+/// All fixed-size input pointers reference readable buffers. The credential
+/// pointer references `credential_len` readable bytes. Output follows the
+/// `links_phone_auth_transcript` contract.
+#[no_mangle]
+pub unsafe extern "C" fn links_enrollment_transcript(
+    user_id: *const u8,
+    device_id: *const u8,
+    mls_node_id: *const u8,
+    public_key: *const u8,
+    challenge_id: *const u8,
+    nonce: *const u8,
+    expires_at_ms: u64,
+    mls_credential: *const u8,
+    credential_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
+    output_length: *mut usize,
+) -> i32 {
+    if output_length.is_null() {
+        return INVALID;
+    }
+    unsafe { output_length.write(0) };
+    boundary(|| {
+        let binding = links_identity::DeviceBinding {
+            user_id: Uuid::from_bytes(unsafe { read_fixed(user_id)? }),
+            device_id: Uuid::from_bytes(unsafe { read_fixed(device_id)? }),
+            mls_node_id: Uuid::from_bytes(unsafe { read_fixed(mls_node_id)? }),
+            public_key: unsafe { read_fixed(public_key)? },
+        };
+        let challenge_id = Uuid::from_bytes(unsafe { read_fixed(challenge_id)? });
+        let nonce = unsafe { read_fixed(nonce)? };
+        let mls_credential = unsafe { read_bytes(mls_credential, credential_len)? };
+        let expected_credential = binding.mls_credential().map_err(|_| INVALID)?;
+        if mls_credential != expected_credential.as_slice() {
+            return Err(INVALID);
+        }
+        unsafe {
+            write_transcript(
+                binding.enrollment_transcript(challenge_id, &nonce, expires_at_ms),
+                output,
+                output_capacity,
+                output_length,
+            )
+        }
+    })
 }
 
 /// Create and read back a hardware-wrapped identity before returning its reference.

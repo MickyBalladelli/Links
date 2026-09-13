@@ -9,7 +9,6 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 links-client-core.workspace = true
-zeroize.workspace = true
-
-[dev-dependencies]
 links-identity = { path = "../identity" }
+zeroize.workspace = true
+uuid.workspace = true

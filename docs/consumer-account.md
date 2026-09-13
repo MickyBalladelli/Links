@@ -3,8 +3,8 @@
 OTP authentication and Ed25519/MLS credential enrollment are implemented and tested.
 Native seed vaults are wired to Rust through Swift/C and Android JNI wrappers;
 physical hardware acceptance is still open. See [hardware identity integration
-and acceptance](hardware-identity.md). This is not a finished mobile onboarding
-UI or an audited E2EE system.
+and acceptance](hardware-identity.md). This is not a finished consumer messaging
+client or an audited E2EE system.
 
 ## What is implemented
 
@@ -21,8 +21,9 @@ request transcripts, verifies signatures strictly, and produces an RFC 9420 basi
 credential using TLS codec serialization. The core exposes `HardwareIdentityStore`
 and `HardwareSeedVault`; Swift and Java supply native wrap/load/delete operations.
 `links-identity-ffi` connects those operations to the native `HardwareIdentityStore`
-APIs. Mobile onboarding UI and persistence of the public reference/account binding
-remain in the Android/iOS client phases.
+APIs. The Android client now provides the first-run hardware identity and phone OTP
+flow; iOS onboarding and the rest of the consumer messaging UX remain separate
+client tasks.
 
 `RecoveryMnemonic` accepts only English BIP-39 12- or 24-word phrases. It uses
 BIP-39 PBKDF2-HMAC-SHA512 with an optional passphrase, keeps the 512-bit root in
@@ -215,8 +216,11 @@ host with the correct Keychain entitlements; no developer team or provisioning
 identity is hardcoded. The Android identity library uses AGP 8.9.2, Gradle 8.11.1,
 JDK 17, and SDK 35. `native/android/client` is the first application module and
 depends on that library. Its first-run shell creates/restores the Rust-backed
-hardware identity off the main thread and stores only the public handle, public
-key, and device ID. The repository does not bundle a Gradle distribution/wrapper.
+hardware identity off the main thread, then signs the phone OTP enrollment proof
+through the native transcript bridge. It stores only public identity/account
+metadata; the bearer token is memory-only. Set `AUTH_BASE_URL` in the client build
+configuration to the HTTPS account-auth endpoint. The repository does not bundle
+a Gradle distribution/wrapper.
 
 ## Verification and remaining gates
 
