@@ -138,6 +138,9 @@ export class WebEncryptedImageCache {
 
   async write(image: WebEncryptedImage): Promise<void> {
     validateEncryptedImage(image)
+    if (!await hasDigest(image.ciphertext, image.metadata.ciphertextSHA256)) {
+      throw new Error('Invalid Web image ciphertext digest')
+    }
     const cache = await this.storage.open(WEB_IMAGE_CACHE_NAME)
     await cache.put(
       cacheKey(image.metadata.attachmentID),
@@ -201,6 +204,9 @@ export class WebImageSession {
         blurHash
       )
       validateEncryptedImage(image)
+      if (!await hasDigest(image.ciphertext, image.metadata.ciphertextSHA256)) {
+        throw new Error('Invalid Web image ciphertext digest')
+      }
       return {
         image,
         width: normalized.width,
