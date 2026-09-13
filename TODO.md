@@ -151,7 +151,11 @@ Make encrypted messages reliably move between devices before adding richer clien
 -  `Gateway::open` now reads the authenticated device mailbox after Hello and
    returns Welcome plus the first contiguous SyncBatch. Explicit Replay remains
    available for pagination; stale cursors fail with CursorExpired.
-- [ ] Register every physical client as a distinct MLS identity node under the primary user account.
+- [x] Register every physical client as a distinct MLS identity node under the primary user account.
+-  `POST /v1/devices` lets an authenticated device approve a new client; the
+   new client proves its Ed25519 key with a nonce-bound signature, and the
+   server stores a distinct device/node/MLS credential. Adding that node to
+   each existing MLS group still requires an authenticated member-add commit.
 - [ ] Fan out outbound encrypted envelopes to all active device queues for target users.
 
 ### Push and retention

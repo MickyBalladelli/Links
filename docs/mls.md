@@ -22,6 +22,11 @@ security until the protocol composition has had independent review.
 `DeviceBinding::mls_credential()` produces an RFC 9420 BasicCredential carrying
 the user ID, device ID, MLS node ID, and Ed25519 public key. `OpenMlsEngine::new`
 checks that the credential key equals the native hardware-backed signer.
+Additional physical clients register through the authenticated device endpoint;
+the existing device authorizes the account scope and the new device signs a
+nonce-bound pairing transcript. The resulting credential is a distinct MLS node
+under the same user account. An existing MLS group still needs an authenticated
+member-add commit before that node receives the group's traffic.
 
 Incoming credentials are accepted only after all of these checks:
 

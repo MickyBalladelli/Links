@@ -1,7 +1,7 @@
 use crate::{
     service::{
-        AccountAuth, EncryptedKeyBackupRequest, FinishRequest, PasskeyAssertionFinishRequest,
-        PasskeyRegistrationFinishRequest, StartRequest,
+        AccountAuth, DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
+        PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, StartRequest,
     },
     AuthError,
 };
@@ -23,6 +23,7 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/auth/start", post(start))
         .route("/v1/auth/finish", post(finish))
         .route("/v1/auth/me", get(me))
+        .route("/v1/devices", post(register_device))
         .layer(DefaultBodyLimit::max(4096));
     let passkey_routes = Router::new()
         .route("/v1/passkeys/register/start", post(passkey_register_start))
@@ -78,6 +79,19 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(auth.authenticate(bearer(&headers)?).await?))
+}
+async fn register_device(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<DeviceRegistrationRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.register_device(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
 }
 async fn passkey_register_start(
     State(auth): State<Arc<AccountAuth>>,

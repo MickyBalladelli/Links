@@ -222,6 +222,29 @@ pub fn phone_auth_transcript(
     Ok(bytes)
 }
 
+/// Transcript signed by a new physical device when an authenticated account
+/// device approves its enrollment. The nonce is supplied by the approving
+/// device and must be freshly random for each pairing attempt.
+pub fn device_pairing_transcript(
+    user_id: Uuid,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: &[u8; 32],
+    nonce: &[u8; 32],
+) -> Result<Vec<u8>, IdentityError> {
+    if user_id.is_nil() || device_id.is_nil() || mls_node_id.is_nil() {
+        return Err(IdentityError::Invalid);
+    }
+    validate_public_key(public_key)?;
+    let mut bytes = b"links/device-pairing/v1\0".to_vec();
+    bytes.extend(user_id.as_bytes());
+    bytes.extend(device_id.as_bytes());
+    bytes.extend(mls_node_id.as_bytes());
+    bytes.extend(public_key);
+    bytes.extend(nonce);
+    Ok(bytes)
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct DeviceBinding {
     pub user_id: Uuid,

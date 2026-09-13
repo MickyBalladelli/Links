@@ -71,6 +71,7 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /start` | `phone`, `channel`, `device_id`, `mls_node_id`, `public_key`, `signature` | Provisional account/device binding, `challenge_id`, nonce, expiry and MLS credential. |
 | `POST /finish` | `challenge_id`, `code`, `signature` | A device-scoped bearer access token, expiry, user ID and device ID. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
+| `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
 
 The phone must already be canonical E.164: `+` followed by 8–15 ASCII digits, with
 a nonzero country-code prefix. This is format validation, not proof that a number
@@ -88,9 +89,12 @@ against its saved identity. Persist the vault handle and binding before proceedi
 do not regenerate keys on an ordinary login or network retry.
 
 A new account can enroll its initial device after OTP plus key-possession proof.
-An existing account can only log in with its already registered, unrevoked device
-and the same public key/node/credential. A new key or device requires the future
-pairing/recovery flow; **OTP alone cannot replace existing identity keys**.
+An existing account can log in with its already registered, unrevoked device and
+the same public key/node/credential. An additional physical client uses the
+authenticated `POST /v1/devices` flow: the approving device supplies its bearer
+session, and the new device signs a fresh nonce-bound transcript with its own
+identity key. **OTP alone cannot replace existing identity keys**. QR transport
+for carrying this pairing payload remains a client UX task.
 Ineligible requests receive provisional challenges without disclosing the real
 account UUID. They never receive a session even with a correct OTP. This is not
 a formal guarantee of enumeration resistance or of constant-time behavior.

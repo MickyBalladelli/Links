@@ -73,6 +73,23 @@ impl Drop for FinishRequest {
         self.code.zeroize();
     }
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceRegistrationRequest {
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub public_key: String,
+    pub nonce: String,
+    pub signature: String,
+}
+#[derive(Serialize)]
+pub struct DeviceRegistrationResponse {
+    pub user_id: Uuid,
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub public_key: String,
+    pub mls_credential: String,
+}
 #[derive(Serialize, Deserialize)]
 pub struct Session {
     pub access_token: String,
@@ -451,6 +468,97 @@ impl AccountAuth {
         Ok(AuthenticatedAccount {
             user_id: row.get("user_id"),
             device_id: row.get("device_id"),
+        })
+    }
+
+    /// Register an additional physical client under the authenticated account.
+    /// The current device authorizes the operation through its bearer session;
+    /// the new device proves possession of its own Ed25519 identity key.
+    pub async fn register_device(
+        &self,
+        token: &str,
+        request: DeviceRegistrationRequest,
+    ) -> Result<DeviceRegistrationResponse, AuthError> {
+        if request.device_id.is_nil() || request.mls_node_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        let public_key = decode::<32>(&request.public_key)?;
+        let nonce = decode::<32>(&request.nonce)?;
+        let signature = decode::<64>(&request.signature)?;
+        let binding = DeviceBinding {
+            user_id: account.user_id,
+            device_id: request.device_id,
+            mls_node_id: request.mls_node_id,
+            public_key,
+        };
+        verify(
+            &public_key,
+            &links_identity::device_pairing_transcript(
+                account.user_id,
+                request.device_id,
+                request.mls_node_id,
+                &public_key,
+                &nonce,
+            )?,
+            &signature,
+        )?;
+        let credential = binding.mls_credential()?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "SELECT user_id FROM accounts WHERE user_id=$1 AND disabled_at IS NULL FOR UPDATE",
+        )
+        .bind(account.user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        let existing = sqlx::query(
+            "SELECT user_id,mls_node_id,identity_public_key,mls_credential,revoked_at IS NULL AS active FROM devices WHERE device_id=$1 FOR UPDATE",
+        )
+        .bind(request.device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(existing) = existing {
+            let same = existing.get::<Uuid, _>("user_id") == account.user_id
+                && existing.get::<Uuid, _>("mls_node_id") == request.mls_node_id
+                && existing.get::<Vec<u8>, _>("identity_public_key") == public_key
+                && existing.get::<Vec<u8>, _>("mls_credential") == credential
+                && existing.get::<bool, _>("active");
+            if same {
+                tx.commit().await?;
+                return Ok(DeviceRegistrationResponse {
+                    user_id: account.user_id,
+                    device_id: request.device_id,
+                    mls_node_id: request.mls_node_id,
+                    public_key: encode(&public_key),
+                    mls_credential: encode(&credential),
+                });
+            }
+            return Err(AuthError::Conflict);
+        }
+        let node_taken: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM devices WHERE mls_node_id=$1)")
+                .bind(request.mls_node_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if node_taken {
+            return Err(AuthError::Conflict);
+        }
+        sqlx::query("INSERT INTO devices (device_id,user_id,mls_node_id,identity_public_key,mls_credential) VALUES ($1,$2,$3,$4,$5)")
+            .bind(request.device_id)
+            .bind(account.user_id)
+            .bind(request.mls_node_id)
+            .bind(public_key.as_slice())
+            .bind(&credential)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(DeviceRegistrationResponse {
+            user_id: account.user_id,
+            device_id: request.device_id,
+            mls_node_id: request.mls_node_id,
+            public_key: encode(&public_key),
+            mls_credential: encode(&credential),
         })
     }
 
