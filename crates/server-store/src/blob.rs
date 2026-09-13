@@ -10,7 +10,8 @@ use links_protocol::validate_id;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
-pub const MAX_BLOB_BYTES: usize = 32 * 1024 * 1024;
+/// 32 MiB plaintext budget plus one 16-byte AEAD tag.
+pub const MAX_BLOB_BYTES: usize = 32 * 1024 * 1024 + 16;
 pub const BLOB_KEY_PREFIX: &str = "links/v1/blobs";
 pub const BLOB_CONTENT_TYPE: &str = "application/octet-stream";
 pub const BLOB_CACHE_CONTROL: &str = "public, max-age=2592000, immutable";

@@ -12,7 +12,8 @@ ciphertext only. It writes the object at:
 
 `links/v1/blobs/<canonical-attachment-uuid>`
 
-Each upload is limited to 32 MiB and uses:
+Each upload is limited to 32 MiB of client plaintext plus its 16-byte AEAD tag
+and uses:
 
 - content type `application/octet-stream`
 - `Cache-Control: public, max-age=2592000, immutable`
