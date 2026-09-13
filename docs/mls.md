@@ -70,7 +70,7 @@ OpenMLS TreeKEM updates derive and publish only the changed path, giving
 `O(log N)` member-update path work for a balanced tree. Message encryption and
 decryption use the current MLS epoch and sender ratchets.
 
-Still required before production use: a durable host storage adapter, Sealed
-Sender integration, adversarial/interoperability vectors, signed
-physical-device acceptance, and an independent cryptographic audit. The draft
-ciphersuite is an implementation choice, not a production security claim.
+Still required before production use: a durable host storage adapter,
+adversarial/interoperability vectors, signed physical-device acceptance, and an
+independent cryptographic audit. The draft ciphersuite is an implementation
+choice, not a production security claim.

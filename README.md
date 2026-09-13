@@ -5,9 +5,8 @@ authentication, Ed25519 device enrollment, hardware-backed identity custody, the
 Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
 provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
 messenger or a production post-quantum security claim.** One-to-one client
-lifecycle wiring, Sealed Sender envelopes, delivery gateways, and client
-applications remain in later phases. Native hardware acceptance and the
-cryptographic audit remain open.
+lifecycle wiring, delivery gateways, and client applications remain in later
+phases. Native hardware acceptance and the cryptographic audit remain open.
 
 ## Workspace
 
@@ -70,6 +69,6 @@ CI is configured for formatting, warning-free lint, unit/doc tests, PostgreSQL
 integration tests, WASM compilation and native-source builds. Hardware custody
 tests require signed physical-device harnesses; compile checks do not prove TEE
 protection. Mobile FFI bindings, Redis and ScyllaDB/DynamoDB network adapters remain
-future work. The outer envelope provider still fails closed rather than sending
-plaintext until its implementation is installed. See [account setup](docs/consumer-account.md),
+future work. The default outer envelope provider still fails closed; install the
+platform-backed Sealed Sender resolver before sending. See [account setup](docs/consumer-account.md),
 [MLS](docs/mls.md), and [the roadmap](TODO.md).

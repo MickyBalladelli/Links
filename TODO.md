@@ -66,7 +66,7 @@ Verification: 25 Rust unit tests and 14 PostgreSQL integration tests passed; for
 - [x] Build Pre-Key Bundle generation and automatic upload for offline message initiation.
 - [x] Integrate the core MLS ratcheting engine with TreeKEM (`O(log N)` member update complexity).
 - [x] Standardize 1-to-1 chats as 2-member MLS groups.
-- [ ] Wrap encrypted payloads in Sealed Sender envelopes to hide origin metadata from routing nodes.
+- [x] Wrap encrypted payloads in Sealed Sender envelopes to hide origin metadata from routing nodes.
 
 PQXDH implementation: `links-client-core::pqxdh` provides the Links X25519 +
 ML-KEM-768 + HKDF-SHA-512 profile, signed prekey transcripts, initiator/responder
@@ -84,6 +84,10 @@ release gates. Direct groups are ready only when exactly two distinct user
 identities are present; each physical device may still occupy its own MLS leaf.
 Authenticated first-payload composition remains in the following roadmap items.
 The server’s direct-group metadata also caps account members at two.
+`crypto::SealedSenderCrypto` now wraps the opaque MLS bytes with an ephemeral
+X25519 key and authenticated ChaCha20-Poly1305 ciphertext; recipient device
+keys resolve through a platform-backed provider, while the routing header stays
+visible and sender/conversation metadata stays inside MLS.
 See [PQXDH profile and security
 limits](docs/pqxdh.md), [pre-key provisioning](docs/prekeys.md), and [MLS/TreeKEM](docs/mls.md).
 

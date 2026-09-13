@@ -123,6 +123,13 @@ can be encrypted or decrypted. Each physical device is a separate MLS leaf, so
 multi-device users do not violate this rule. Add and commit processing rejects a
 third user and leaf updates cannot transfer a leaf between users.
 
+`SealedSenderCrypto` implements the v1 outer wrapper as an ephemeral X25519
+public key, random nonce, and ChaCha20-Poly1305 ciphertext. It derives a
+per-message key from the recipient device public key and authenticates the
+routing header as associated data. The recipient key resolver must use an
+authenticated directory public key and a platform-backed private key; no private
+key or sender identity enters the routing-visible envelope.
+
 Provider state mutations are not automatically transactional. Mobile/Web hosts
 must coordinate durable MLS state with inbox/outbox transactions before installing
 a real provider. `seal_message` is a single-recipient orchestration boundary, not

@@ -1,6 +1,7 @@
 //! Platform-neutral client contracts and validated send/receive orchestration.
 //! Ed25519 identity, PQXDH key agreement, and an OpenMLS TreeKEM provider are
-//! available. The outer envelope provider still fails closed until integrated.
+//! available. The default outer envelope provider still fails closed; install
+//! `crypto::SealedSenderCrypto` with a platform-backed key resolver for sends.
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;

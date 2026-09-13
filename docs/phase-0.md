@@ -36,7 +36,7 @@ clients must verify the corresponding signed membership/epoch changes.
 
 | Threat | Required control | Boundary / current state |
 | --- | --- | --- |
-| Network or stored-payload disclosure | TLS plus client-side authenticated encryption | MLS message protection is integrated; the outer envelope and delivery gateway remain later phases. |
+| Network or stored-payload disclosure | TLS plus client-side authenticated encryption | MLS and the Sealed Sender outer wrapper are integrated; the delivery gateway remains a later phase. |
 | Forgery, replay, or stale membership | Verified MLS credentials, transcript/epoch validation, durable replay state | OpenMLS engine is integrated; durable host storage and adversarial vectors remain required in Phase 1. |
 | Compromised directory | Authenticated enrollment, peer verification and device-change handling | Not solved by OTP or protobuf public keys alone. |
 | Stolen device | OS-keystore custody, revoke device, rotate affected MLS groups | SQL revocation and MLS removal primitives exist; revocation-driven group rotation is not yet wired. |
@@ -64,9 +64,10 @@ not implied by the interface names.
 | Rate-limit key | Opaque namespaced digest only | Expire after a full-refill idle interval. |
 
 Sender identity and conversation identity are absent from the outer envelope.
-This reduces stored routing metadata but does **not** hide the sender from an
-authenticated gateway or defeat timing correlation. Sealed Sender integration is
-not implemented in Phase 0. Operational metrics should aggregate counts without
+The Sealed Sender wrapper encrypts the MLS bytes to the recipient device key and
+authenticates the routing header as associated data. This reduces stored routing
+metadata but does **not** hide the sender from an authenticated gateway or defeat
+timing correlation. Operational metrics should aggregate counts without
 account, device, conversation, IP, or payload labels. No frame/body SQL-parameter
 logging is permitted. Backup, replica, and log deletion must meet the same payload
 retention ceiling; provider TTL alone does not prove timely physical erasure.
