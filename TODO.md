@@ -430,7 +430,12 @@ Add media after text delivery and multi-device sync are stable.
   delivery enforcement. `WebRtcFileTransfer` adds browser DataChannel
   backpressure and bounded Blob source/sink callbacks; SDP signaling remains
   a separate host concern.
-- [ ] Add encrypted video and large-file transfer to clients after images and voice notes work.
+- [x] Add encrypted video and large-file transfer to clients after images and voice notes work.
+  Shared chunked ChaCha20-Poly1305 uses 256 KiB ciphertext chunks, private
+  size/chunk metadata, per-chunk AEAD, and whole-ciphertext SHA-256. iOS,
+  Android, Web/WASM, and desktop clients stream ciphertext through upload or
+  authenticated WebRTC transfer boundaries and publish plaintext only after
+  complete verification.
 
 ---
 

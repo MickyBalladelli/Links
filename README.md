@@ -47,14 +47,20 @@ remain open.
 | `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
 | `web/src/WebImages.ts` | Web image normalization, encrypted transfer, ciphertext cache, and render boundary. |
 | `web/src/WebRtcFileTransfer.ts` | Browser WebRTC DataChannel ciphertext streaming, resume, backpressure, and integrity boundary. |
+| `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
 | `crates/desktop-client/src/session.rs` | Desktop image encryption, transfer, ciphertext cache, and render boundary. |
 | `docs/voice-notes.md` | Opus profile, Ogg container, encryption boundary and platform codec contract. |
 | `docs/video-transcoding.md` | Native VideoToolbox/MediaCodec profiles and hardware-only transcode boundary. |
 | `docs/p2p-file-transfer.md` | WebRTC DataChannel ciphertext-only transfer, resume, backpressure, and integrity contract. |
+| `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |
+| `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |
+| `native/apple/Sources/LinksClient/IOSLargeFileSession.swift` | iOS upload receipt, private MLS send, and decrypt orchestration. |
 | `native/android/client/src/main/java/ai/links/app/AndroidVideoTranscoder.java` | Android MediaCodec surface transcode, MP4 mux, and faststart boundary. |
 | `native/android/client/src/main/java/ai/links/app/Mp4FastStart.java` | Android MP4 `moov` relocation and `stco`/`co64` offset repair. |
+| `native/android/client/src/main/java/ai/links/app/AndroidLargeFileTransfer.java` | Android bounded ChaCha20-Poly1305 staging for video/files. |
+| `native/android/client/src/main/java/ai/links/app/AndroidLargeFileSession.java` | Android upload receipt, private MLS send, and decrypt orchestration. |
 
 ## Build and test
 

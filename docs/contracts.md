@@ -67,6 +67,14 @@ implementations and uses decoder/encoder surfaces with EGL scaling. Compatible
 AAC audio may be copied into the MP4. The server never receives the staging
 file, codec settings, or plaintext media.
 
+Video and arbitrary large files use the shared chunked ChaCha20-Poly1305
+attachment format. Plaintext chunks are at most 262,128 bytes and ciphertext
+chunks are at most 256 KiB. `MediaMetadata.original_size_bytes` and
+`encryption_chunk_bytes` are private MLS fields; the key, nonce, and complete
+ciphertext digest stay private too. Native iOS/Android staging, Web/WASM
+chunk helpers, and desktop file streams must use the same nonce/AAD derivation
+and verify the complete ciphertext digest before publishing plaintext.
+
 Large encrypted attachments may bypass blob storage through an authenticated,
 ordered and reliable WebRTC DataChannel. `links-client-core::p2p_transfer` and
 the Web `WebRtcFileTransfer` adapter use byte-compatible `LDT1` frames with

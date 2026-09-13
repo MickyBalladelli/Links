@@ -24,7 +24,7 @@ pub const DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES: usize = DESKTOP_IMAGE_MAX_PLAINTEX
 pub const DESKTOP_LARGE_FILE_CIPHERTEXT_CHUNK_BYTES: usize =
     links_client_core::attachments::LARGE_FILE_CIPHERTEXT_CHUNK_BYTES;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopEncryptedLargeFile {
     pub metadata: protocol::v1::MediaMetadata,
     pub ciphertext_path: PathBuf,
@@ -158,7 +158,10 @@ pub struct DesktopEncryptedImage {
 
 impl DesktopEncryptedImage {
     pub fn new(metadata: DesktopImageMetadata, ciphertext: Vec<u8>) -> Result<Self, CoreError> {
-        let image = Self { metadata, ciphertext };
+        let image = Self {
+            metadata,
+            ciphertext,
+        };
         image.validate()?;
         Ok(image)
     }
@@ -207,8 +210,11 @@ pub trait DesktopImageUploader: Send {
 
 pub trait DesktopImageRenderer: Send {
     /// The renderer must not retain plaintext after this call returns.
-    fn render(&mut self, plaintext: &[u8], metadata: &DesktopImageMetadata)
-        -> Result<(), CoreError>;
+    fn render(
+        &mut self,
+        plaintext: &[u8],
+        metadata: &DesktopImageMetadata,
+    ) -> Result<(), CoreError>;
 }
 
 pub trait DesktopImageCache: Send {
@@ -242,9 +248,7 @@ impl DesktopImageCache for DesktopImageFileCache {
         if !path.is_file() {
             return Ok(None);
         }
-        let size = fs::metadata(&path)
-            .map_err(|_| CoreError::Provider)?
-            .len();
+        let size = fs::metadata(&path).map_err(|_| CoreError::Provider)?.len();
         if size != metadata.ciphertext_size_bytes
             || size > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES as u64
         {
@@ -730,14 +734,8 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
         let attachment_id = uuid::Uuid::new_v4().to_string();
         let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
         let blur_hash = core.encode_image_blur_hash(rgb_pixels, width, height)?;
-        let image = core.encrypt_image(
-            image,
-            &attachment_id,
-            mime_type,
-            width,
-            height,
-            &blur_hash,
-        )?;
+        let image =
+            core.encrypt_image(image, &attachment_id, mime_type, width, height, &blur_hash)?;
         image.metadata.validate()?;
         Ok(image)
     }
@@ -770,8 +768,7 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
         protocol::validate_id(recipient_user_id)?;
         image.metadata.validate()?;
         if receipt.matches(&image.metadata)
-            && recipient_user_id
-                != self.core.lock().map_err(|_| CoreError::Provider)?.user_id()
+            && recipient_user_id != self.core.lock().map_err(|_| CoreError::Provider)?.user_id()
             && self.is_connected()
         {
             let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
@@ -841,8 +838,8 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
         }
         fs::create_dir_all(destination_directory).map_err(|_| CoreError::Provider)?;
         let attachment_id = uuid::Uuid::new_v4().to_string();
-        let ciphertext_path = destination_directory
-            .join(format!(".links-encrypted-{attachment_id}.blob"));
+        let ciphertext_path =
+            destination_directory.join(format!(".links-encrypted-{attachment_id}.blob"));
         let mut encryptor = LargeFileEncryptor::new(
             attachment_id,
             mime_type.to_owned(),
@@ -897,8 +894,7 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
         protocol::validate_id(recipient_user_id)?;
         file.validate()?;
         if !receipt.matches(&file.metadata)
-            || recipient_user_id
-                == self.core.lock().map_err(|_| CoreError::Provider)?.user_id()
+            || recipient_user_id == self.core.lock().map_err(|_| CoreError::Provider)?.user_id()
             || !self.is_connected()
         {
             return Err(CoreError::Authentication);

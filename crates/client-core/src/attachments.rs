@@ -64,16 +64,17 @@ impl LargeFileEncryptor {
     ) -> Result<Self, CoreError> {
         protocol::validate_id(&attachment_id)?;
         let valid_shape = match mime_type.as_str() {
-            "video/mp4" => width.is_some_and(|width| width > 0)
-                && height.is_some_and(|height| height > 0)
-                && duration_ms.is_some_and(|duration| duration > 0),
-            "application/octet-stream" => width.is_none()
-                && height.is_none()
-                && duration_ms.is_none(),
+            "video/mp4" => {
+                width.is_some_and(|width| width > 0)
+                    && height.is_some_and(|height| height > 0)
+                    && duration_ms.is_some_and(|duration| duration > 0)
+            }
+            "application/octet-stream" => {
+                width.is_none() && height.is_none() && duration_ms.is_none()
+            }
             _ => false,
         };
-        if !valid_shape
-        {
+        if !valid_shape {
             return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
                 "large file",
             )));
