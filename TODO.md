@@ -417,7 +417,9 @@ Add media after text delivery and multi-device sync are stable.
   Shared 720p/1080p profiles select H.264 or HEVC at 1.5/3 Mbps. iOS uses a
   hardware-required VideoToolbox session; Android uses hardware MediaCodec
   decoder/encoder surfaces with EGL scaling. Compatible AAC audio is preserved.
-- [ ] Use H.264/H.265 MP4 with target bitrates of 720p at 1.5 Mbps and 1080p at 3.0 Mbps.
+- [x] Use H.264/H.265 MP4 with target bitrates of 720p at 1.5 Mbps and 1080p at 3.0 Mbps.
+  Shared profiles enforce H.264 or HEVC MP4 output at 1280x720 / 1.5 Mbps or
+  1920x1080 / 3.0 Mbps, at 30 fps, across iOS and Android.
 - [ ] Place the `moov` atom at the file start (`faststart`).
 - [ ] Implement WebRTC DataChannel P2P direct file streaming for uncapped large transfers.
 - [ ] Add encrypted video and large-file transfer to clients after images and voice notes work.
