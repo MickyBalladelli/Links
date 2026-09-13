@@ -65,6 +65,11 @@ public protocol SharedClientCore: AnyObject {
                        metadata: IOSVoiceNoteMetadata,
                        receipt: IOSVoiceNoteUploadReceipt,
                        transport: any IOSCoreTransport) throws
+    /// Send private video/file metadata only after an exact ciphertext receipt.
+    func sendLargeFile(conversationID: String, recipientUserID: String,
+                       metadata: IOSLargeFileMetadata,
+                       receipt: IOSLargeFileUploadReceipt,
+                       transport: any IOSCoreTransport) throws
 }
 
 public protocol SharedCoreIdentitySigner: AnyObject {

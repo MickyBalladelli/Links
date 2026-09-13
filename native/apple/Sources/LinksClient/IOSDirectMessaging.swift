@@ -273,6 +273,24 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             metadata: metadata, receipt: receipt, transport: manager)
     }
 
+    /// Send private video/file metadata only after the exact ciphertext upload receipt.
+    public func sendLargeFile(conversationID: String, recipientUserID: String,
+                              metadata: IOSLargeFileMetadata,
+                              receipt: IOSLargeFileUploadReceipt) throws {
+        guard receipt.matches(metadata) else { throw IOSLargeFileError.invalidUploadReceipt }
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        try sharedCore.sendLargeFile(
+            conversationID: conversationID, recipientUserID: recipientUserID,
+            metadata: metadata, receipt: receipt, transport: manager)
+    }
+
     public func connectionManager(_ manager: IOSConnectionManager,
                                   didChange state: IOSConnectionManager.State) {
         lock.lock()

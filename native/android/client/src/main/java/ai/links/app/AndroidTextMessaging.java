@@ -62,6 +62,13 @@ public final class AndroidTextMessaging {
                 ConnectionManager connection) throws Exception {
             throw new IOException("Image core unavailable");
         }
+        /** Send private video/file metadata after its ciphertext receipt. */
+        default void sendLargeFile(String conversationId, String recipientUserId,
+                AndroidLargeFileTransfer.Metadata metadata,
+                AndroidLargeFileSession.UploadReceipt receipt,
+                ConnectionManager connection) throws Exception {
+            throw new IOException("Large-file core unavailable");
+        }
     }
 
     public interface Listener {
@@ -249,6 +256,23 @@ public final class AndroidTextMessaging {
                 throw new IOException("Image session is not connected");
         }
         bridge.sendImage(conversationId, recipientUserId, metadata, receipt, active);
+    }
+
+    /** Send private video/file metadata only after the exact ciphertext receipt. */
+    public void sendLargeFile(String conversationId, String recipientUserId,
+            AndroidLargeFileTransfer.Metadata metadata,
+            AndroidLargeFileSession.UploadReceipt receipt) throws Exception {
+        requireUuid(conversationId, "conversation ID");
+        requireUuid(recipientUserId, "recipient user ID");
+        if (metadata == null || receipt == null || !receipt.matches(metadata))
+            throw new IOException("Invalid large-file upload receipt");
+        ConnectionManager active;
+        synchronized (lock) {
+            active = connection;
+            if (state != State.READY || active == null || !active.isConnected())
+                throw new IOException("Large-file session is not connected");
+        }
+        bridge.sendLargeFile(conversationId, recipientUserId, metadata, receipt, active);
     }
 
     public void stop() {

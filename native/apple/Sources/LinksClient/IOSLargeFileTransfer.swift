@@ -7,6 +7,7 @@ public enum IOSLargeFileError: Error {
     case encryptionFailed
     case decryptionFailed
     case integrityFailure
+    case coreUnavailable
 }
 
 /// Private metadata for a chunk-encrypted MP4 or arbitrary large file.
@@ -83,15 +84,17 @@ public final class IOSLargeFileTransfer {
               sourceSize > 0 else {
             throw IOSLargeFileError.invalidInput
         }
-        let key = randomBytes(count: 32)
-        let nonce = randomBytes(count: 12)
+        let key = Self.randomBytes(count: 32)
+        let nonce = Self.randomBytes(count: 12)
         let outputURL = destinationDirectory.appendingPathComponent(
             ".links-encrypted-\(UUID().uuidString.lowercased()).blob")
         guard !FileManager.default.fileExists(atPath: outputURL.path) else {
             throw IOSLargeFileError.invalidInput
         }
         do {
-            FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+            guard FileManager.default.createFile(atPath: outputURL.path, contents: nil) else {
+                throw IOSLargeFileError.encryptionFailed
+            }
             let input = try FileHandle(forReadingFrom: source)
             let output = try FileHandle(forWritingTo: outputURL)
             defer {
@@ -101,15 +104,19 @@ public final class IOSLargeFileTransfer {
             var hash = SHA256()
             var chunkIndex: UInt64 = 0
             var ciphertextSize: UInt64 = 0
-            while let plaintext = try input.read(upToCount: Self.plaintextChunkBytes),
-                  !plaintext.isEmpty {
+            var plaintextSize: UInt64 = 0
+            while let plaintext = try Self.readChunk(input, capacity: Self.plaintextChunkBytes) {
                 let ciphertext = try Self.seal(
                     plaintext, key: key, nonce: nonce,
                     attachmentID: attachmentID, chunkIndex: chunkIndex)
                 try output.write(contentsOf: ciphertext)
                 hash.update(data: ciphertext)
+                plaintextSize = try Self.adding(plaintextSize, UInt64(plaintext.count))
                 ciphertextSize = try Self.adding(ciphertextSize, UInt64(ciphertext.count))
                 chunkIndex = try Self.adding(chunkIndex, 1)
+            }
+            guard plaintextSize == sourceSize else {
+                throw IOSLargeFileError.encryptionFailed
             }
             try output.synchronize()
             let metadata = try IOSLargeFileMetadata(
@@ -130,6 +137,9 @@ public final class IOSLargeFileTransfer {
                         metadata: IOSLargeFileMetadata) throws {
         try validate(metadata)
         guard FileManager.default.fileExists(atPath: source.path),
+              let sourceAttributes = try? FileManager.default.attributesOfItem(atPath: source.path),
+              let sourceSize = (sourceAttributes[.size] as? NSNumber)?.uint64Value,
+              sourceSize == metadata.ciphertextSizeBytes,
               !FileManager.default.fileExists(atPath: destination.path) else {
             throw IOSLargeFileError.invalidInput
         }
@@ -247,6 +257,21 @@ public final class IOSLargeFileTransfer {
 
     private static func randomBytes(count: Int) -> Data {
         var generator = SystemRandomNumberGenerator()
-        return Data((0..<count).map { _ in UInt8.random(in: .min... .max, using: &generator) })
+        return Data((0..<count).map { _ in
+            UInt8.random(in: UInt8.min...UInt8.max, using: &generator)
+        })
+    }
+
+    private static func readChunk(_ input: FileHandle, capacity: Int) throws -> Data? {
+        var chunk = Data()
+        chunk.reserveCapacity(capacity)
+        while chunk.count < capacity {
+            guard let part = try input.read(upToCount: capacity - chunk.count),
+                  !part.isEmpty else {
+                break
+            }
+            chunk.append(part)
+        }
+        return chunk.isEmpty ? nil : chunk
     }
 }
