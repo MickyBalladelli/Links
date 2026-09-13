@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use links_account_auth::{
-    provider::TwilioVerify,
     passkeys::PasskeyConfig,
+    provider::TwilioVerify,
     service::{AccountAuth, SystemClock},
     web,
 };

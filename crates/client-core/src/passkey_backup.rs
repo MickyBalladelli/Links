@@ -32,11 +32,7 @@ pub struct PasskeyPrfKey(Zeroizing<[u8; 32]>);
 
 impl PasskeyPrfKey {
     pub fn from_output(output: &[u8]) -> Result<Self, CoreError> {
-        let bytes = Zeroizing::new(
-            output
-                .try_into()
-                .map_err(|_| CoreError::Authentication)?,
-        );
+        let bytes = Zeroizing::new(output.try_into().map_err(|_| CoreError::Authentication)?);
         if *bytes == [0; 32] {
             return Err(CoreError::Authentication);
         }
@@ -120,13 +116,13 @@ impl PasskeyBackupEnvelope {
         let plaintext = Zeroizing::new(
             cipher
                 .decrypt(
-                Nonce::from_slice(parsed.nonce),
-                Payload {
-                    msg: parsed.ciphertext,
-                    aad: parsed.header,
-                },
-            )
-            .map_err(|_| CoreError::Authentication)?,
+                    Nonce::from_slice(parsed.nonce),
+                    Payload {
+                        msg: parsed.ciphertext,
+                        aad: parsed.header,
+                    },
+                )
+                .map_err(|_| CoreError::Authentication)?,
         );
         let seed: [u8; SEED_BYTES] = plaintext
             .as_slice()

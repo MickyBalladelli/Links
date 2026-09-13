@@ -21,11 +21,16 @@ impl PasskeyConfig {
     pub fn new(rp_id: String, origin: String) -> Result<Self, AuthError> {
         if rp_id.is_empty()
             || rp_id.len() > 253
+            || !valid_rp_id(&rp_id)
             || origin.is_empty()
             || origin.len() > 512
             || origin.contains('\n')
             || origin.contains('\r')
         {
+            return Err(AuthError::Invalid);
+        }
+        let origin_host = origin_host(&origin).ok_or(AuthError::Invalid)?;
+        if origin_host != rp_id && !origin_host.ends_with(&format!(".{rp_id}")) {
             return Err(AuthError::Invalid);
         }
         Ok(Self { rp_id, origin })
@@ -224,4 +229,41 @@ fn p256_key(public_key: &[u8; 64]) -> Result<VerifyingKey, AuthError> {
         false,
     );
     VerifyingKey::from_encoded_point(&point).map_err(|_| AuthError::Denied)
+}
+
+fn valid_rp_id(value: &str) -> bool {
+    if value == "localhost" {
+        return true;
+    }
+    value.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    })
+}
+
+fn origin_host(origin: &str) -> Option<&str> {
+    let authority = if let Some(value) = origin.strip_prefix("https://") {
+        value
+    } else if let Some(value) = origin.strip_prefix("http://localhost") {
+        if !value.is_empty() && !value.starts_with(':') {
+            return None;
+        }
+        return Some("localhost");
+    } else {
+        return None;
+    };
+    let authority = authority.split('/').next()?;
+    if authority.is_empty()
+        || authority.contains('@')
+        || authority.contains('?')
+        || authority.contains('#')
+    {
+        return None;
+    }
+    Some(authority.split(':').next()?)
 }

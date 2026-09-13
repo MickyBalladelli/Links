@@ -741,6 +741,10 @@ impl AccountAuth {
             .bind(now - CHALLENGE_TTL_MS as i64)
             .execute(&self.pool)
             .await?;
+        sqlx::query("DELETE FROM passkey_challenges WHERE expires_at_ms <= $1")
+            .bind(now - PASSKEY_CHALLENGE_TTL_MS as i64)
+            .execute(&self.pool)
+            .await?;
         sqlx::query("DELETE FROM auth_rate_limits WHERE window_start_ms <= $1")
             .bind(now - 3_600_000)
             .execute(&self.pool)
