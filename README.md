@@ -16,7 +16,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors and boundary validation. |
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, PRF-encrypted passkey backup, envelope orchestration and durable sync validation. |
-| `crates/server-store` | PostgreSQL repository/migrations, encrypted payload-store contract, Redis-shaped state contract and memory reference adapter. |
+| `crates/server-store` | PostgreSQL repository/migrations, encrypted payload-store contract, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and APNs/FCM wakeup contracts. |

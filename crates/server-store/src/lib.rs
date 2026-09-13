@@ -2,6 +2,7 @@
 pub mod ephemeral;
 pub mod payload;
 pub mod postgres;
+pub mod redis;
 
 use thiserror::Error;
 #[derive(Debug, Error)]

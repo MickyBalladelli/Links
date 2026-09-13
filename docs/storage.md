@@ -78,11 +78,13 @@ ack beyond high watermark, expiry GC, stale-cursor recovery, and crash between
 allocation and commit. Phase 0 tests input contracts; it does not claim these
 backend conformance cases have passed without an adapter.
 
-## Redis-shaped state: interface and local reference implementation
+## Redis state: implemented adapter and local reference implementation
 
 `EphemeralState` defines atomic bind, renew, unbind, route and token consumption.
-`MemoryEphemeralState` is a bounded single-process reference adapter with a mutex;
-it is not Redis, has no network connection, and loses all data on restart.
+`RedisEphemeralState` implements the production-shaped adapter with one key per
+session or bucket, Redis `TIME`, Lua atomicity and server-side TTLs.
+`MemoryEphemeralState` remains a bounded single-process reference adapter with a
+mutex; it has no network connection and loses all data on restart.
 Session values contain gateway locators, not socket objects or bearer tokens.
 Only the gateway process owns a socket; the shared route identifies its owner.
 
@@ -99,9 +101,10 @@ each map independently to the constructor's entry limit and prunes expired entri
 on writes. Invalid zero costs/capacities/refill rates and over-capacity costs fail.
 Keys must be namespaced opaque digests supplied by the service, not raw PII.
 
-A production Redis adapter used by `links-gateway` must implement the same CAS and token math atomically
-using Lua/transactions and Redis server time, plus TTLs. Use same-slot keys in
+`RedisEphemeralState` uses one-key Lua scripts for the same CAS and token math,
+Redis server time and TTLs. Its keys use per-device/per-bucket hash tags for
 Redis Cluster. Backend errors are errors, not permission to bypass rate limits;
 gateways fail closed for new sends and reconnect rather than assuming a missing
-route means a device is permanently offline. Redis deployment and its adapter are
-Phase 2, not implied by the in-memory reference tests.
+route means a device is permanently offline. The concrete Redis client must
+implement `RedisScriptExecutor` with TLS, authentication, timeouts, connection
+pooling and metrics that omit keys and values.

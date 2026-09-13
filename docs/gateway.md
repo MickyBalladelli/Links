@@ -43,8 +43,9 @@ The client wakes, reconnects over TLS and replays from its durable cursor.
 ## Production deployment
 
 Run at least two gateway instances per region behind a TLS 1.3 load balancer.
-Use a shared Redis-compatible `EphemeralState` with server-time Lua/CAS
-operations and a durable encrypted payload store shared by all regions. Route
+Use a shared `links-server-store::redis::RedisEphemeralState` with server-time
+Lua/CAS operations and a durable encrypted payload store shared by all regions.
+Route
 records must use the gateway's stable deployment ID, not a pod IP. Health checks
 must remove a gateway from new connections before termination; existing sockets
 receive a reconnect/close signal and their leases expire or are explicitly

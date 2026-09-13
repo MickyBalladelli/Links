@@ -128,7 +128,11 @@ Make encrypted messages reliably move between devices before adding richer clien
    protobuf delivery wrapper, exact per-gateway subjects and durable-publish
    adapter. Cluster provisioning, mTLS credentials and the concrete consumer
    client remain an operational release gate.
-- [ ] Build ephemeral Redis state for active WebSocket sessions, routing tables, and rate-limit buckets.
+- [x] Build ephemeral Redis state for active WebSocket sessions, routing tables, and rate-limit buckets.
+-  `RedisEphemeralState` provides single-key Lua/CAS session fencing, Redis
+   server-time expiry, per-device routing, and atomic token buckets. A concrete
+   TLS Redis client implementing `RedisScriptExecutor` and production rollout
+   remain deployment work.
 - [ ] Deploy the append-only encrypted payload store for undelivered envelopes.
 
 ### Synchronization and multi-device state
