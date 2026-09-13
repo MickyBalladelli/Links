@@ -97,9 +97,12 @@ Every recipient device has an independent mailbox. Appending allocates a strictl
 increasing positive cursor atomically with the record. No global/conversation
 counter is exposed in the routing envelope. The encrypted Message carries a
 strictly increasing sender-local sequence for each `(conversation_id,
-sender_device_id)` scope. Fanout allocates a separate mailbox entry per active
-recipient device; group/application ordering is authenticated inside the
-encrypted protocol rather than inferred from mailbox order. `ConversationSequence`
+sender_device_id)` scope. The sender obtains active recipient devices from an
+authenticated directory, encrypts the MLS application message once, and seals
+that ciphertext independently for each device. Fanout allocates a separate
+mailbox entry per active recipient device; the server never copies a
+recipient-bound envelope. Group/application ordering is authenticated inside
+the encrypted protocol rather than inferred from mailbox order. `ConversationSequence`
 allocates and accepts these private sequence values; the host persists its state
 with the MLS/outbox transaction.
 
@@ -152,10 +155,12 @@ key or sender identity enters the routing-visible envelope.
 
 Provider state mutations are not automatically transactional. Mobile/Web hosts
 must coordinate durable MLS state with inbox/outbox transactions before installing
-a real provider. `seal_message` is a single-recipient orchestration boundary, not
-an exactly-once send service or multi-device fanout implementation. Persist its
-output and reuse it on retry. Adapter error and crash-injection tests must prove
-state recovery before the security/delivery gates pass.
+a real provider. `seal_message` is a single-recipient convenience wrapper. For
+multi-device delivery, `seal_message_for_devices` performs one MLS encryption
+and creates one recipient-bound envelope per authenticated active device. Neither
+API is an exactly-once send service: persist every output and reuse the exact
+envelopes on retry. Adapter error and crash-injection tests must prove state
+recovery before the security/delivery gates pass.
 
 SecretBytes and KeyHandle zeroize their owned buffers and omit Debug. Generated
 protobuf structs omit Debug, but remain cloneable and are not zeroizing storage;

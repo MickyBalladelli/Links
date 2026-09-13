@@ -11,6 +11,7 @@ pub const VERSION: u32 = 1;
 pub const MAX_ENVELOPE_BYTES: usize = 256 * 1024;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_BATCH_ITEMS: usize = 100;
+pub const MAX_FANOUT_DEVICES: usize = 100;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;

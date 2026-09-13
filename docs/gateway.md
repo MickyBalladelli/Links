@@ -16,7 +16,7 @@ The lease contains only device ID, session ID, gateway locator and a 120-second
 expiry. Renew and close are compare-and-swap operations; an old socket cannot
 clear or use a newer connection after a cross-region reconnect.
 
-Sending follows this order:
+Sending follows this order for each envelope in a client-side fanout:
 
 1. Validate the opaque envelope and append it to the durable encrypted mailbox.
 2. Return `Accepted` only after the append/idempotency commit succeeds.
@@ -26,6 +26,13 @@ Sending follows this order:
 Forward or push failure leaves the mailbox row available for replay. Retrying
 the same envelope ID is idempotent. A client sends `Replay` after `Welcome` and
 sends `QueueAck` only after its local message/MLS transaction is durable.
+
+The sender obtains the target user's active device list from an authenticated
+directory. `links-client-core` encrypts the MLS message once and wraps that
+ciphertext separately for every device, with a distinct recipient-bound
+envelope ID. The gateway receives those envelopes independently; it does not
+need target-user metadata and never clones one device's sealed envelope into
+another queue.
 
 `RegionBus` is implemented for the first queue target by
 `links-queue::NatsRegionBus`. Its `GatewayDelivery` wrapper preserves the

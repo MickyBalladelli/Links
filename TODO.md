@@ -156,7 +156,12 @@ Make encrypted messages reliably move between devices before adding richer clien
    new client proves its Ed25519 key with a nonce-bound signature, and the
    server stores a distinct device/node/MLS credential. Adding that node to
    each existing MLS group still requires an authenticated member-add commit.
-- [ ] Fan out outbound encrypted envelopes to all active device queues for target users.
+- [x] Fan out outbound encrypted envelopes to all active device queues for target users.
+  `ClientCore::seal_message_for_devices` encrypts the MLS application message
+  once, then creates one independently sealed envelope per active recipient
+  device from an authenticated directory result. Each envelope keeps its own
+  recipient binding and ID, and the existing gateway appends/routes each one to
+  that device's mailbox without copying or inspecting ciphertext.
 
 ### Push and retention
 
