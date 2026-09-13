@@ -2,8 +2,8 @@
 
 `links-client-core::voice` defines the v1 voice-note profile. It accepts Opus
 at 16–24 kbps, 20 ms frames, 8/12/16/24/48 kHz input and mono or stereo
-channels. The current native encoder uses libopus in voice mode with CBR;
-VBR and DTX are a separate follow-up task.
+channels. The current native encoder uses libopus in voice mode with
+constrained VBR at the selected target and DTX for quiet frames.
 
 Both `.ogg` and `.opus` use the Ogg Opus page format. The profile maps them to
 `audio/ogg` and `audio/ogg; codecs=opus` respectively. `OggOpusWriter` emits `OpusHead`,

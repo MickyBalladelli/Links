@@ -374,8 +374,11 @@ Add media after text delivery and multi-device sync are stable.
   `links-client-core::voice` validates the fixed 20 ms voice profile, encodes
   native PCM with libopus, muxes packets into CRC-checked Ogg Opus pages, and
   accepts both container extensions. The encrypted Message carries matching
-  Opus metadata; VBR/DTX tuning remains the next task.
-- [ ] Enable VBR and DTX to suppress quiet pauses.
+  Opus metadata.
+- [x] Enable VBR and DTX to suppress quiet pauses.
+  Native libopus now uses constrained VBR at the selected 16–24 kbps target
+  and DTX for silent frames; the Ogg writer still keeps stream framing and
+  packet bounds strict.
 - [ ] Add voice-note recording, upload, download, decryption, and playback to Android and iOS.
 
 ### Images

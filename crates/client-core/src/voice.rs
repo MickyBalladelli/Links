@@ -5,6 +5,8 @@ use thiserror::Error;
 pub const MAX_VOICE_NOTE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_OPUS_PACKET_BYTES: usize = 1_275;
 pub const OPUS_PRESKIP_SAMPLES: u16 = 312;
+pub const OPUS_VBR_ENABLED: bool = true;
+pub const OPUS_DTX_ENABLED: bool = true;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum VoiceError {
@@ -580,8 +582,15 @@ impl NativeOpusEncoder {
         encoder
             .set_bitrate(opus::Bitrate::Bits((profile.bitrate_kbps * 1_000) as i32))
             .map_err(|_| VoiceError::Codec)?;
-        encoder.set_vbr(false).map_err(|_| VoiceError::Codec)?;
-        encoder.set_dtx(false).map_err(|_| VoiceError::Codec)?;
+        encoder
+            .set_vbr(OPUS_VBR_ENABLED)
+            .map_err(|_| VoiceError::Codec)?;
+        encoder
+            .set_vbr_constraint(true)
+            .map_err(|_| VoiceError::Codec)?;
+        encoder
+            .set_dtx(OPUS_DTX_ENABLED)
+            .map_err(|_| VoiceError::Codec)?;
         Ok(Self {
             profile,
             encoder,
