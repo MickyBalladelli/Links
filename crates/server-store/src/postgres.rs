@@ -34,6 +34,19 @@ pub enum GroupKind {
     Group,
     Channel,
 }
+
+pub struct PasskeyCredentialRecord {
+    pub credential_id: Vec<u8>,
+    pub public_key: [u8; 64],
+    pub sign_count: u32,
+}
+
+pub struct EncryptedKeyBackupRecord {
+    pub backup_id: Uuid,
+    pub device_id: Uuid,
+    pub credential_id: Vec<u8>,
+    pub encrypted_envelope: Vec<u8>,
+}
 impl GroupKind {
     fn as_str(self) -> &'static str {
         match self {
@@ -140,6 +153,131 @@ impl RelationalStore {
             return Err(StoreError::NotFound);
         }
         Ok(())
+    }
+
+    pub async fn register_passkey_credential(
+        &self,
+        user_id: Uuid,
+        credential_id: &[u8],
+        public_key: &[u8],
+        sign_count: u32,
+    ) -> Result<(), StoreError> {
+        if credential_id.is_empty() || credential_id.len() > 1024 || public_key.len() != 64 {
+            return Err(StoreError::Invalid);
+        }
+        let mut tx = self.pool.begin().await?;
+        require_active_account(&mut tx, user_id).await?;
+        sqlx::query(
+            "INSERT INTO passkey_credentials (user_id,credential_id,public_key,sign_count) VALUES ($1,$2,$3,$4)",
+        )
+        .bind(user_id)
+        .bind(credential_id)
+        .bind(public_key)
+        .bind(i64::from(sign_count))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn passkey_credential(
+        &self,
+        user_id: Uuid,
+        credential_id: &[u8],
+    ) -> Result<Option<PasskeyCredentialRecord>, StoreError> {
+        let row = sqlx::query(
+            "SELECT credential_id,public_key,sign_count FROM passkey_credentials pc JOIN accounts a USING (user_id) WHERE pc.user_id=$1 AND pc.credential_id=$2 AND a.disabled_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(credential_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            let public_key: [u8; 64] = row
+                .get::<Vec<u8>, _>("public_key")
+                .try_into()
+                .map_err(|_| StoreError::Invalid)?;
+            let sign_count = row.get::<i64, _>("sign_count");
+            if !(0..=u32::MAX as i64).contains(&sign_count) {
+                return Err(StoreError::Invalid);
+            }
+            Ok(PasskeyCredentialRecord {
+                credential_id: row.get("credential_id"),
+                public_key,
+                sign_count: sign_count as u32,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn put_encrypted_key_backup(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        backup_id: Uuid,
+        credential_id: &[u8],
+        encrypted_envelope: &[u8],
+    ) -> Result<(), StoreError> {
+        if backup_id.is_nil()
+            || device_id.is_nil()
+            || credential_id.is_empty()
+            || credential_id.len() > 1024
+            || !(128..=8192).contains(&encrypted_envelope.len())
+        {
+            return Err(StoreError::Invalid);
+        }
+        let mut tx = self.pool.begin().await?;
+        require_active_account(&mut tx, user_id).await?;
+        let existing = sqlx::query(
+            "SELECT backup_id,credential_id,encrypted_envelope FROM encrypted_key_backups WHERE user_id=$1 AND device_id=$2 FOR UPDATE",
+        )
+        .bind(user_id)
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(existing) = existing {
+            if existing.get::<Uuid, _>("backup_id") != backup_id
+                || existing.get::<Vec<u8>, _>("credential_id") != credential_id
+                || existing.get::<Vec<u8>, _>("encrypted_envelope") != encrypted_envelope
+            {
+                return Err(StoreError::Conflict);
+            }
+            tx.commit().await?;
+            return Ok(());
+        }
+        sqlx::query(
+            "INSERT INTO encrypted_key_backups (backup_id,user_id,device_id,credential_id,encrypted_envelope) VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(backup_id)
+        .bind(user_id)
+        .bind(device_id)
+        .bind(credential_id)
+        .bind(encrypted_envelope)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn encrypted_key_backup(
+        &self,
+        user_id: Uuid,
+        backup_id: Uuid,
+    ) -> Result<EncryptedKeyBackupRecord, StoreError> {
+        let row = sqlx::query(
+            "SELECT backup_id,device_id,credential_id,encrypted_envelope FROM encrypted_key_backups WHERE user_id=$1 AND backup_id=$2",
+        )
+        .bind(user_id)
+        .bind(backup_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+        Ok(EncryptedKeyBackupRecord {
+            backup_id: row.get("backup_id"),
+            device_id: row.get("device_id"),
+            credential_id: row.get("credential_id"),
+            encrypted_envelope: row.get("encrypted_envelope"),
+        })
     }
     pub async fn prekey_inventory(
         &self,

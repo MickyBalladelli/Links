@@ -1,4 +1,6 @@
+use super::passkey_backup::{PasskeyBackupEnvelope, PasskeyBackupSalt, PasskeyPrfKey};
 use crate::{protocol::validate_id, CoreError};
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 /// An opaque platform-keystore reference, never raw private key material.
@@ -70,6 +72,45 @@ impl<V: HardwareSeedVault> HardwareIdentityStore<V> {
         let seed = mnemonic
             .derive_identity_seed(passphrase)
             .map_err(|_| CoreError::Authentication)?;
+        self.vault.store_seed(seed.expose_for_wrapping())
+    }
+
+    /// Encrypt the existing hardware-backed identity with a WebAuthn PRF key.
+    /// The vault seed is read only for this call; only the sealed envelope may
+    /// leave the device.
+    pub fn backup_with_passkey(
+        &self,
+        key: &KeyHandle,
+        backup_id: Uuid,
+        device_id: Uuid,
+        credential_id: &[u8],
+        salt: PasskeyBackupSalt,
+        prf_output: &[u8],
+    ) -> Result<PasskeyBackupEnvelope, CoreError> {
+        let seed = IdentitySeed::from_vault(self.vault.load_seed(key)?);
+        let prf_key = PasskeyPrfKey::from_output(prf_output)?;
+        PasskeyBackupEnvelope::seal_identity_seed(
+            backup_id,
+            device_id,
+            credential_id,
+            salt,
+            &prf_key,
+            &seed,
+        )
+    }
+
+    /// Restore a sealed identity into the platform vault after the passkey PRF
+    /// has been evaluated locally. This is an explicit recovery operation.
+    pub fn restore_from_passkey(
+        &mut self,
+        envelope: &PasskeyBackupEnvelope,
+        backup_id: Uuid,
+        device_id: Uuid,
+        credential_id: &[u8],
+        prf_output: &[u8],
+    ) -> Result<KeyHandle, CoreError> {
+        let prf_key = PasskeyPrfKey::from_output(prf_output)?;
+        let seed = envelope.open_identity_seed(backup_id, device_id, credential_id, &prf_key)?;
         self.vault.store_seed(seed.expose_for_wrapping())
     }
 

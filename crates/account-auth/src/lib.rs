@@ -1,5 +1,6 @@
 //! Phone verification and proof-of-possession device enrollment.
 //! Never log request bodies, provider responses, phone digests or session tokens.
+pub mod passkeys;
 pub mod provider;
 pub mod service;
 pub mod web;

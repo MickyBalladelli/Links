@@ -1,4 +1,5 @@
 use crate::{
+    passkeys::{verify_assertion, verify_registration, PasskeyConfig},
     provider::{Channel, OtpProvider},
     AuthError,
 };
@@ -20,6 +21,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 pub const CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
+pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
@@ -89,6 +91,63 @@ pub struct AuthenticatedAccount {
     pub device_id: Uuid,
 }
 
+#[derive(Serialize)]
+pub struct PasskeyOptions {
+    pub challenge_id: Uuid,
+    pub challenge: String,
+    pub rp_id: String,
+    pub user_id: Uuid,
+    pub expires_at_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasskeyRegistrationFinishRequest {
+    pub challenge_id: Uuid,
+    pub credential_id: String,
+    pub client_data_json: String,
+    pub attestation_object: String,
+}
+
+#[derive(Serialize)]
+pub struct RegisteredPasskeyResponse {
+    pub credential_id: String,
+    pub sign_count: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasskeyAssertionFinishRequest {
+    pub challenge_id: Uuid,
+    pub credential_id: String,
+    pub client_data_json: String,
+    pub authenticator_data: String,
+    pub signature: String,
+}
+
+#[derive(Serialize)]
+pub struct PasskeyAssertionResponse {
+    pub credential_id: String,
+    pub sign_count: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EncryptedKeyBackupRequest {
+    pub backup_id: Uuid,
+    pub device_id: Uuid,
+    pub credential_id: String,
+    pub encrypted_envelope: String,
+}
+
+#[derive(Serialize)]
+pub struct EncryptedKeyBackupResponse {
+    pub backup_id: Uuid,
+    pub device_id: Uuid,
+    pub credential_id: String,
+    pub encrypted_envelope: String,
+}
+
 pub fn validate_phone(phone: &str) -> Result<(), AuthError> {
     let digits = phone.strip_prefix('+').ok_or(AuthError::Invalid)?;
     if !(8..=15).contains(&digits.len())
@@ -112,6 +171,18 @@ fn decode<const N: usize>(value: &str) -> Result<[u8; N], AuthError> {
         .try_into()
         .map_err(|_| AuthError::Invalid)
 }
+fn decode_blob(value: &str, max: usize) -> Result<Vec<u8>, AuthError> {
+    if value.len() > max.saturating_mul(2) {
+        return Err(AuthError::Invalid);
+    }
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| AuthError::Invalid)?;
+    if bytes.is_empty() || bytes.len() > max {
+        return Err(AuthError::Invalid);
+    }
+    Ok(bytes)
+}
 fn random() -> Result<[u8; 32], AuthError> {
     let mut bytes = [0; 32];
     getrandom::getrandom(&mut bytes).map_err(|_| AuthError::Unavailable)?;
@@ -123,6 +194,7 @@ pub struct AccountAuth {
     provider: Arc<dyn OtpProvider>,
     phone_lookup_key: Zeroizing<[u8; 32]>,
     clock: Arc<dyn Clock>,
+    passkey: Option<PasskeyConfig>,
 }
 impl AccountAuth {
     pub fn new(
@@ -139,7 +211,24 @@ impl AccountAuth {
             provider,
             phone_lookup_key,
             clock,
+            passkey: None,
         })
+    }
+
+    pub fn new_with_passkey(
+        pool: PgPool,
+        provider: Arc<dyn OtpProvider>,
+        phone_lookup_key: Zeroizing<[u8; 32]>,
+        clock: Arc<dyn Clock>,
+        passkey: PasskeyConfig,
+    ) -> Result<Self, AuthError> {
+        let mut auth = Self::new(pool, provider, phone_lookup_key, clock)?;
+        auth.passkey = Some(passkey);
+        Ok(auth)
+    }
+
+    fn passkey_config(&self) -> Result<&PasskeyConfig, AuthError> {
+        self.passkey.as_ref().ok_or(AuthError::Unavailable)
     }
     fn now(&self) -> Result<i64, AuthError> {
         let now = self.clock.now_ms();
@@ -364,6 +453,253 @@ impl AccountAuth {
             device_id: row.get("device_id"),
         })
     }
+
+    pub async fn passkey_registration_start(
+        &self,
+        token: &str,
+    ) -> Result<PasskeyOptions, AuthError> {
+        let account = self.authenticate(token).await?;
+        let config = self.passkey_config()?.clone();
+        let now = self.now()?;
+        let challenge = random()?;
+        let challenge_id = Uuid::new_v4();
+        let expires = now + PASSKEY_CHALLENGE_TTL_MS as i64;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE passkey_challenges SET state='failed' WHERE user_id=$1 AND purpose='registration' AND state='pending'",
+        )
+        .bind(account.user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO passkey_challenges (challenge_id,user_id,purpose,challenge,state,expires_at_ms) VALUES ($1,$2,'registration',$3,'pending',$4)",
+        )
+        .bind(challenge_id)
+        .bind(account.user_id)
+        .bind(challenge.as_slice())
+        .bind(expires)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(PasskeyOptions {
+            challenge_id,
+            challenge: encode(&challenge),
+            rp_id: config.rp_id,
+            user_id: account.user_id,
+            expires_at_ms: expires as u64,
+        })
+    }
+
+    pub async fn passkey_registration_finish(
+        &self,
+        token: &str,
+        request: PasskeyRegistrationFinishRequest,
+    ) -> Result<RegisteredPasskeyResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let config = self.passkey_config()?.clone();
+        let expected_credential_id = decode_blob(&request.credential_id, 1024)?;
+        let client_data_json = decode_blob(&request.client_data_json, 4096)?;
+        let attestation_object = decode_blob(&request.attestation_object, 8192)?;
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT challenge,state,expires_at_ms FROM passkey_challenges WHERE challenge_id=$1 AND user_id=$2 AND purpose='registration' FOR UPDATE",
+        )
+        .bind(request.challenge_id)
+        .bind(account.user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        let challenge: [u8; 32] = row
+            .get::<Vec<u8>, _>("challenge")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        if row.get::<String, _>("state") != "pending"
+            || row.get::<i64, _>("expires_at_ms") <= self.now()?
+        {
+            return Err(AuthError::Denied);
+        }
+        let credential = verify_registration(
+            &config,
+            &challenge,
+            &expected_credential_id,
+            &client_data_json,
+            &attestation_object,
+        )?;
+        sqlx::query(
+            "INSERT INTO passkey_credentials (user_id,credential_id,public_key,sign_count) VALUES ($1,$2,$3,$4)",
+        )
+        .bind(account.user_id)
+        .bind(&credential.credential_id)
+        .bind(credential.public_key.as_slice())
+        .bind(i64::from(credential.sign_count))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE passkey_challenges SET state='consumed' WHERE challenge_id=$1 AND state='pending'",
+        )
+        .bind(request.challenge_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(RegisteredPasskeyResponse {
+            credential_id: encode(&credential.credential_id),
+            sign_count: credential.sign_count,
+        })
+    }
+
+    pub async fn passkey_assertion_start(&self, token: &str) -> Result<PasskeyOptions, AuthError> {
+        let account = self.authenticate(token).await?;
+        let config = self.passkey_config()?.clone();
+        let now = self.now()?;
+        let challenge = random()?;
+        let challenge_id = Uuid::new_v4();
+        let expires = now + PASSKEY_CHALLENGE_TTL_MS as i64;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE passkey_challenges SET state='failed' WHERE user_id=$1 AND purpose='assertion' AND state='pending'",
+        )
+        .bind(account.user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO passkey_challenges (challenge_id,user_id,purpose,challenge,state,expires_at_ms) VALUES ($1,$2,'assertion',$3,'pending',$4)",
+        )
+        .bind(challenge_id)
+        .bind(account.user_id)
+        .bind(challenge.as_slice())
+        .bind(expires)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(PasskeyOptions {
+            challenge_id,
+            challenge: encode(&challenge),
+            rp_id: config.rp_id,
+            user_id: account.user_id,
+            expires_at_ms: expires as u64,
+        })
+    }
+
+    pub async fn passkey_assertion_finish(
+        &self,
+        token: &str,
+        request: PasskeyAssertionFinishRequest,
+    ) -> Result<PasskeyAssertionResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let config = self.passkey_config()?.clone();
+        let credential_id = decode_blob(&request.credential_id, 1024)?;
+        let client_data_json = decode_blob(&request.client_data_json, 4096)?;
+        let authenticator_data = decode_blob(&request.authenticator_data, 4096)?;
+        let signature = decode_blob(&request.signature, 1024)?;
+        let mut tx = self.pool.begin().await?;
+        let challenge_row = sqlx::query(
+            "SELECT challenge,state,expires_at_ms FROM passkey_challenges WHERE challenge_id=$1 AND user_id=$2 AND purpose='assertion' FOR UPDATE",
+        )
+        .bind(request.challenge_id)
+        .bind(account.user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        let challenge: [u8; 32] = challenge_row
+            .get::<Vec<u8>, _>("challenge")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        if challenge_row.get::<String, _>("state") != "pending"
+            || challenge_row.get::<i64, _>("expires_at_ms") <= self.now()?
+        {
+            return Err(AuthError::Denied);
+        }
+        let credential_row = sqlx::query(
+            "SELECT public_key,sign_count FROM passkey_credentials WHERE user_id=$1 AND credential_id=$2 FOR UPDATE",
+        )
+        .bind(account.user_id)
+        .bind(&credential_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        let public_key: [u8; 64] = credential_row
+            .get::<Vec<u8>, _>("public_key")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        let previous_sign_count = credential_row.get::<i64, _>("sign_count");
+        if !(0..=u32::MAX as i64).contains(&previous_sign_count) {
+            return Err(AuthError::Unavailable);
+        }
+        let sign_count = verify_assertion(
+            &config,
+            &challenge,
+            &client_data_json,
+            &authenticator_data,
+            &signature,
+            &public_key,
+            previous_sign_count as u32,
+        )?;
+        sqlx::query(
+            "UPDATE passkey_credentials SET sign_count=$3,last_used_at=now() WHERE user_id=$1 AND credential_id=$2",
+        )
+        .bind(account.user_id)
+        .bind(&credential_id)
+        .bind(i64::from(sign_count))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE passkey_challenges SET state='consumed' WHERE challenge_id=$1 AND state='pending'",
+        )
+        .bind(request.challenge_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(PasskeyAssertionResponse {
+            credential_id: encode(&credential_id),
+            sign_count,
+        })
+    }
+
+    pub async fn put_encrypted_key_backup(
+        &self,
+        token: &str,
+        request: EncryptedKeyBackupRequest,
+    ) -> Result<(), AuthError> {
+        let account = self.authenticate(token).await?;
+        if request.device_id != account.device_id {
+            return Err(AuthError::Denied);
+        }
+        let credential_id = decode_blob(&request.credential_id, 1024)?;
+        let encrypted_envelope = decode_blob(&request.encrypted_envelope, 8192)?;
+        validate_encrypted_backup_envelope(
+            request.backup_id,
+            request.device_id,
+            &credential_id,
+            &encrypted_envelope,
+        )?;
+        RelationalStore::from_pool(self.pool.clone())
+            .put_encrypted_key_backup(
+                account.user_id,
+                account.device_id,
+                request.backup_id,
+                &credential_id,
+                &encrypted_envelope,
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_encrypted_key_backup(
+        &self,
+        token: &str,
+        backup_id: Uuid,
+    ) -> Result<EncryptedKeyBackupResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let record = RelationalStore::from_pool(self.pool.clone())
+            .encrypted_key_backup(account.user_id, backup_id)
+            .await?;
+        Ok(EncryptedKeyBackupResponse {
+            backup_id: record.backup_id,
+            device_id: record.device_id,
+            credential_id: encode(&record.credential_id),
+            encrypted_envelope: encode(&record.encrypted_envelope),
+        })
+    }
     pub async fn prekey_inventory(&self, token: &str) -> Result<v1::PreKeyInventory, AuthError> {
         let account = self.authenticate(token).await?;
         Ok(RelationalStore::from_pool(self.pool.clone())
@@ -451,6 +787,37 @@ fn verify_prekey_upload(upload: &v1::PreKeyUpload) -> Result<(), AuthError> {
     verify_kem_prekey(&signing_key, &dh_key, last)?;
     for key in &upload.one_time_kem_prekeys {
         verify_kem_prekey(&signing_key, &dh_key, key)?;
+    }
+    Ok(())
+}
+
+fn validate_encrypted_backup_envelope(
+    backup_id: Uuid,
+    device_id: Uuid,
+    credential_id: &[u8],
+    envelope: &[u8],
+) -> Result<(), AuthError> {
+    // Keep this structural check on the server so a plaintext seed or an
+    // unrelated blob cannot be registered as a backup. AEAD verification stays
+    // on the device because the passkey PRF output never reaches this service.
+    if backup_id.is_nil()
+        || device_id.is_nil()
+        || !(1..=1024).contains(&credential_id.len())
+        || envelope.len() < 128
+        || envelope.len() > 8192
+        || envelope[0] != 1
+        || envelope[1] != 1
+        || envelope[2..18] != backup_id.as_bytes()[..]
+        || envelope[18..34] != device_id.as_bytes()[..]
+    {
+        return Err(AuthError::Invalid);
+    }
+    let credential_len = u16::from_be_bytes([envelope[34], envelope[35]]) as usize;
+    if credential_len != credential_id.len()
+        || envelope.len() != 128 + credential_len
+        || envelope[36..36 + credential_len] != credential_id[..]
+    {
+        return Err(AuthError::Invalid);
     }
     Ok(())
 }

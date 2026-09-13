@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod envelopes;
 pub mod identity;
 pub mod mls;
+pub mod passkey_backup;
 pub mod pqxdh;
 pub mod prekeys;
 pub mod sync;

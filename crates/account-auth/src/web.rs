@@ -1,5 +1,8 @@
 use crate::{
-    service::{AccountAuth, FinishRequest, StartRequest},
+    service::{
+        AccountAuth, EncryptedKeyBackupRequest, FinishRequest, PasskeyAssertionFinishRequest,
+        PasskeyRegistrationFinishRequest, StartRequest,
+    },
     AuthError,
 };
 use axum::{
@@ -21,6 +24,17 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/auth/finish", post(finish))
         .route("/v1/auth/me", get(me))
         .layer(DefaultBodyLimit::max(4096));
+    let passkey_routes = Router::new()
+        .route("/v1/passkeys/register/start", post(passkey_register_start))
+        .route(
+            "/v1/passkeys/register/finish",
+            post(passkey_register_finish),
+        )
+        .route("/v1/passkeys/assert/start", post(passkey_assert_start))
+        .route("/v1/passkeys/assert/finish", post(passkey_assert_finish))
+        .route("/v1/passkey-backups", put(put_passkey_backup))
+        .route("/v1/passkey-backups/{backup_id}", get(get_passkey_backup))
+        .layer(DefaultBodyLimit::max(16 * 1024));
     let prekey_routes = Router::new()
         .route("/v1/prekeys", put(upload_prekeys))
         .route("/v1/prekeys/status", get(prekey_inventory))
@@ -28,6 +42,7 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .layer(DefaultBodyLimit::max(MAX_PREKEY_UPLOAD_BYTES));
     Router::new()
         .merge(auth_routes)
+        .merge(passkey_routes)
         .merge(prekey_routes)
         .layer(middleware::from_fn(no_store))
         .with_state(auth)
@@ -63,6 +78,68 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(auth.authenticate(bearer(&headers)?).await?))
+}
+async fn passkey_register_start(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.passkey_registration_start(bearer(&headers)?).await?,
+    ))
+}
+async fn passkey_register_finish(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<PasskeyRegistrationFinishRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.passkey_registration_finish(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn passkey_assert_start(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.passkey_assertion_start(bearer(&headers)?).await?))
+}
+async fn passkey_assert_finish(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<PasskeyAssertionFinishRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.passkey_assertion_finish(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn put_passkey_backup(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<EncryptedKeyBackupRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.put_encrypted_key_backup(
+        bearer(&headers)?,
+        request.map_err(|_| AuthError::Invalid)?.0,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn get_passkey_backup(
+    State(auth): State<Arc<AccountAuth>>,
+    Path(backup_id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.get_encrypted_key_backup(bearer(&headers)?, backup_id)
+            .await?,
+    ))
 }
 async fn upload_prekeys(
     State(auth): State<Arc<AccountAuth>>,
