@@ -9,6 +9,7 @@ import type {
   WebImageUploadReceipt,
   WebEncryptedImage
 } from './WebImages'
+import { validateWebImageMetadata, validateWebImageUploadReceipt } from './WebImages'
 
 export interface WebCoreTransport {
   send(frame: Uint8Array): boolean
@@ -179,6 +180,8 @@ export class WebTextMessaging implements WebCoreTransport {
   ): void {
     requireCanonicalUUID(conversationID, 'conversation ID')
     requireCanonicalUUID(recipientUserID, 'recipient user ID')
+    validateWebImageMetadata(metadata)
+    validateWebImageUploadReceipt(receipt)
     if (receipt.attachmentID !== metadata.attachmentID ||
         receipt.ciphertextSizeBytes !== metadata.ciphertextSizeBytes ||
         !sameBytes(receipt.ciphertextSHA256, metadata.ciphertextSHA256)) {

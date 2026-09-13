@@ -221,7 +221,12 @@ fn validate_image_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
             "image metadata",
         )));
     }
-    images::resized_dimensions(media.width.unwrap(), media.height.unwrap())?;
+    let width = media.width.unwrap();
+    let height = media.height.unwrap();
+    let dimensions = images::resized_dimensions(width, height)?;
+    if dimensions.width != width || dimensions.height != height {
+        return Err(CoreError::Image(images::ImageError::InvalidDimensions));
+    }
     Ok(())
 }
 

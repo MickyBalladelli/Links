@@ -123,7 +123,7 @@ export class WebEncryptedImageCache {
   }
 
   async read(metadata: WebImageMetadata): Promise<Uint8Array | null> {
-    validateMetadata(metadata)
+    validateWebImageMetadata(metadata)
     const cache = await this.storage.open(WEB_IMAGE_CACHE_NAME)
     const response = await cache.match(cacheKey(metadata.attachmentID))
     if (response === undefined) return null
@@ -220,6 +220,9 @@ export class WebImageSession {
 
   async upload(image: WebEncryptedImage): Promise<WebImageUploadReceipt> {
     validateEncryptedImage(image)
+    if (!await hasDigest(image.ciphertext, image.metadata.ciphertextSHA256)) {
+      throw new Error('Invalid Web image ciphertext digest')
+    }
     const receipt = await this.uploader.upload(this.requireAccessToken(), image)
     if (!matchesReceipt(image.metadata, receipt)) {
       throw new Error('Invalid Web image upload receipt')
@@ -244,7 +247,7 @@ export class WebImageSession {
     metadata: WebImageMetadata,
     renderer: WebImageRenderer
   ): Promise<void> {
-    validateMetadata(metadata)
+    validateWebImageMetadata(metadata)
     if (this.core.decryptImage === undefined) {
       throw new Error('Web image core unavailable')
     }
@@ -316,7 +319,7 @@ function encodeLossy(canvas: HTMLCanvasElement, mimeType: WebImageMimeType): Pro
   })
 }
 
-function validateMetadata(metadata: WebImageMetadata): void {
+export function validateWebImageMetadata(metadata: WebImageMetadata): void {
   requireCanonicalUUID(metadata.attachmentID, 'attachment ID')
   if ((metadata.mimeType !== 'image/webp' && metadata.mimeType !== 'image/avif') ||
       metadata.ciphertextSizeBytes < 17n ||
@@ -331,8 +334,17 @@ function validateMetadata(metadata: WebImageMetadata): void {
   }
 }
 
+export function validateWebImageUploadReceipt(receipt: WebImageUploadReceipt): void {
+  requireCanonicalUUID(receipt.attachmentID, 'attachment ID')
+  if (receipt.ciphertextSizeBytes < 17n ||
+      receipt.ciphertextSizeBytes > BigInt(WEB_IMAGE_MAX_CIPHERTEXT_BYTES) ||
+      receipt.ciphertextSHA256.length !== 32) {
+    throw new Error('Invalid Web image upload receipt')
+  }
+}
+
 function validateEncryptedImage(image: WebEncryptedImage): void {
-  validateMetadata(image.metadata)
+  validateWebImageMetadata(image.metadata)
   if (BigInt(image.ciphertext.length) !== image.metadata.ciphertextSizeBytes ||
       image.ciphertext.length < 17 ||
       image.ciphertext.length > WEB_IMAGE_MAX_CIPHERTEXT_BYTES) {
@@ -341,6 +353,7 @@ function validateEncryptedImage(image: WebEncryptedImage): void {
 }
 
 function matchesReceipt(metadata: WebImageMetadata, receipt: WebImageUploadReceipt): boolean {
+  validateWebImageUploadReceipt(receipt)
   return receipt.attachmentID === metadata.attachmentID &&
     receipt.ciphertextSizeBytes === metadata.ciphertextSizeBytes &&
     sameBytes(receipt.ciphertextSHA256, metadata.ciphertextSHA256)
