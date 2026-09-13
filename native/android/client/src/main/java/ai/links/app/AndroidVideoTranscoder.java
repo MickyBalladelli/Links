@@ -204,7 +204,7 @@ public final class AndroidVideoTranscoder {
                     } else if (outputIndex >= 0) {
                         boolean endOfStream = (decoderInfo.flags
                                 & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
-                        if (decoderInfo.size > 0 && !endOfStream) {
+                        if (!endOfStream) {
                             decoder.releaseOutputBuffer(outputIndex, true);
                             decoderSurface.drawFrame(encoderSurface, decoderInfo.presentationTimeUs);
                             lastVideoPtsUs = Math.max(lastVideoPtsUs, decoderInfo.presentationTimeUs);
