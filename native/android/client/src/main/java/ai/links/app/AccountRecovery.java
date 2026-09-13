@@ -6,8 +6,6 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.UUID;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 /** Explicit Android account recovery coordinator. Secrets stay in this process. */
 public final class AccountRecovery {
