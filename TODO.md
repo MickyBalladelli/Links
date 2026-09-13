@@ -325,7 +325,11 @@ These clients join an existing account as additional MLS device nodes. They do n
   pairing URI text, and accepts only a matching validated MLS credential from
   mobile approval. Browser storage, WebSocket sync, and text UI remain the
   following Web client tasks.
-- [ ] Implement Web connection manager with exponential backoff, reconnect, and heartbeating.
+- [x] Implement Web connection manager with exponential backoff, reconnect, and heartbeating.
+  `web/src/WebConnectionManager.ts` uses binary `links.v1` WebSockets, sends
+  Hello within five seconds, enforces the 1 MiB frame limit, reconnects with
+  full jitter from 1 to 30 seconds, and keeps bearer tokens out of URLs. Browser
+  ping/pong is handled by the platform; the manager checks socket liveness.
 - [ ] Implement encrypted 1-to-1 text sync across mobile and Web.
 
 ### Desktop client

@@ -38,6 +38,12 @@ export interface WebClientSnapshot {
   registered: boolean
 }
 
+export { WebConnectionManager } from './WebConnectionManager'
+export type {
+  WebConnectionManagerOptions,
+  WebConnectionState
+} from './WebConnectionManager'
+
 const MAX_CREDENTIAL_BYTES = 1024
 
 function requireCanonicalUUID(value: string, field: string): string {

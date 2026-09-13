@@ -22,6 +22,16 @@ mobile side submits only `device_id`, `mls_node_id`, `public_key`, `nonce`, and
 and MLS credential to `completePairing()`. WASM verifies that the credential is
 the expected Links BasicCredential and matches this exact Web device identity.
 
+`WebConnectionManager` owns the browser `wss://<host>/v1/connect` lifecycle.
+It requests the `links.v1` subprotocol, sends one binary Hello frame within five
+seconds, rejects text or oversized frames, and reports binary ServerFrame bytes
+to the shared-core host callback. It reconnects with full jitter and exponential
+backoff, capped at 30 seconds, resetting after a stable 30-second connection.
+Browser WebSocket APIs automatically answer server ping frames and do not expose
+ping/pong callbacks; the manager therefore uses the browser's close/error events
+and periodic open-state checks for liveness. It never puts a bearer token in the
+endpoint URL.
+
 The seed never crosses the WASM/TypeScript boundary. Do not put it in
 `localStorage`, URLs, analytics, or logs. The current facade keeps it in memory;
 refresh or process loss requires a fresh explicit pairing until a durable,
@@ -34,5 +44,5 @@ Build the Web-facing WASM package from the `web` directory:
 npm run build:wasm
 ```
 
-This is the Web identity/pairing foundation. WebSocket reconnect, cursor replay,
+This is the Web identity/pairing and connection foundation. Cursor replay,
 encrypted text orchestration, and browser UI are separate roadmap tasks.
