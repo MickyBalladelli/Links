@@ -109,10 +109,7 @@ async fn directory_lookup(
     if handle.is_empty() || handle.starts_with('@') {
         return Err(AuthError::Invalid);
     }
-    match auth
-        .lookup_username_directory(handle, peer.ip())
-        .await?
-    {
+    match auth.lookup_username_directory(handle, peer.ip()).await? {
         Some(directory) => Ok(Json(directory).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }

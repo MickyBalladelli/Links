@@ -453,7 +453,11 @@ Add discovery options after the basic phone-based account works.
   Shared identity APIs derive Ed25519 keys locally from generated 12/24-word
   mnemonics or user-verified WebAuthn PRF output. WASM, Apple, and Android
   wrappers expose the same local-only flow and hardware-seal the result.
-- [ ] Deploy global key directory lookup for `@usernames`.
+- [x] Deploy global key directory lookup for `@usernames`.
+  The account service exposes a no-store, rate-limited `GET /v1/directory/{handle}`
+  endpoint backed by the shared PostgreSQL control plane. It returns active
+  device identity keys and MLS credentials only; disabled accounts and revoked
+  devices are excluded, and one-time pre-key claims remain separate.
 
 ### Private contact discovery
 

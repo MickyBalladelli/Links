@@ -7,6 +7,11 @@ claim/lookup, device-node enrollment/list/revocation, group creation, role grant
 and member removal. SQLx uses bound parameters. Migrations are embedded and run
 explicitly; application startup must not implicitly migrate an arbitrary database.
 
+`lookup_handle_directory` reads the globally authoritative active handle,
+account, and non-revoked device rows in one public-key directory query. It
+returns only device IDs, MLS node IDs, identity public keys, and MLS
+credentials; pre-key claims remain a separate authenticated atomic operation.
+
 `accounts` stores a unique keyed 32-byte authentication-subject lookup digest, not
 a raw phone number, OTP, or unkeyed phone hash. Pseudonymous username accounts
 leave that subject NULL and set `account_kind='pseudonymous'`; their first-party

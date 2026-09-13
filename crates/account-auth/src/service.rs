@@ -345,8 +345,7 @@ impl AccountAuth {
     ) -> Result<(), AuthError> {
         let handle_minute_key =
             self.digest(b"links/directory-handle-minute/v1\0", handle.as_bytes());
-        let handle_hour_key =
-            self.digest(b"links/directory-handle-hour/v1\0", handle.as_bytes());
+        let handle_hour_key = self.digest(b"links/directory-handle-hour/v1\0", handle.as_bytes());
         let ip_key = self.digest(b"links/directory-ip/v1\0", peer_ip.to_string().as_bytes());
         let mut tx = self.pool.begin().await?;
         let mut limited = false;

@@ -81,8 +81,19 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /finish` | `challenge_id`, `code`, `signature` | A device-scoped bearer access token, expiry, user ID and device ID. |
 | `POST /v1/auth/username/register` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Creates a pseudonymous account and returns its session, handle, and MLS credential. |
 | `POST /v1/auth/username/login` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Returns a session after the registered device key proves possession. |
+| `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's public identity key, MLS node ID and MLS credential. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
 | `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
+
+The username directory is globally backed by the authoritative PostgreSQL
+control plane. It returns only active accounts and non-revoked device public
+material; disabled accounts and revoked devices disappear from the result. All
+responses use `Cache-Control: no-store`, and the endpoint applies independent
+per-handle and per-source rate limits. A missing handle returns `404` without
+revealing account-authentication state. The lookup does not consume one-time
+pre-keys: an authenticated sender claims each returned device's bundle through
+`POST /v1/prekeys/{device_id}/claim`, then verifies the signed bundle before
+starting PQXDH.
 
 The phone must already be canonical E.164: `+` followed by 8–15 ASCII digits, with
 a nonzero country-code prefix. This is format validation, not proof that a number

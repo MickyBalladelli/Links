@@ -22,7 +22,7 @@ remain open.
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts and MLS basic credentials. |
-| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
+| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, and the internal Android text-messaging shell. |
@@ -35,6 +35,7 @@ remain open.
 | `docs/blob-storage.md` | S3-compatible encrypted attachment storage and Cloudflare/CloudFront edge deployment contract. |
 | `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
+| `docs/directory.md` | Global `@username` lookup, active-device public keys, revocation visibility and pre-key handoff. |
 | `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 | `docs/pairing.md` | Canonical device-pairing QR URI, signature verification and client flow. |
