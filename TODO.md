@@ -147,7 +147,10 @@ Make encrypted messages reliably move between devices before adding richer clien
    `cursor` is assigned transactionally per recipient-device mailbox by the
    payload store. Both reject reuse and preserve replay ordering without
    exposing conversation metadata to routing services.
-- [ ] Implement connection replay: the client sends `last_seen_cursor`, and the server returns the missing delta payloads.
+- [x] Implement connection replay: the client sends `last_seen_cursor`, and the server returns the missing delta payloads.
+-  `Gateway::open` now reads the authenticated device mailbox after Hello and
+   returns Welcome plus the first contiguous SyncBatch. Explicit Replay remains
+   available for pagination; stale cursors fail with CursorExpired.
 - [ ] Register every physical client as a distinct MLS identity node under the primary user account.
 - [ ] Fan out outbound encrypted envelopes to all active device queues for target users.
 

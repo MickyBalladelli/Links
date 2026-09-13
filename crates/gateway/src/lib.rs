@@ -218,7 +218,7 @@ where
         &self,
         frame: v1::ClientFrame,
         now_ms: u64,
-    ) -> Result<(GatewaySession, GatewayAction), GatewayError> {
+    ) -> Result<(GatewaySession, Vec<GatewayAction>), GatewayError> {
         validate_request(&frame)?;
         let request_id = frame.request_id.clone();
         let Some(v1::client_frame::Body::Hello(hello)) = frame.body else {
@@ -242,7 +242,7 @@ where
         self.state
             .bind(
                 SessionLease {
-                    device_id: hello.device_id,
+                    device_id: hello.device_id.clone(),
                     session_id: session_id.clone(),
                     gateway_id: self.config.gateway_id.clone(),
                     expires_at_ms,
@@ -250,6 +250,35 @@ where
                 now_ms,
             )
             .await?;
+        let batch = match self
+            .queue
+            .read(ReadRequest::new(
+                hello.device_id.clone(),
+                hello.last_seen_cursor,
+                protocol::MAX_BATCH_ITEMS as u32,
+                now_ms,
+            )?)
+            .await
+        {
+            Ok(batch) => batch,
+            Err(error) => {
+                let _ = self.state.unbind(&hello.device_id, &session_id).await;
+                return Err(error.into());
+            }
+        };
+        let mut actions = vec![GatewayAction::Server(v1::ServerFrame {
+            request_id: request_id.clone(),
+            body: Some(v1::server_frame::Body::Welcome(v1::Welcome {
+                protocol_version: protocol::VERSION,
+                heartbeat_seconds: (HEARTBEAT_INTERVAL_MS / 1000) as u32,
+            })),
+        })];
+        if !batch.items.is_empty() {
+            actions.push(GatewayAction::Server(v1::ServerFrame {
+                request_id,
+                body: Some(v1::server_frame::Body::Batch(batch)),
+            }));
+        }
         Ok((
             GatewaySession {
                 user_id: authenticated.user_id,
@@ -257,13 +286,7 @@ where
                 session_id,
                 last_ack_cursor: hello.last_seen_cursor,
             },
-            GatewayAction::Server(v1::ServerFrame {
-                request_id,
-                body: Some(v1::server_frame::Body::Welcome(v1::Welcome {
-                    protocol_version: protocol::VERSION,
-                    heartbeat_seconds: (HEARTBEAT_INTERVAL_MS / 1000) as u32,
-                })),
-            }),
+            actions,
         ))
     }
 

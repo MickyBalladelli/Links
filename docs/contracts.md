@@ -55,6 +55,9 @@ device ID, a short-lived device-scoped access token, and the last durable cursor
 Do not put tokens into query strings or log them. The gateway validates
 the token against an active account/device, binds all replay/ack actions to that
 device, validates browser Origin against an allowlist, and returns Welcome.
+The gateway immediately reads the mailbox after `last_seen_cursor` and returns
+the first missing contiguous `SyncBatch` after Welcome; a stale cursor fails
+with `CURSOR_EXPIRED` and requires explicit resync.
 The request ID is a UUID used only for response correlation, not authentication
 or durable message idempotency. Outbound envelopes may target another device;
 inbound queue reads and acks may only target the authenticated local device.
@@ -106,6 +109,10 @@ cursor. Items must be contiguous. Purged or expired entries remain tombstones
 for the replay window; absent data is never silently interpreted as delivered.
 An empty batch is legal only when its cursor equals the high watermark. A page
 may stop before that watermark due to the item or byte limit.
+
+The initial connection replay uses the same `last_seen_cursor` from Hello and
+the same batch contract. Clients persist/decrypt/process the returned batch,
+then emit cumulative QueueAck only after their local durable transaction.
 
 `SyncState::prepare` validates the batch without advancing state. The host first
 persists received entries, MLS state, message-ID deduplication and the returned

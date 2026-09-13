@@ -3,7 +3,9 @@
 `links-gateway` is the transport-neutral core for the public WebSocket edge. A
 small adapter owns the actual `wss://.../v1/connect` socket and calls
 `decode_client_frame`, `Gateway::open`, `Gateway::handle` and
-`encode_server_frame`. The core never logs or decrypts sealed message bytes.
+`encode_server_frame`. `Gateway::open` returns `Welcome` followed by the
+initial `SyncBatch` when `Hello.last_seen_cursor` has missing items. The core
+never logs or decrypts sealed message bytes.
 
 ## Regional flow
 
