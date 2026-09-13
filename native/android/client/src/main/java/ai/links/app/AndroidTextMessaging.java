@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * Android one-to-one text session. The injected bridge owns shared Rust
  * send/receive state, MLS persistence, protobuf framing and local rendering.
- * This shell exposes no group, media or call operation.
+ * Voice notes are exposed through the separate AndroidVoiceNotes pipeline.
  */
 public final class AndroidTextMessaging {
     public static final int MAX_TEXT_BYTES = 64 * 1024;

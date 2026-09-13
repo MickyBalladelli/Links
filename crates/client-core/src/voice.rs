@@ -616,6 +616,31 @@ impl NativeOpusEncoder {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+/// Encode interleaved PCM, padding only the final 20 ms frame when needed.
+/// The duration carried in private media metadata remains the unpadded capture
+/// duration supplied by the host.
+pub fn encode_ogg_opus(pcm: &[i16], profile: OpusVoiceProfile) -> Result<Vec<u8>, VoiceError> {
+    profile.validate()?;
+    if pcm.is_empty() {
+        return Err(VoiceError::InvalidConfiguration);
+    }
+    let frame_samples = profile.frame_samples()?;
+    let mut serial_bytes = [0u8; 4];
+    getrandom::fill(&mut serial_bytes).map_err(|_| VoiceError::Codec)?;
+    let mut encoder = NativeOpusEncoder::new(profile, u32::from_le_bytes(serial_bytes))?;
+    for frame in pcm.chunks(frame_samples) {
+        if frame.len() == frame_samples {
+            encoder.encode_frame(frame)?;
+        } else {
+            let mut padded = vec![0i16; frame_samples];
+            padded[..frame.len()].copy_from_slice(frame);
+            encoder.encode_frame(&padded)?;
+        }
+    }
+    encoder.finish()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode a validated Ogg Opus voice note into interleaved signed PCM.
 /// Playback hosts use this after attachment decryption; the server never sees
 /// or invokes this decoder.
@@ -718,5 +743,10 @@ impl NativeOpusEncoder {
 
 #[cfg(target_arch = "wasm32")]
 pub fn decode_ogg_opus(_data: &[u8], _profile: OpusVoiceProfile) -> Result<Vec<i16>, VoiceError> {
+    Err(VoiceError::CodecUnavailable)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn encode_ogg_opus(_pcm: &[i16], _profile: OpusVoiceProfile) -> Result<Vec<u8>, VoiceError> {
     Err(VoiceError::CodecUnavailable)
 }

@@ -19,6 +19,10 @@ writer but does not compile native libopus; a browser host may provide Opus
 packets from WebCodecs or another reviewed browser codec and pass them to the
 same writer.
 
+`encode_ogg_opus` is the native host helper for a complete PCM recording. It
+pads only a partial final 20 ms frame; the private duration metadata still
+records the unpadded capture duration.
+
 The resulting container is still media plaintext at the codec boundary. The
 host must encrypt the complete container as an attachment using the existing
 E2EE provider. `OpusAudioMetadata` is placed inside the encrypted `Message`

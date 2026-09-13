@@ -27,6 +27,11 @@ updates, Sealed Sender envelopes, durable outbox/inbox commits, replay cursors,
 and delivery receipts. Core work runs off the main queue; the host receives
 committed text events on its chosen callback queue.
 
+`IOSVoiceNoteSession` uses the same connected core for Opus encoding,
+attachment encryption, private media send, attachment download/decryption, and
+Opus-to-PCM playback. Its uploader boundary handles ciphertext only and must
+return an exact ID/size/digest receipt before media metadata is sent.
+
 `IOSAPNsWakeup` accepts only the gateway's silent payload fields:
 `aps.content-available`, `recipient_device_id`, and the positive decimal
 `cursor`. `IOSMissingMessageRecovery` ignores the cursor as a checkpoint,

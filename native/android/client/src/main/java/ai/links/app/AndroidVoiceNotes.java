@@ -281,6 +281,9 @@ public final class AndroidVoiceNotes {
         try (FileOutputStream output = new FileOutputStream(playbackFile)) {
             output.write(plaintext);
             output.flush();
+        } catch (Exception error) {
+            deleteQuietly(playbackFile);
+            throw error;
         } finally {
             Arrays.fill(plaintext, (byte) 0);
         }
