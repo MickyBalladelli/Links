@@ -1,8 +1,12 @@
-use links_client_core::{protocol, CoreError};
+use links_client_core::{
+    attachments::{decrypt_large_file, validate_large_file_metadata, LargeFileEncryptor},
+    protocol, CoreError,
+};
 use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
     fs,
+    io::{Read, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -17,6 +21,73 @@ pub const DESKTOP_MAX_TEXT_BYTES: usize = 64 * 1024;
 pub const DESKTOP_IMAGE_MAX_EDGE: u32 = 1_600;
 pub const DESKTOP_IMAGE_MAX_PLAINTEXT_BYTES: usize = 32 * 1024 * 1024;
 pub const DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES: usize = DESKTOP_IMAGE_MAX_PLAINTEXT_BYTES + 16;
+pub const DESKTOP_LARGE_FILE_CIPHERTEXT_CHUNK_BYTES: usize =
+    links_client_core::attachments::LARGE_FILE_CIPHERTEXT_CHUNK_BYTES;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopEncryptedLargeFile {
+    pub metadata: protocol::v1::MediaMetadata,
+    pub ciphertext_path: PathBuf,
+}
+
+impl DesktopEncryptedLargeFile {
+    pub fn validate(&self) -> Result<(), CoreError> {
+        validate_large_file_metadata(&self.metadata)?;
+        let file_metadata = fs::metadata(&self.ciphertext_path).map_err(|_| CoreError::Provider)?;
+        if file_metadata.len() != self.metadata.ciphertext_size_bytes {
+            return Err(CoreError::Authentication);
+        }
+        let mut file = fs::File::open(&self.ciphertext_path).map_err(|_| CoreError::Provider)?;
+        let mut digest = Sha256::new();
+        let mut size = 0u64;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer).map_err(|_| CoreError::Provider)?;
+            if read == 0 {
+                break;
+            }
+            digest.update(&buffer[..read]);
+            size = size
+                .checked_add(read as u64)
+                .ok_or(CoreError::Authentication)?;
+        }
+        if size != self.metadata.ciphertext_size_bytes
+            || digest.finalize().as_slice() != self.metadata.ciphertext_sha256.as_slice()
+        {
+            return Err(CoreError::Authentication);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopLargeFileUploadReceipt {
+    pub attachment_id: String,
+    pub ciphertext_size_bytes: u64,
+    pub ciphertext_sha256: Vec<u8>,
+}
+
+impl DesktopLargeFileUploadReceipt {
+    pub fn matches(&self, metadata: &protocol::v1::MediaMetadata) -> bool {
+        self.attachment_id == metadata.attachment_id
+            && self.ciphertext_size_bytes == metadata.ciphertext_size_bytes
+            && self.ciphertext_sha256 == metadata.ciphertext_sha256
+    }
+}
+
+pub trait DesktopLargeFileUploader: Send {
+    fn upload(
+        &mut self,
+        access_token: &str,
+        file: &DesktopEncryptedLargeFile,
+    ) -> Result<DesktopLargeFileUploadReceipt, CoreError>;
+    /// Return a disposable ciphertext staging path.
+    fn download(
+        &mut self,
+        access_token: &str,
+        metadata: &protocol::v1::MediaMetadata,
+    ) -> Result<PathBuf, CoreError>;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DesktopImageMetadata {
@@ -517,6 +588,16 @@ pub trait DesktopMessagingCore: Send {
     ) -> Result<(), CoreError> {
         Err(CoreError::Provider)
     }
+    fn send_large_file(
+        &mut self,
+        _conversation_id: &str,
+        _recipient_user_id: &str,
+        _metadata: &protocol::v1::MediaMetadata,
+        _receipt: &DesktopLargeFileUploadReceipt,
+        _transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::Provider)
+    }
 }
 
 pub type DesktopAccessTokenProvider = Arc<dyn Fn() -> Result<String, CoreError> + Send + Sync>;
@@ -738,6 +819,136 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
         let result = renderer.render(&plaintext, metadata);
         plaintext.fill(0);
         ciphertext.fill(0);
+        result
+    }
+
+    /// Stream-encrypt a transcoded MP4 or arbitrary file into a ciphertext
+    /// staging path. The key and metadata remain private to the MLS message.
+    pub fn prepare_and_encrypt_large_file(
+        &mut self,
+        source: impl AsRef<std::path::Path>,
+        destination_directory: impl AsRef<std::path::Path>,
+        mime_type: &str,
+        width: Option<u32>,
+        height: Option<u32>,
+        duration_ms: Option<u64>,
+    ) -> Result<DesktopEncryptedLargeFile, CoreError> {
+        let source = source.as_ref();
+        let destination_directory = destination_directory.as_ref();
+        let source_metadata = fs::metadata(source).map_err(|_| CoreError::Provider)?;
+        if !source_metadata.is_file() || source_metadata.len() == 0 {
+            return Err(CoreError::Authentication);
+        }
+        fs::create_dir_all(destination_directory).map_err(|_| CoreError::Provider)?;
+        let attachment_id = uuid::Uuid::new_v4().to_string();
+        let ciphertext_path = destination_directory
+            .join(format!(".links-encrypted-{attachment_id}.blob"));
+        let mut encryptor = LargeFileEncryptor::new(
+            attachment_id,
+            mime_type.to_owned(),
+            width,
+            height,
+            duration_ms,
+        )?;
+        let result = (|| {
+            let input = fs::File::open(source).map_err(|_| CoreError::Provider)?;
+            let mut output = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&ciphertext_path)
+                .map_err(|_| CoreError::Provider)?;
+            let encrypted = encryptor.encrypt_reader(input, &mut output)?;
+            output.flush().map_err(|_| CoreError::Provider)?;
+            Ok(DesktopEncryptedLargeFile {
+                metadata: encrypted.media,
+                ciphertext_path: ciphertext_path.clone(),
+            })
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&ciphertext_path);
+        }
+        result
+    }
+
+    pub fn upload_large_file(
+        &mut self,
+        uploader: &mut dyn DesktopLargeFileUploader,
+        file: &DesktopEncryptedLargeFile,
+    ) -> Result<DesktopLargeFileUploadReceipt, CoreError> {
+        file.validate()?;
+        let token = self.require_access_token()?;
+        let receipt = uploader.upload(&token, file)?;
+        if !receipt.matches(&file.metadata) {
+            return Err(CoreError::Authentication);
+        }
+        Ok(receipt)
+    }
+
+    /// Send private video/file metadata only after the opaque upload receipt.
+    pub fn send_large_file(
+        &mut self,
+        now: Instant,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        file: &DesktopEncryptedLargeFile,
+        receipt: &DesktopLargeFileUploadReceipt,
+    ) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        protocol::validate_id(recipient_user_id)?;
+        file.validate()?;
+        if !receipt.matches(&file.metadata)
+            || recipient_user_id
+                == self.core.lock().map_err(|_| CoreError::Provider)?.user_id()
+            || !self.is_connected()
+        {
+            return Err(CoreError::Authentication);
+        }
+        let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
+        let mut transport = ManagerTransport {
+            manager: &mut self.manager,
+            now,
+        };
+        core.send_large_file(
+            conversation_id,
+            recipient_user_id,
+            &file.metadata,
+            receipt,
+            &mut transport,
+        )
+    }
+
+    /// Download opaque ciphertext and decrypt it into an atomically published
+    /// destination after full chunk authentication and digest verification.
+    pub fn download_and_decrypt_large_file(
+        &mut self,
+        uploader: &mut dyn DesktopLargeFileUploader,
+        metadata: &protocol::v1::MediaMetadata,
+        destination: impl AsRef<std::path::Path>,
+    ) -> Result<(), CoreError> {
+        validate_large_file_metadata(metadata)?;
+        let destination = destination.as_ref();
+        if destination.exists() {
+            return Err(CoreError::Authentication);
+        }
+        let token = self.require_access_token()?;
+        let ciphertext_path = uploader.download(&token, metadata)?;
+        let parent = destination.parent().ok_or(CoreError::Provider)?;
+        fs::create_dir_all(parent).map_err(|_| CoreError::Provider)?;
+        let staging = parent.join(format!(".links-decrypted-{}.tmp", uuid::Uuid::new_v4()));
+        let result = (|| {
+            let input = fs::File::open(&ciphertext_path).map_err(|_| CoreError::Provider)?;
+            let output = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&staging)
+                .map_err(|_| CoreError::Provider)?;
+            decrypt_large_file(metadata, input, output)?;
+            fs::rename(&staging, destination).map_err(|_| CoreError::Provider)
+        })();
+        let _ = fs::remove_file(&ciphertext_path);
+        if result.is_err() {
+            let _ = fs::remove_file(&staging);
+        }
         result
     }
 

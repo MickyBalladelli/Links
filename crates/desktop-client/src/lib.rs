@@ -11,10 +11,12 @@ pub use session::{
     DesktopFrameResult, DesktopFrameTransport, DesktopMessagingCore, DesktopReceivedTextMessage,
     DesktopImageCache, DesktopImageFileCache, DesktopImageMetadata, DesktopImageRenderer,
     DesktopImageUploadReceipt, DesktopImageUploader, DesktopSocket, DesktopSocketFactory,
-    DesktopTextSession, DesktopEncryptedImage, DESKTOP_HEARTBEAT_INTERVAL_MS,
+    DesktopTextSession, DesktopEncryptedImage, DesktopEncryptedLargeFile,
+    DesktopLargeFileUploadReceipt, DesktopLargeFileUploader, DESKTOP_HEARTBEAT_INTERVAL_MS,
     DESKTOP_INITIAL_BACKOFF_MS, DESKTOP_MAX_BACKOFF_MS, DESKTOP_MAX_FRAME_BYTES,
     DESKTOP_MAX_TEXT_BYTES, DESKTOP_STABLE_CONNECTION_MS, DESKTOP_IMAGE_MAX_EDGE,
     DESKTOP_IMAGE_MAX_PLAINTEXT_BYTES, DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES,
+    DESKTOP_LARGE_FILE_CIPHERTEXT_CHUNK_BYTES,
 };
 
 use links_client_core::{
