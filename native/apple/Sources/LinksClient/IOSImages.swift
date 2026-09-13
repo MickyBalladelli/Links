@@ -1,8 +1,14 @@
-#if os(iOS)
 import CryptoKit
 import Foundation
-import ImageIO
-import UIKit
+
+public enum IOSImageError: Error {
+    case invalidMetadata
+    case invalidUploadReceipt
+    case integrityFailure
+    case unableToReadImage
+    case unableToRender
+    case coreUnavailable
+}
 
 public struct IOSImageMetadata: Sendable {
     public let attachmentID: String
@@ -23,8 +29,8 @@ public struct IOSImageMetadata: Sendable {
               (17...32 * 1024 * 1024 + 16).contains(ciphertextSizeBytes),
               contentKey.count == 32, nonce.count == 12,
               ciphertextSHA256.count == 32,
-              (1...IOSImageResizer.maximumImageEdge).contains(width),
-              (1...IOSImageResizer.maximumImageEdge).contains(height),
+              (1...1_600).contains(width),
+              (1...1_600).contains(height),
               Self.isBlurHash(blurHash) else {
             throw IOSImageError.invalidMetadata
         }
@@ -83,6 +89,10 @@ public struct IOSImageUploadReceipt: Equatable, Sendable {
             && ciphertextSHA256 == metadata.ciphertextSHA256
     }
 }
+
+#if os(iOS)
+import ImageIO
+import UIKit
 
 public protocol IOSImageUploader: AnyObject {
     /// Upload ciphertext only over authenticated TLS.
@@ -277,15 +287,6 @@ public final class IOSImageSession {
         rgba.resetBytes(in: 0..<rgba.count)
         return (rgb, width, height)
     }
-}
-
-public enum IOSImageError: Error {
-    case invalidMetadata
-    case invalidUploadReceipt
-    case integrityFailure
-    case unableToReadImage
-    case unableToRender
-    case coreUnavailable
 }
 
 public extension SharedClientCore {
