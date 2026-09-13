@@ -133,7 +133,12 @@ Make encrypted messages reliably move between devices before adding richer clien
    server-time expiry, per-device routing, and atomic token buckets. A concrete
    TLS Redis client implementing `RedisScriptExecutor` and production rollout
    remain deployment work.
-- [ ] Deploy the append-only encrypted payload store for undelivered envelopes.
+- [x] Deploy the append-only encrypted payload store for undelivered envelopes.
+-  `RelationalStore` now implements the encrypted mailbox with transactional
+   per-device cursors, envelope-id idempotency, replay tombstones, cumulative
+   acknowledgement and bounded expiry compaction. PostgreSQL hardening,
+   encrypted-at-rest configuration, backups and recovery validation remain
+   deployment gates.
 
 ### Synchronization and multi-device state
 

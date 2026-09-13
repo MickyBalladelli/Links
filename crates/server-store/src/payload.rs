@@ -1,5 +1,5 @@
-//! Backend-neutral contracts for ScyllaDB/DynamoDB adapters (Phase 2).
-//! No plaintext API and no production adapter are provided in Phase 0.
+//! Ciphertext-only mailbox contract used by the PostgreSQL adapter and future
+//! ScyllaDB/DynamoDB adapters. No plaintext API exists here.
 use crate::StoreError;
 use async_trait::async_trait;
 use links_protocol::{self, v1};
@@ -28,6 +28,8 @@ pub struct AppendResult {
     pub cursor: u64,
     pub duplicate: bool,
 }
+
+pub const MAX_PURGE_BATCH: u32 = 1_000;
 
 pub struct ReadRequest {
     device_id: String,

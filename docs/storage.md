@@ -42,14 +42,14 @@ automatic destructive down migration. Take and test backups before production
 schema changes. Use TLS verification, least-privilege runtime credentials, a
 separate migration role, and managed secrets outside local development.
 
-## Encrypted payload store: interface, not a deployed adapter
+## Encrypted payload store: PostgreSQL adapter implemented
 
-`EncryptedPayloadStore` defines append, read, cumulative acknowledgement and
-expiry purge for a future ScyllaDB or DynamoDB implementation. AppendRequest checks
-version, UUIDs, nonempty sealed bytes, 256 KiB envelope limit, and a positive TTL
-no longer than 30 days. ReadRequest validates device, cursor and page size.
-Authentication must still scope every operation. Opaque bytes are a type boundary,
-not proof that a client encrypted them correctly.
+`RelationalStore` implements `EncryptedPayloadStore` against the append-only
+`encrypted_payloads` mailbox migration. AppendRequest checks version, UUIDs,
+nonempty sealed bytes, 256 KiB envelope limit, and a positive TTL no longer than
+30 days. ReadRequest validates device, cursor and page size. Authentication must
+still scope every operation. Opaque bytes are a type boundary, not proof that a
+client encrypted them correctly.
 
 The partition key is recipient device ID; ordering key is mailbox cursor. The
 idempotency key is `(recipient_device_id, envelope_id)`. Allocate a cursor and
@@ -66,17 +66,18 @@ never expose expired ciphertext through reads. Compact tombstones/fingerprints
 after the replay window and report CursorExpired when a requested cursor is gone.
 Backend cleanup/replica/backup behavior needs operational retention verification.
 
-A DynamoDB adapter must use conditional writes/transactions and consistent reads;
-a ScyllaDB adapter must prove equivalent cursor/idempotency atomicity with its
-chosen data model and consistency settings. Do not assume multi-table atomicity
-or generic eventual consistency meets this contract. Provider selection, service
-credentials, tables, and load/chaos tests belong to Phase 2.
+A future DynamoDB adapter must use conditional writes/transactions and consistent
+reads; a ScyllaDB adapter must prove equivalent cursor/idempotency atomicity with
+its chosen data model and consistency settings. Do not assume multi-table
+atomicity or generic eventual consistency meets this contract. The PostgreSQL
+deployment still needs encrypted-at-rest storage, private networking, backups,
+replica recovery, and load/chaos validation.
 
 Required adapter conformance cases are concurrent appends, identical/conflicting
 retries, retry after ack, TTL boundary reads, byte-limited paging, cursor overflow,
 ack beyond high watermark, expiry GC, stale-cursor recovery, and crash between
-allocation and commit. Phase 0 tests input contracts; it does not claim these
-backend conformance cases have passed without an adapter.
+allocation and commit. The repository contains the PostgreSQL implementation;
+production conformance and recovery validation still belong to deployment.
 
 ## Redis state: implemented adapter and local reference implementation
 

@@ -1,5 +1,12 @@
-use crate::StoreError;
-use links_protocol::{v1, validate_handle, validate_prekey_upload, MAX_ONE_TIME_PREKEYS};
+use crate::{
+    payload::{AppendRequest, AppendResult, EncryptedPayloadStore, ReadRequest, MAX_PURGE_BATCH},
+    StoreError,
+};
+use async_trait::async_trait;
+use links_protocol::{
+    self as protocol, v1, validate_handle, validate_prekey_upload, MAX_CURSOR, MAX_FRAME_BYTES,
+    MAX_ONE_TIME_PREKEYS, MAX_RETENTION_MS,
+};
 use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Row, Transaction};
@@ -646,6 +653,263 @@ impl RelationalStore {
         tx.commit().await?;
         Ok(())
     }
+}
+
+#[async_trait]
+impl EncryptedPayloadStore for RelationalStore {
+    async fn append(&self, request: AppendRequest) -> Result<AppendResult, StoreError> {
+        let envelope = request.envelope();
+        let recipient_device_id =
+            Uuid::parse_str(&envelope.recipient_device_id).map_err(|_| StoreError::Invalid)?;
+        let envelope_id =
+            Uuid::parse_str(&envelope.envelope_id).map_err(|_| StoreError::Invalid)?;
+        let envelope_bytes = envelope.encode_to_vec();
+        let fingerprint = Sha256::digest(&envelope_bytes);
+        let accepted_at_ms = signed_cursor(request.accepted_at_ms())?;
+        let expires_at_ms = signed_cursor(envelope.expires_at_ms)?;
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO encrypted_payload_cursors (recipient_device_id) VALUES ($1) ON CONFLICT DO NOTHING",
+        )
+        .bind(recipient_device_id)
+        .execute(&mut *tx)
+        .await?;
+        let high_watermark: i64 = sqlx::query_scalar(
+            "SELECT high_watermark FROM encrypted_payload_cursors WHERE recipient_device_id=$1 FOR UPDATE",
+        )
+        .bind(recipient_device_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let existing = sqlx::query(
+            "SELECT cursor,envelope_fingerprint FROM encrypted_payloads WHERE recipient_device_id=$1 AND envelope_id=$2 FOR UPDATE",
+        )
+        .bind(recipient_device_id)
+        .bind(envelope_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(existing) = existing {
+            let existing_fingerprint: Vec<u8> = existing.get("envelope_fingerprint");
+            if existing_fingerprint != fingerprint.as_slice() {
+                return Err(StoreError::Conflict);
+            }
+            let cursor = existing.get::<i64, _>("cursor");
+            tx.commit().await?;
+            return Ok(AppendResult {
+                cursor: unsigned_cursor(cursor)?,
+                duplicate: true,
+            });
+        }
+
+        if high_watermark < 0 || high_watermark >= MAX_CURSOR as i64 {
+            return Err(StoreError::Conflict);
+        }
+        let cursor = high_watermark + 1;
+        sqlx::query(
+            "INSERT INTO encrypted_payloads (recipient_device_id,cursor,envelope_id,envelope_bytes,envelope_fingerprint,accepted_at_ms,expires_at_ms,state) VALUES ($1,$2,$3,$4,$5,$6,$7,'live')",
+        )
+        .bind(recipient_device_id)
+        .bind(cursor)
+        .bind(envelope_id)
+        .bind(envelope_bytes)
+        .bind(fingerprint.as_slice())
+        .bind(accepted_at_ms)
+        .bind(expires_at_ms)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE encrypted_payload_cursors SET high_watermark=$2 WHERE recipient_device_id=$1",
+        )
+        .bind(recipient_device_id)
+        .bind(cursor)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(AppendResult {
+            cursor: unsigned_cursor(cursor)?,
+            duplicate: false,
+        })
+    }
+
+    async fn read(&self, request: ReadRequest) -> Result<v1::SyncBatch, StoreError> {
+        let device_id = Uuid::parse_str(request.device_id()).map_err(|_| StoreError::Invalid)?;
+        let after_cursor = signed_cursor(request.after_cursor())?;
+        let now_ms = signed_cursor(request.now_ms())?;
+        let mut tx = self.pool.begin().await?;
+        let high_watermark: Option<i64> = sqlx::query_scalar(
+            "SELECT high_watermark FROM encrypted_payload_cursors WHERE recipient_device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let high_watermark = high_watermark.unwrap_or(0);
+        if high_watermark < 0 || after_cursor > high_watermark {
+            return Err(StoreError::Invalid);
+        }
+        if after_cursor < high_watermark {
+            let next_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM encrypted_payloads WHERE recipient_device_id=$1 AND cursor=$2)",
+            )
+            .bind(device_id)
+            .bind(after_cursor + 1)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !next_exists {
+                return Err(StoreError::CursorExpired);
+            }
+        }
+
+        let rows = sqlx::query(
+            "SELECT cursor,envelope_bytes,state,expires_at_ms FROM encrypted_payloads WHERE recipient_device_id=$1 AND cursor>$2 ORDER BY cursor LIMIT $3",
+        )
+        .bind(device_id)
+        .bind(after_cursor)
+        .bind(i64::from(request.limit()))
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut items = Vec::with_capacity(rows.len());
+        let mut expected = after_cursor + 1;
+        for row in rows {
+            let cursor: i64 = row.get("cursor");
+            if cursor != expected {
+                return Err(StoreError::CursorExpired);
+            }
+            expected = expected.checked_add(1).ok_or(StoreError::Conflict)?;
+            let state: String = row.get("state");
+            let expires_at_ms: i64 = row.get("expires_at_ms");
+            let entry = if state == "acknowledged" || state == "expired" {
+                Some(v1::queue_item::Entry::Tombstone(v1::Tombstone {
+                    reason: if state == "acknowledged" {
+                        v1::tombstone::Reason::Acknowledged as i32
+                    } else {
+                        v1::tombstone::Reason::Expired as i32
+                    },
+                }))
+            } else if state == "live" && expires_at_ms > now_ms {
+                let bytes: Vec<u8> = row.get("envelope_bytes");
+                let envelope = protocol::decode_envelope(&bytes)?;
+                if envelope.recipient_device_id != request.device_id() {
+                    return Err(StoreError::Unavailable);
+                }
+                Some(v1::queue_item::Entry::Envelope(envelope))
+            } else if state == "live" {
+                Some(v1::queue_item::Entry::Tombstone(v1::Tombstone {
+                    reason: v1::tombstone::Reason::Expired as i32,
+                }))
+            } else {
+                return Err(StoreError::Unavailable);
+            };
+            let item = v1::QueueItem {
+                cursor: unsigned_cursor(cursor)?,
+                entry,
+            };
+            let mut candidate = v1::SyncBatch {
+                recipient_device_id: request.device_id().to_owned(),
+                after_cursor: request.after_cursor(),
+                next_cursor: item.cursor,
+                high_watermark: unsigned_cursor(high_watermark)?,
+                items: items.clone(),
+            };
+            candidate.items.push(item.clone());
+            if candidate.encoded_len() > MAX_FRAME_BYTES - 128 {
+                if items.is_empty() {
+                    return Err(StoreError::Invalid);
+                }
+                break;
+            }
+            items.push(item);
+        }
+        let next_cursor = items
+            .last()
+            .map_or(request.after_cursor(), |item| item.cursor);
+        let batch = v1::SyncBatch {
+            recipient_device_id: request.device_id().to_owned(),
+            after_cursor: request.after_cursor(),
+            next_cursor,
+            high_watermark: unsigned_cursor(high_watermark)?,
+            items,
+        };
+        if batch.items.is_empty() && batch.next_cursor != batch.high_watermark {
+            return Err(StoreError::CursorExpired);
+        }
+        tx.commit().await?;
+        Ok(batch)
+    }
+
+    async fn acknowledge(
+        &self,
+        device_id: &str,
+        through_cursor: u64,
+        now_ms: u64,
+    ) -> Result<(), StoreError> {
+        let device_id = Uuid::parse_str(device_id).map_err(|_| StoreError::Invalid)?;
+        let through_cursor = signed_cursor(through_cursor)?;
+        let now_ms = signed_cursor(now_ms)?;
+        let mut tx = self.pool.begin().await?;
+        let high_watermark: Option<i64> = sqlx::query_scalar(
+            "SELECT high_watermark FROM encrypted_payload_cursors WHERE recipient_device_id=$1 FOR UPDATE",
+        )
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if through_cursor > high_watermark.unwrap_or(0) {
+            return Err(StoreError::Invalid);
+        }
+        sqlx::query(
+            "UPDATE encrypted_payloads SET state=CASE WHEN expires_at_ms <= $3 THEN 'expired' ELSE 'acknowledged' END, envelope_bytes=NULL WHERE recipient_device_id=$1 AND cursor <= $2 AND state='live'",
+        )
+        .bind(device_id)
+        .bind(through_cursor)
+        .bind(now_ms)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn purge_expired(&self, now_ms: u64, limit: u32) -> Result<u64, StoreError> {
+        if limit == 0 || limit > MAX_PURGE_BATCH {
+            return Err(StoreError::Invalid);
+        }
+        let now_ms = signed_cursor(now_ms)?;
+        let cutoff = now_ms.saturating_sub(MAX_RETENTION_MS as i64);
+        let mut tx = self.pool.begin().await?;
+        let expired = sqlx::query(
+            "WITH candidates AS (SELECT recipient_device_id,cursor FROM encrypted_payloads WHERE state='live' AND expires_at_ms <= $1 ORDER BY expires_at_ms,cursor LIMIT $2 FOR UPDATE SKIP LOCKED) UPDATE encrypted_payloads p SET state='expired',envelope_bytes=NULL FROM candidates c WHERE p.recipient_device_id=c.recipient_device_id AND p.cursor=c.cursor",
+        )
+        .bind(now_ms)
+        .bind(i64::from(limit))
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        let remaining = u64::from(limit).saturating_sub(expired);
+        let deleted = if remaining == 0 {
+            0
+        } else {
+            sqlx::query(
+                "WITH candidates AS (SELECT recipient_device_id,cursor FROM encrypted_payloads WHERE state <> 'live' AND accepted_at_ms <= $1 ORDER BY accepted_at_ms,cursor LIMIT $2 FOR UPDATE SKIP LOCKED) DELETE FROM encrypted_payloads p USING candidates c WHERE p.recipient_device_id=c.recipient_device_id AND p.cursor=c.cursor",
+            )
+            .bind(cutoff)
+            .bind(i64::try_from(remaining).map_err(|_| StoreError::Invalid)?)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+        };
+        tx.commit().await?;
+        Ok(expired + deleted)
+    }
+}
+
+fn signed_cursor(value: u64) -> Result<i64, StoreError> {
+    if value > MAX_CURSOR {
+        return Err(StoreError::Invalid);
+    }
+    Ok(value as i64)
+}
+
+fn unsigned_cursor(value: i64) -> Result<u64, StoreError> {
+    u64::try_from(value).map_err(|_| StoreError::Unavailable)
 }
 
 async fn require_active_account(
