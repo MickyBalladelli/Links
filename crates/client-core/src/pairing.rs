@@ -14,7 +14,189 @@ pub const PAIRING_VERSION: u8 = 1;
 pub const PAIRING_NONCE_BYTES: usize = 32;
 pub const PAIRING_PUBLIC_KEY_BYTES: usize = 32;
 pub const PAIRING_SIGNATURE_BYTES: usize = 64;
+pub const MAX_MLS_CREDENTIAL_BYTES: usize = 1024;
 pub const MAX_PAIRING_URI_BYTES: usize = 1024;
+
+/// Request sent by the authenticated mobile device to register the scanned
+/// Web/desktop identity. All fields are public; the access token stays in the
+/// transport call and is never part of this value.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PairingRegistrationRequest {
+    user_id: Uuid,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: [u8; PAIRING_PUBLIC_KEY_BYTES],
+    nonce: [u8; PAIRING_NONCE_BYTES],
+    signature: [u8; PAIRING_SIGNATURE_BYTES],
+}
+
+/// Registration response returned by `POST /v1/devices`. The credential is
+/// the server-created MLS BasicCredential for the new physical device node.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PairingRegistrationResponse {
+    user_id: Uuid,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: [u8; PAIRING_PUBLIC_KEY_BYTES],
+    mls_credential: Vec<u8>,
+}
+
+impl PairingRegistrationRequest {
+    /// Parse and authenticate a scanned URI for the currently signed-in
+    /// account. The account check prevents approving a QR code for another
+    /// account, while `verify` proves possession of the new device key.
+    pub fn from_uri(uri: &str, approving_user_id: Uuid) -> Result<Self, CoreError> {
+        let payload = PairingPayload::from_uri(uri)?;
+        Self::from_payload(&payload, approving_user_id)
+    }
+
+    pub fn from_payload(
+        payload: &PairingPayload,
+        approving_user_id: Uuid,
+    ) -> Result<Self, CoreError> {
+        if approving_user_id.is_nil() || payload.user_id != approving_user_id {
+            return Err(CoreError::Authentication);
+        }
+        payload.verify()?;
+        Ok(Self {
+            user_id: payload.user_id,
+            device_id: payload.device_id,
+            mls_node_id: payload.mls_node_id,
+            public_key: payload.public_key,
+            nonce: payload.nonce,
+            signature: payload.signature,
+        })
+    }
+
+    pub fn user_id(&self) -> Uuid {
+        self.user_id
+    }
+
+    pub fn device_id(&self) -> Uuid {
+        self.device_id
+    }
+
+    pub fn mls_node_id(&self) -> Uuid {
+        self.mls_node_id
+    }
+
+    pub fn public_key(&self) -> [u8; PAIRING_PUBLIC_KEY_BYTES] {
+        self.public_key
+    }
+
+    pub fn nonce(&self) -> [u8; PAIRING_NONCE_BYTES] {
+        self.nonce
+    }
+
+    pub fn signature(&self) -> [u8; PAIRING_SIGNATURE_BYTES] {
+        self.signature
+    }
+}
+
+impl PairingRegistrationResponse {
+    /// Validate the server response shape and the returned MLS credential.
+    /// A credential for a different public key or node is rejected before it
+    /// reaches the Web/desktop MLS engine.
+    pub fn new(
+        user_id: Uuid,
+        device_id: Uuid,
+        mls_node_id: Uuid,
+        public_key: [u8; PAIRING_PUBLIC_KEY_BYTES],
+        mls_credential: Vec<u8>,
+    ) -> Result<Self, CoreError> {
+        if user_id.is_nil()
+            || device_id.is_nil()
+            || mls_node_id.is_nil()
+            || mls_credential.is_empty()
+            || mls_credential.len() > MAX_MLS_CREDENTIAL_BYTES
+        {
+            return Err(CoreError::Authentication);
+        }
+        links_identity::validate_public_key(&public_key).map_err(|_| CoreError::Authentication)?;
+        let binding = links_identity::DeviceBinding {
+            user_id,
+            device_id,
+            mls_node_id,
+            public_key,
+        };
+        if binding
+            .mls_credential()
+            .map_err(|_| CoreError::Authentication)?
+            != mls_credential
+        {
+            return Err(CoreError::Authentication);
+        }
+        Ok(Self {
+            user_id,
+            device_id,
+            mls_node_id,
+            public_key,
+            mls_credential,
+        })
+    }
+
+    /// Ensure the response is exactly for the QR payload that was approved.
+    pub fn validate_for(&self, request: &PairingRegistrationRequest) -> Result<(), CoreError> {
+        if self.user_id != request.user_id
+            || self.device_id != request.device_id
+            || self.mls_node_id != request.mls_node_id
+            || self.public_key != request.public_key
+        {
+            return Err(CoreError::Authentication);
+        }
+        Ok(())
+    }
+
+    pub fn user_id(&self) -> Uuid {
+        self.user_id
+    }
+
+    pub fn device_id(&self) -> Uuid {
+        self.device_id
+    }
+
+    pub fn mls_node_id(&self) -> Uuid {
+        self.mls_node_id
+    }
+
+    pub fn public_key(&self) -> [u8; PAIRING_PUBLIC_KEY_BYTES] {
+        self.public_key
+    }
+
+    pub fn mls_credential(&self) -> &[u8] {
+        &self.mls_credential
+    }
+}
+
+/// HTTP/WebSocket adapters implement this boundary. The adapter must parse the
+/// JSON response into `PairingRegistrationResponse::new`; it must not expose or
+/// persist the bearer token in the returned device state.
+#[async_trait::async_trait]
+pub trait PairingRegistrationTransport: Send {
+    async fn register_device(
+        &mut self,
+        access_token: &str,
+        request: &PairingRegistrationRequest,
+    ) -> Result<PairingRegistrationResponse, CoreError>;
+}
+
+/// Complete the approval side of Web/desktop pairing on an authenticated
+/// mobile device. The returned credential can initialize the new client's
+/// `OpenMlsEngine`, which then generates its first MLS KeyPackage.
+pub async fn approve_pairing<T: PairingRegistrationTransport>(
+    uri: &str,
+    approving_user_id: Uuid,
+    access_token: &str,
+    transport: &mut T,
+) -> Result<PairingRegistrationResponse, CoreError> {
+    if access_token.is_empty() || access_token.len() > MAX_PAIRING_URI_BYTES {
+        return Err(CoreError::Authentication);
+    }
+    let request = PairingRegistrationRequest::from_uri(uri, approving_user_id)?;
+    let response = transport.register_device(access_token, &request).await?;
+    response.validate_for(&request)?;
+    Ok(response)
+}
 
 /// Public information needed by an authenticated device to approve a new
 /// physical client. The signature is made by the new device's identity key.
@@ -211,8 +393,7 @@ impl PairingPayload {
         if self.user_id.is_nil() || self.device_id.is_nil() || self.mls_node_id.is_nil() {
             return Err(CoreError::Authentication);
         }
-        links_identity::validate_public_key(&self.public_key)
-            .map_err(|_| CoreError::Authentication)
+        links_identity::validate_public_key(&self.public_key).map_err(|_| CoreError::Authentication)
     }
 }
 
@@ -227,9 +408,7 @@ fn decode_fixed<const N: usize>(value: &str) -> Result<[u8; N], CoreError> {
     let bytes = URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| CoreError::Authentication)?;
-    bytes
-        .try_into()
-        .map_err(|_| CoreError::Authentication)
+    bytes.try_into().map_err(|_| CoreError::Authentication)
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, CoreError> {

@@ -25,7 +25,9 @@ checks that the credential key equals the native hardware-backed signer.
 Additional physical clients register through the authenticated device endpoint;
 the existing device authorizes the account scope and the new device signs a
 nonce-bound pairing transcript. The resulting credential is a distinct MLS node
-under the same user account. An existing MLS group still needs an authenticated
+under the same user account. `client-core::pairing::approve_pairing` validates
+this handoff before the new client initializes OpenMLS and publishes its first
+KeyPackage. An existing MLS group still needs an authenticated
 member-add commit before that node receives the group's traffic.
 
 Incoming credentials are accepted only after all of these checks:

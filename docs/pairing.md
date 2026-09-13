@@ -49,6 +49,21 @@ binding. A QR string is not trusted merely because it parsed.
    The new device stores the returned MLS credential and becomes a distinct
    device node under the account.
 
+The shared approval coordinator is `approve_pairing(uri, approving_user_id,
+access_token, transport)`. It creates a `PairingRegistrationRequest` only after
+URI parsing, signature verification, and account matching. The transport sends
+the request to `POST /v1/devices`, parses the response with
+`PairingRegistrationResponse::new`, and returns it to the coordinator. The
+coordinator then checks every returned identity field against the scanned
+request and checks that the returned credential is the expected Links MLS
+BasicCredential.
+
+The Web/desktop side persists the returned `mls_credential` with its own
+identity-key reference, constructs `OpenMlsEngine` with that credential and its
+signer, and calls `generate_key_package()`. It uploads that KeyPackage through
+the existing authenticated pre-key flow. Mobile approval does not copy a
+private key or bearer token to the Web/desktop client.
+
 `PairingPayload::signed_with_identity` is available for software-held test or
 recovery seeds. Production mobile clients should sign the transcript through
 the iOS Secure Enclave or Android Keystore adapter, then construct the payload

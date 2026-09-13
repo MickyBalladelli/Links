@@ -311,7 +311,11 @@ These clients join an existing account as additional MLS device nodes. They do n
   device's Ed25519 pairing signature before registration. Platform QR libraries
   encode/decode this URI text; the server request uses the existing pairing
   transcript contract.
-- [ ] Pair a Web or desktop device with a mobile device and register it as an MLS identity node.
+- [x] Pair a Web or desktop device with a mobile device and register it as an MLS identity node.
+  `PairingRegistrationRequest::from_uri` authenticates the scanned payload and
+  checks the approving account. `approve_pairing` calls an authenticated
+  registration transport and validates the returned Links MLS credential before
+  the new client initializes `OpenMlsEngine` and generates its first KeyPackage.
 
 ### Web companion client
 
