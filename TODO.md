@@ -392,7 +392,9 @@ Add media after text delivery and multi-device sync are stable.
   Shared dimension policy plus Android Bitmap and iOS ImageIO adapters preserve
   aspect ratio, avoid upscaling, and cap the longest edge at 1600 pixels before
   later image encryption/upload.
-- [ ] Strip EXIF location metadata.
+- [x] Strip EXIF location metadata.
+  Android preserves EXIF orientation while re-encoding without input EXIF;
+  iOS filters the ImageIO GPS dictionary before image encryption/upload.
 - [ ] Transcode to WebP / AVIF at approximately 80% lossy quality.
 - [ ] Embed low-resolution BlurHash placeholders in text payloads.
 - [ ] Deploy S3-compatible encrypted blob storage with Cloudflare / CloudFront CDN edge caching.

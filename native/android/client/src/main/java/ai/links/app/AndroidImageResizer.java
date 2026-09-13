@@ -2,10 +2,13 @@ package ai.links.app;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-/** Decode, proportionally downscale, and re-encode images before encryption. */
+/** Decode, orient, proportionally downscale, and re-encode images before encryption. */
 public final class AndroidImageResizer {
     public static final int MAX_IMAGE_EDGE = 1_600;
     public static final int MAX_INPUT_BYTES = 32 * 1024 * 1024;
@@ -37,25 +40,27 @@ public final class AndroidImageResizer {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outMimeType == null)
             throw new IOException("Unable to read image dimensions");
 
-        if (bounds.outWidth <= MAX_IMAGE_EDGE && bounds.outHeight <= MAX_IMAGE_EDGE) {
-            return new Result(encodedImage.clone(), bounds.outMimeType,
-                    bounds.outWidth, bounds.outHeight);
-        }
-
-        Dimensions target = targetDimensions(bounds.outWidth, bounds.outHeight);
+        int orientation = readOrientation(encodedImage);
+        boolean swapsDimensions = swapsDimensions(orientation);
+        int orientedWidth = swapsDimensions ? bounds.outHeight : bounds.outWidth;
+        int orientedHeight = swapsDimensions ? bounds.outWidth : bounds.outHeight;
+        Dimensions target = targetDimensions(orientedWidth, orientedHeight);
+        int decodeTargetWidth = swapsDimensions ? target.height : target.width;
+        int decodeTargetHeight = swapsDimensions ? target.width : target.height;
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight,
-                target.width, target.height);
+                decodeTargetWidth, decodeTargetHeight);
         options.inScaled = false;
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
         Bitmap decoded = BitmapFactory.decodeByteArray(encodedImage, 0, encodedImage.length,
                 options);
         if (decoded == null) throw new IOException("Unable to decode image");
 
-        Bitmap resized = decoded;
+        Bitmap oriented = applyOrientation(decoded, orientation);
+        Bitmap resized = oriented;
         try {
-            if (decoded.getWidth() != target.width || decoded.getHeight() != target.height) {
-                resized = Bitmap.createScaledBitmap(decoded, target.width, target.height, true);
+            if (oriented.getWidth() != target.width || oriented.getHeight() != target.height) {
+                resized = Bitmap.createScaledBitmap(oriented, target.width, target.height, true);
             }
             Format format = outputFormat(bounds.outMimeType);
             ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -66,9 +71,61 @@ public final class AndroidImageResizer {
                 throw new IOException("Resized image exceeds size limit");
             return new Result(result, format.mimeType, resized.getWidth(), resized.getHeight());
         } finally {
-            if (resized != decoded) resized.recycle();
+            if (resized != oriented) resized.recycle();
+            if (oriented != decoded) oriented.recycle();
             decoded.recycle();
         }
+    }
+
+    /** Re-encoding removes input EXIF, including GPS location tags. */
+    private static int readOrientation(byte[] encodedImage) {
+        try {
+            ExifInterface exif = new ExifInterface(new ByteArrayInputStream(encodedImage));
+            return exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+        } catch (IOException | IllegalArgumentException ignored) {
+            return ExifInterface.ORIENTATION_NORMAL;
+        }
+    }
+
+    private static boolean swapsDimensions(int orientation) {
+        return orientation == ExifInterface.ORIENTATION_TRANSPOSE
+                || orientation == ExifInterface.ORIENTATION_ROTATE_90
+                || orientation == ExifInterface.ORIENTATION_TRANSVERSE
+                || orientation == ExifInterface.ORIENTATION_ROTATE_270;
+    }
+
+    private static Bitmap applyOrientation(Bitmap bitmap, int orientation) {
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setRotate(180);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90);
+                break;
+            default:
+                return bitmap;
+        }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
     }
 
     private static Dimensions targetDimensions(int width, int height) {

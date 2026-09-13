@@ -25,9 +25,7 @@ public enum IOSImageResizeError: Error {
     case imageTooLarge
 }
 
-/// Resize images before any encryption or upload. ImageIO applies EXIF
-/// orientation while creating the thumbnail; metadata stripping is a separate
-/// image task.
+/// Resize images before any encryption or upload and remove EXIF GPS metadata.
 public enum IOSImageResizer {
     public static let maximumImageEdge = 1_600
     public static let maximumInputBytes = 32 * 1024 * 1024
@@ -43,7 +41,9 @@ public enum IOSImageResizer {
             throw IOSImageResizeError.invalidInput
         }
 
-        if sourceWidth <= maximumImageEdge && sourceHeight <= maximumImageEdge {
+        let needsResize = sourceWidth > maximumImageEdge || sourceHeight > maximumImageEdge
+        let hasLocationMetadata = properties[kCGImagePropertyGPSDictionary] != nil
+        if !needsResize && !hasLocationMetadata {
             guard let sourceType = CGImageSourceGetType(source) as String? else {
                 throw IOSImageResizeError.unableToReadImage
             }
@@ -54,23 +54,39 @@ public enum IOSImageResizer {
                 height: sourceHeight)
         }
 
-        let thumbnailOptions: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumImageEdge
-        ]
-        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
-            source, 0, thumbnailOptions as CFDictionary) else {
-            throw IOSImageResizeError.unableToReadImage
+        let image: CGImage
+        if needsResize {
+            let thumbnailOptions: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maximumImageEdge
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                source, 0, thumbnailOptions as CFDictionary) else {
+                throw IOSImageResizeError.unableToReadImage
+            }
+            image = thumbnail
+        } else {
+            guard let sourceImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                throw IOSImageResizeError.unableToReadImage
+            }
+            image = sourceImage
         }
+
         let outputUTI = outputType(source: source)
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             output, outputUTI as CFString, 1, nil) else {
             throw IOSImageResizeError.unableToEncodeImage
         }
-        let outputProperties: [CFString: Any] = [:]
-        CGImageDestinationAddImage(destination, thumbnail, outputProperties as CFDictionary)
+        var outputProperties = properties
+        outputProperties.removeValue(forKey: kCGImagePropertyGPSDictionary)
+        if needsResize {
+            outputProperties.removeValue(forKey: kCGImagePropertyOrientation)
+            outputProperties.removeValue(forKey: kCGImagePropertyPixelWidth)
+            outputProperties.removeValue(forKey: kCGImagePropertyPixelHeight)
+        }
+        CGImageDestinationAddImage(destination, image, outputProperties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             throw IOSImageResizeError.unableToEncodeImage
         }
@@ -81,8 +97,8 @@ public enum IOSImageResizer {
         return IOSResizedImage(
             data: encoded,
             mimeType: mimeType(for: outputUTI),
-            width: thumbnail.width,
-            height: thumbnail.height)
+            width: image.width,
+            height: image.height)
     }
 
     private static func outputType(source: CGImageSource) -> String {
