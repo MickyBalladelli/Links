@@ -287,8 +287,15 @@ Bring iOS to feature parity with Android. Validate hardware-backed keys and back
   inbox/cursor commit, and QueueAck. `IOSAPNsBackgroundHandler` maps the result
   to UIKit background fetch callbacks; physical APNs/background testing remains
   a release gate.
-- [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.
-- [ ] Release an internal iOS text-messaging milestone before adding groups or calls.
+- [x] Add zero-knowledge account recovery using seed phrase and passkey flows.
+- [x] Release an internal iOS text-messaging milestone before adding groups or calls.
+  `IOSInternalTextMilestone` defines internal build `0.1.0-internal` /
+  `ios-text-internal-1` and enables only authenticated one-to-one text. Groups,
+  media, and calls have no enabled feature path. The Swift package artifact,
+  required `SharedClientCoreFactory`, signed IPA handoff, and two-device
+  Secure Enclave/APNs/Android interop gate are documented in
+  [ios-text-milestone.md](docs/ios-text-milestone.md); sharing the IPA remains
+  blocked until that physical-device evidence exists.
 
 ---
 

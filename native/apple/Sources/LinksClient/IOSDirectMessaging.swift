@@ -22,7 +22,7 @@ public struct IOSReceivedTextMessage: Sendable {
         guard IOSClient.isCanonicalUUID(conversationID),
               IOSClient.isCanonicalUUID(senderDeviceID),
               !text.isEmpty,
-              text.utf8.count <= IOSDirectMessaging.maximumTextBytes,
+              text.utf8.count <= IOSInternalTextMilestone.maximumTextBytes,
               sequenceID > 0 else {
             throw IOSMessagingError.invalidMessage
         }
@@ -52,7 +52,7 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         case failed
     }
 
-    public static let maximumTextBytes = 64 * 1024
+    public static let maximumTextBytes = IOSInternalTextMilestone.maximumTextBytes
 
     private let client: IOSClient
     private let factory: any SharedClientCoreFactory

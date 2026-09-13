@@ -35,6 +35,7 @@ remain open.
 | `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
 | `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |
 | `docs/ios-client.md` | iOS client foundation, shared-core boundary and release limits. |
+| `docs/ios-text-milestone.md` | Internal iOS one-to-one text build scope and two-device acceptance gate. |
 
 ## Build and test
 
