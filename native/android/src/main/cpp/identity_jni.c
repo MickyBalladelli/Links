@@ -139,6 +139,26 @@ static int read_bounded(JNIEnv *env, jbyteArray input, uint8_t *output, jsize ma
     *length = actual;
     return 1;
 }
+static int read_variable(JNIEnv *env, jbyteArray input, jbyte **output, jsize *length, jsize maximum) {
+    if (!input) {
+        throw_status(env, LINKS_INVALID);
+        return 0;
+    }
+    *length = (*env)->GetArrayLength(env, input);
+    if (*length > maximum) {
+        throw_status(env, LINKS_INVALID);
+        return 0;
+    }
+    *output = (*env)->GetByteArrayElements(env, input, NULL);
+    if (!*output && *length != 0) {
+        throw_status(env, LINKS_PROVIDER);
+        return 0;
+    }
+    return !(*env)->ExceptionCheck(env);
+}
+static void release_variable(JNIEnv *env, jbyteArray input, jbyte *output) {
+    if (input && output) (*env)->ReleaseByteArrayElements(env, input, output, JNI_ABORT);
+}
 static jbyteArray result_array(JNIEnv *env, int32_t status, const uint8_t *data, jsize size) {
     throw_status(env, status);
     if (status != LINKS_OK || (*env)->ExceptionCheck(env)) return NULL;
@@ -160,6 +180,84 @@ JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_create(
     if (status != LINKS_OK || (*env)->ExceptionCheck(env)) return NULL;
     (*env)->SetByteArrayRegion(env, output, 0, 68, (const jbyte *)reference);
     return output;
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_restoreFromRecovery(
+        JNIEnv *env, jclass cls, jobject vault, jbyteArray phrase_input, jbyteArray passphrase_input) {
+    (void)cls;
+    VaultContext ctx = {0}; LinksVaultCallbacks callbacks;
+    if (!setup(env, vault, &ctx, &callbacks)) return NULL;
+    jbyte *phrase = NULL, *passphrase = NULL;
+    jsize phrase_len = 0, passphrase_len = 0;
+    if (!read_variable(env, phrase_input, &phrase, &phrase_len, LINKS_IDENTITY_MAX_RECOVERY_PHRASE)) return NULL;
+    if (!read_variable(env, passphrase_input, &passphrase, &passphrase_len,
+            LINKS_IDENTITY_MAX_RECOVERY_PASSPHRASE)) {
+        release_variable(env, phrase_input, phrase);
+        return NULL;
+    }
+    uint8_t reference[68] = {0};
+    int32_t status = links_identity_restore_from_mnemonic(&callbacks,
+            (const uint8_t *)phrase, (size_t)phrase_len,
+            (const uint8_t *)passphrase, (size_t)passphrase_len,
+            reference, reference + 36);
+    release_variable(env, passphrase_input, passphrase);
+    release_variable(env, phrase_input, phrase);
+    return result_array(env, status, reference, 68);
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_backupWithPasskey(
+        JNIEnv *env, jclass cls, jobject vault, jbyteArray handle_input,
+        jbyteArray backup_input, jbyteArray device_input, jbyteArray credential_input,
+        jbyteArray salt_input, jbyteArray prf_input) {
+    (void)cls;
+    VaultContext ctx = {0}; LinksVaultCallbacks callbacks;
+    uint8_t handle[36], backup[16], device[16], salt[32], prf[32];
+    if (!read_fixed(env, handle_input, handle, 36)
+            || !read_fixed(env, backup_input, backup, 16)
+            || !read_fixed(env, device_input, device, 16)
+            || !read_fixed(env, salt_input, salt, 32)
+            || !read_fixed(env, prf_input, prf, 32)
+            || !setup(env, vault, &ctx, &callbacks)) return NULL;
+    jbyte *credential = NULL; jsize credential_len = 0;
+    if (!read_variable(env, credential_input, &credential, &credential_len,
+            LINKS_IDENTITY_MAX_CREDENTIAL_ID)) return NULL;
+    uint8_t envelope[LINKS_IDENTITY_MAX_BACKUP_ENVELOPE] = {0};
+    size_t envelope_len = 0;
+    int32_t status = links_identity_backup_with_passkey(&callbacks, handle, backup, device,
+            (const uint8_t *)credential, (size_t)credential_len, salt, prf,
+            envelope, sizeof(envelope), &envelope_len);
+    release_variable(env, credential_input, credential);
+    if (envelope_len > LINKS_IDENTITY_MAX_BACKUP_ENVELOPE) {
+        throw_status(env, LINKS_PROVIDER);
+        return NULL;
+    }
+    return result_array(env, status, envelope, (jsize)envelope_len);
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_restoreFromPasskey(
+        JNIEnv *env, jclass cls, jobject vault, jbyteArray backup_input, jbyteArray device_input,
+        jbyteArray credential_input, jbyteArray envelope_input, jbyteArray prf_input) {
+    (void)cls;
+    VaultContext ctx = {0}; LinksVaultCallbacks callbacks;
+    uint8_t backup[16], device[16], prf[32];
+    if (!read_fixed(env, backup_input, backup, 16)
+            || !read_fixed(env, device_input, device, 16)
+            || !read_fixed(env, prf_input, prf, 32)
+            || !setup(env, vault, &ctx, &callbacks)) return NULL;
+    jbyte *credential = NULL, *envelope = NULL;
+    jsize credential_len = 0, envelope_len = 0;
+    if (!read_variable(env, credential_input, &credential, &credential_len,
+            LINKS_IDENTITY_MAX_CREDENTIAL_ID)) return NULL;
+    if (!read_variable(env, envelope_input, &envelope, &envelope_len,
+            LINKS_IDENTITY_MAX_BACKUP_ENVELOPE)) {
+        release_variable(env, credential_input, credential);
+        return NULL;
+    }
+    uint8_t reference[68] = {0};
+    int32_t status = links_identity_restore_from_passkey(&callbacks, backup, device,
+            (const uint8_t *)credential, (size_t)credential_len,
+            (const uint8_t *)envelope, (size_t)envelope_len, prf,
+            reference, reference + 36);
+    release_variable(env, envelope_input, envelope);
+    release_variable(env, credential_input, credential);
+    return result_array(env, status, reference, 68);
 }
 JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_publicKey(JNIEnv *env, jclass cls, jobject vault, jbyteArray input) {
     (void)cls;

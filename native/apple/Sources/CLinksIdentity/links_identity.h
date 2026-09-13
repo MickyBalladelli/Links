@@ -10,6 +10,10 @@ enum { LINKS_OK = 0, LINKS_INVALID = 1, LINKS_UNAVAILABLE = 2,
        LINKS_AUTHENTICATION = 3, LINKS_PROVIDER = 4 };
 #define LINKS_IDENTITY_MAX_MESSAGE (1024 * 1024)
 #define LINKS_IDENTITY_MAX_TRANSCRIPT 1024
+#define LINKS_IDENTITY_MAX_RECOVERY_PHRASE 512
+#define LINKS_IDENTITY_MAX_RECOVERY_PASSPHRASE 256
+#define LINKS_IDENTITY_MAX_CREDENTIAL_ID 1024
+#define LINKS_IDENTITY_MAX_BACKUP_ENVELOPE 1152
 
 /* ABI v1, synchronous only, called on the entering thread. No pointers retained.
  * Native callbacks must enforce hardware backing and catch all exceptions.
@@ -36,6 +40,23 @@ typedef struct {
  * There is deliberately no plaintext-seed export in this API.
  */
 int32_t links_identity_create(const LinksVaultCallbacks *, uint8_t *handle36, uint8_t *public32);
+int32_t links_identity_restore_from_mnemonic(const LinksVaultCallbacks *,
+                                             const uint8_t *phrase, size_t phrase_len,
+                                             const uint8_t *passphrase, size_t passphrase_len,
+                                             uint8_t *handle36, uint8_t *public32);
+int32_t links_identity_backup_with_passkey(const LinksVaultCallbacks *,
+                                           const uint8_t *handle36,
+                                           const uint8_t *backup16, const uint8_t *device16,
+                                           const uint8_t *credential, size_t credential_len,
+                                           const uint8_t *salt32, const uint8_t *prf32,
+                                           uint8_t *envelope, size_t envelope_capacity,
+                                           size_t *envelope_len);
+int32_t links_identity_restore_from_passkey(const LinksVaultCallbacks *,
+                                            const uint8_t *backup16, const uint8_t *device16,
+                                            const uint8_t *credential, size_t credential_len,
+                                            const uint8_t *envelope, size_t envelope_len,
+                                            const uint8_t *prf32,
+                                            uint8_t *handle36, uint8_t *public32);
 int32_t links_identity_public_key(const LinksVaultCallbacks *, const uint8_t *handle36, uint8_t *public32);
 int32_t links_identity_sign(const LinksVaultCallbacks *, const uint8_t *handle36,
                             const uint8_t *expected_public32, const uint8_t *message,

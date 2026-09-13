@@ -5,6 +5,7 @@
 
 use links_client_core::{
     identity::{HardwareIdentityStore, HardwareSeedVault, IdentityStore, KeyHandle},
+    passkey_backup::{PasskeyBackupEnvelope, PasskeyBackupSalt},
     CoreError,
 };
 use std::{ffi::c_void, panic::AssertUnwindSafe, slice, str};
@@ -18,6 +19,10 @@ pub const AUTHENTICATION: i32 = 3;
 pub const PROVIDER: i32 = 4;
 pub const MAX_MESSAGE: usize = 1024 * 1024;
 pub const MAX_TRANSCRIPT: usize = 1024;
+pub const MAX_RECOVERY_PHRASE: usize = 512;
+pub const MAX_RECOVERY_PASSPHRASE: usize = 256;
+pub const MAX_CREDENTIAL_ID: usize = 1024;
+pub const MAX_BACKUP_ENVELOPE: usize = 1152;
 const HANDLE_LEN: usize = 36;
 
 #[repr(C)]
@@ -137,10 +142,22 @@ unsafe fn read_fixed<const N: usize>(input: *const u8) -> Result<[u8; N], i32> {
 }
 
 unsafe fn read_bytes<'a>(input: *const u8, length: usize) -> Result<&'a [u8], i32> {
-    if input.is_null() || length > MAX_TRANSCRIPT {
+    read_bytes_limited(input, length, MAX_TRANSCRIPT, false)
+}
+
+unsafe fn read_bytes_limited<'a>(
+    input: *const u8,
+    length: usize,
+    maximum: usize,
+    allow_empty_null: bool,
+) -> Result<&'a [u8], i32> {
+    if length > maximum || (input.is_null() && !(allow_empty_null && length == 0)) {
         return Err(INVALID);
     }
     // SAFETY: callers provide a readable buffer of the declared length.
+    if length == 0 {
+        return Ok(&[]);
+    }
     Ok(unsafe { slice::from_raw_parts(input, length) })
 }
 
@@ -291,6 +308,183 @@ pub unsafe extern "C" fn links_identity_create(
             Err(error) => {
                 // Creation failed: do not return an unusable identity. Native
                 // cleanup is best effort; crash/orphan cleanup is a separate gate.
+                let _ = store.delete_key(key);
+                return Err(status(error));
+            }
+        };
+        unsafe {
+            out_handle.copy_from_nonoverlapping(key.as_bytes().as_ptr(), HANDLE_LEN);
+            out_public_key.copy_from_nonoverlapping(public_key.as_ptr(), 32);
+        }
+        Ok(())
+    })
+}
+
+/// Derive an identity from an explicit local BIP-39 recovery phrase and seal it
+/// in the native hardware vault. The phrase and passphrase are never retained.
+/// # Safety
+/// Input buffers are readable for their declared lengths. Output buffers are
+/// distinct writable buffers of 36 and 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn links_identity_restore_from_mnemonic(
+    callbacks: *const VaultCallbacks,
+    phrase: *const u8,
+    phrase_len: usize,
+    passphrase: *const u8,
+    passphrase_len: usize,
+    out_handle: *mut u8,
+    out_public_key: *mut u8,
+) -> i32 {
+    if out_handle.is_null() || out_public_key.is_null() {
+        return INVALID;
+    }
+    unsafe {
+        out_handle.write_bytes(0, HANDLE_LEN);
+        out_public_key.write_bytes(0, 32);
+    }
+    boundary(|| {
+        let phrase = unsafe {
+            read_bytes_limited(phrase, phrase_len, MAX_RECOVERY_PHRASE, false)?
+        };
+        let passphrase = unsafe {
+            read_bytes_limited(
+                passphrase,
+                passphrase_len,
+                MAX_RECOVERY_PASSPHRASE,
+                true,
+            )?
+        };
+        let phrase = str::from_utf8(phrase).map_err(|_| INVALID)?;
+        let passphrase = str::from_utf8(passphrase).map_err(|_| INVALID)?;
+        let mnemonic = links_identity::RecoveryMnemonic::from_phrase(phrase)
+            .map_err(|_| AUTHENTICATION)?;
+        let mut store = unsafe { store(callbacks)? };
+        let key = store
+            .restore_from_recovery(&mnemonic, passphrase)
+            .map_err(status)?;
+        let public_key = match store.public_key(&key) {
+            Ok(public_key) => public_key,
+            Err(error) => {
+                let _ = store.delete_key(key);
+                return Err(status(error));
+            }
+        };
+        unsafe {
+            out_handle.copy_from_nonoverlapping(key.as_bytes().as_ptr(), HANDLE_LEN);
+            out_public_key.copy_from_nonoverlapping(public_key.as_ptr(), 32);
+        }
+        Ok(())
+    })
+}
+
+/// Seal the vault identity with a locally evaluated WebAuthn PRF result.
+/// Only the opaque envelope leaves the native boundary.
+/// # Safety
+/// Fixed inputs and output pointers follow the sizes in the C header. The
+/// credential and PRF buffers are readable for their declared lengths.
+#[no_mangle]
+pub unsafe extern "C" fn links_identity_backup_with_passkey(
+    callbacks: *const VaultCallbacks,
+    key_handle: *const u8,
+    backup_id: *const u8,
+    device_id: *const u8,
+    credential_id: *const u8,
+    credential_id_len: usize,
+    salt: *const u8,
+    prf_output: *const u8,
+    output: *mut u8,
+    output_capacity: usize,
+    output_length: *mut usize,
+) -> i32 {
+    if output_length.is_null() {
+        return INVALID;
+    }
+    unsafe { output_length.write(0) };
+    boundary(|| {
+        if output.is_null() {
+            return Err(INVALID);
+        }
+        let key = unsafe { handle(key_handle)? };
+        let backup_id = Uuid::from_bytes(unsafe { read_fixed(backup_id)? });
+        let device_id = Uuid::from_bytes(unsafe { read_fixed(device_id)? });
+        let credential_id = unsafe {
+            read_bytes_limited(credential_id, credential_id_len, MAX_CREDENTIAL_ID, false)?
+        };
+        let salt = unsafe { read_fixed::<32>(salt)? };
+        let prf_output = unsafe { read_fixed::<32>(prf_output)? };
+        let store = unsafe { store(callbacks)? };
+        let envelope = store
+            .backup_with_passkey(
+                &key,
+                backup_id,
+                device_id,
+                credential_id,
+                PasskeyBackupSalt::from_bytes(salt),
+                &prf_output,
+            )
+            .map_err(status)?;
+        if envelope.as_bytes().len() > MAX_BACKUP_ENVELOPE
+            || envelope.as_bytes().len() > output_capacity
+        {
+            return Err(INVALID);
+        }
+        unsafe {
+            output.copy_from_nonoverlapping(envelope.as_bytes().as_ptr(), envelope.as_bytes().len());
+            output_length.write(envelope.as_bytes().len());
+        }
+        Ok(())
+    })
+}
+
+/// Open an opaque passkey envelope after local WebAuthn PRF evaluation and
+/// immediately reseal the recovered identity in the native hardware vault.
+/// # Safety
+/// Fixed inputs and output pointers follow the sizes in the C header. The
+/// envelope, credential and PRF buffers are readable for their declared sizes.
+#[no_mangle]
+pub unsafe extern "C" fn links_identity_restore_from_passkey(
+    callbacks: *const VaultCallbacks,
+    backup_id: *const u8,
+    device_id: *const u8,
+    credential_id: *const u8,
+    credential_id_len: usize,
+    envelope: *const u8,
+    envelope_len: usize,
+    prf_output: *const u8,
+    out_handle: *mut u8,
+    out_public_key: *mut u8,
+) -> i32 {
+    if out_handle.is_null() || out_public_key.is_null() {
+        return INVALID;
+    }
+    unsafe {
+        out_handle.write_bytes(0, HANDLE_LEN);
+        out_public_key.write_bytes(0, 32);
+    }
+    boundary(|| {
+        let backup_id = Uuid::from_bytes(unsafe { read_fixed(backup_id)? });
+        let device_id = Uuid::from_bytes(unsafe { read_fixed(device_id)? });
+        let credential_id = unsafe {
+            read_bytes_limited(credential_id, credential_id_len, MAX_CREDENTIAL_ID, false)?
+        };
+        let envelope = unsafe {
+            read_bytes_limited(envelope, envelope_len, MAX_BACKUP_ENVELOPE, false)?
+        };
+        let prf_output = unsafe { read_fixed::<32>(prf_output)? };
+        let envelope = PasskeyBackupEnvelope::try_from(envelope.to_vec()).map_err(status)?;
+        let mut store = unsafe { store(callbacks)? };
+        let key = store
+            .restore_from_passkey(
+                &envelope,
+                backup_id,
+                device_id,
+                credential_id,
+                &prf_output,
+            )
+            .map_err(status)?;
+        let public_key = match store.public_key(&key) {
+            Ok(public_key) => public_key,
+            Err(error) => {
                 let _ = store.delete_key(key);
                 return Err(status(error));
             }

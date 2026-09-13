@@ -12,6 +12,10 @@ import java.util.UUID;
  * Invoke off the main thread. No seed is retained between operations. */
 public final class HardwareIdentityStore {
     private static final Object WORKER_LOCK = new Object();
+    public static final int MAX_CREDENTIAL_ID_BYTES = 1024;
+    public static final int MAX_BACKUP_ENVELOPE_BYTES = 1152;
+    private static final int MAX_RECOVERY_PHRASE_BYTES = 512;
+    private static final int MAX_RECOVERY_PASSPHRASE_BYTES = 256;
     private final HardwareSeedVault vault;
 
     public HardwareIdentityStore(Context context) throws GeneralSecurityException, IOException {
@@ -40,6 +44,57 @@ public final class HardwareIdentityStore {
             byte[] reference = NativeIdentityBridge.create(vault);
             return new KeyReference(new String(reference, 0, 36, StandardCharsets.US_ASCII),
                     Arrays.copyOfRange(reference, 36, 68));
+        }
+    }
+    /** Explicit local BIP-39 restore. The phrase never enters a network API. */
+    public KeyReference restoreFromRecovery(String phrase, String passphrase)
+            throws GeneralSecurityException, IOException {
+        if (phrase == null || passphrase == null)
+            throw new GeneralSecurityException("Invalid recovery input");
+        byte[] phraseBytes = phrase.getBytes(StandardCharsets.UTF_8);
+        byte[] passphraseBytes = passphrase.getBytes(StandardCharsets.UTF_8);
+        if (phraseBytes.length == 0 || phraseBytes.length > MAX_RECOVERY_PHRASE_BYTES
+                || passphraseBytes.length > MAX_RECOVERY_PASSPHRASE_BYTES)
+            throw new GeneralSecurityException("Invalid recovery input");
+        try {
+            synchronized (WORKER_LOCK) {
+                return reference(NativeIdentityBridge.restoreFromRecovery(vault, phraseBytes, passphraseBytes));
+            }
+        } finally {
+            wipe(phraseBytes);
+            wipe(passphraseBytes);
+        }
+    }
+    /** Seal the identity with a WebAuthn PRF result. Only the opaque envelope returns. */
+    public byte[] backupWithPasskey(KeyReference identity, UUID backupId, UUID deviceId,
+            byte[] credentialId, byte[] salt, byte[] prfOutput)
+            throws GeneralSecurityException, IOException {
+        validatePasskeyInput(identity, backupId, deviceId, credentialId, salt, prfOutput);
+        byte[] prf = prfOutput.clone();
+        try {
+            synchronized (WORKER_LOCK) {
+                return NativeIdentityBridge.backupWithPasskey(vault, identity.handleBytes(),
+                        uuidBytes(backupId), uuidBytes(deviceId), credentialId, salt, prf);
+            }
+        } finally {
+            wipe(prf);
+        }
+    }
+    /** Restore an opaque passkey envelope into the native hardware vault. */
+    public KeyReference restoreFromPasskey(UUID backupId, UUID deviceId, byte[] credentialId,
+            byte[] envelope, byte[] prfOutput)
+            throws GeneralSecurityException, IOException {
+        if (envelope == null || envelope.length == 0 || envelope.length > MAX_BACKUP_ENVELOPE_BYTES)
+            throw new GeneralSecurityException("Invalid passkey backup envelope");
+        validatePasskeyInput(null, backupId, deviceId, credentialId, null, prfOutput);
+        byte[] prf = prfOutput.clone();
+        try {
+            synchronized (WORKER_LOCK) {
+                return reference(NativeIdentityBridge.restoreFromPasskey(vault,
+                        uuidBytes(backupId), uuidBytes(deviceId), credentialId, envelope, prf));
+            }
+        } finally {
+            wipe(prf);
         }
     }
     /** Restore/check only. Missing or invalidated keys never trigger creation. */
@@ -90,6 +145,30 @@ public final class HardwareIdentityStore {
     /** Explicit device removal only; never delete on a network retry/login. */
     public void deleteIdentity(KeyReference identity) throws GeneralSecurityException, IOException {
         synchronized (WORKER_LOCK) { NativeIdentityBridge.delete(vault, identity.handleBytes()); }
+    }
+
+    private static KeyReference reference(byte[] encoded) throws GeneralSecurityException {
+        if (encoded == null || encoded.length != 68)
+            throw new GeneralSecurityException("Invalid identity reference");
+        return new KeyReference(new String(encoded, 0, 36, StandardCharsets.US_ASCII),
+                Arrays.copyOfRange(encoded, 36, 68));
+    }
+
+    private static void validatePasskeyInput(KeyReference identity, UUID backupId, UUID deviceId,
+            byte[] credentialId, byte[] salt, byte[] prfOutput) throws GeneralSecurityException {
+        if (identity == null && salt != null)
+            throw new GeneralSecurityException("Invalid passkey identity");
+        if (backupId == null || deviceId == null || backupId.equals(new UUID(0, 0))
+                || deviceId.equals(new UUID(0, 0)) || credentialId == null
+                || credentialId.length == 0 || credentialId.length > MAX_CREDENTIAL_ID_BYTES
+                || prfOutput == null || prfOutput.length != 32)
+            throw new GeneralSecurityException("Invalid passkey backup input");
+        if (salt != null && salt.length != 32)
+            throw new GeneralSecurityException("Invalid passkey backup salt");
+    }
+
+    private static void wipe(byte[] bytes) {
+        if (bytes != null) Arrays.fill(bytes, (byte) 0);
     }
 
     private static byte[] uuidBytes(UUID value) {

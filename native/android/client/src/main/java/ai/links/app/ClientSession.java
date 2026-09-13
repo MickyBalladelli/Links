@@ -64,6 +64,12 @@ public final class ClientSession {
         return identity;
     }
 
+    /** Bearer token is memory-only and is used only for an active recovery ceremony. */
+    public synchronized String accessToken() {
+        if (!isAuthenticated()) throw new IllegalStateException("Account session required");
+        return accessToken;
+    }
+
     public synchronized HardwareIdentityStore.KeyReference createIdentity()
             throws GeneralSecurityException, IOException {
         if (identity != null) throw new GeneralSecurityException("Identity already enrolled");
@@ -88,6 +94,33 @@ public final class ClientSession {
         deviceId = createdDeviceId;
         mlsNodeId = createdMlsNodeId;
         return created;
+    }
+
+    /** Restore a deterministic identity locally; never replace an enrolled identity silently. */
+    public synchronized HardwareIdentityStore.KeyReference restoreFromRecovery(
+            String phrase, String passphrase) throws GeneralSecurityException, IOException {
+        requireNoIdentityForRecovery();
+        HardwareIdentityStore.KeyReference recovered = identityStore.restoreFromRecovery(phrase, passphrase);
+        return adoptRecoveredIdentity(recovered);
+    }
+
+    /** Create the opaque passkey backup after the server assertion succeeds. */
+    public synchronized byte[] createPasskeyBackup(UUID backupId, byte[] credentialId,
+            byte[] salt, byte[] prfOutput) throws GeneralSecurityException, IOException {
+        if (!isAuthenticated() || identity == null)
+            throw new GeneralSecurityException("Authenticated identity required");
+        return identityStore.backupWithPasskey(identity, backupId, UUID.fromString(deviceId),
+                credentialId, salt, prfOutput);
+    }
+
+    /** Restore a passkey envelope and assign this physical client a fresh device/node ID. */
+    public synchronized HardwareIdentityStore.KeyReference restoreFromPasskey(UUID backupId,
+            UUID sourceDeviceId, byte[] credentialId, byte[] envelope, byte[] prfOutput)
+            throws GeneralSecurityException, IOException {
+        requireNoIdentityForRecovery();
+        HardwareIdentityStore.KeyReference recovered = identityStore.restoreFromPasskey(
+                backupId, sourceDeviceId, credentialId, envelope, prfOutput);
+        return adoptRecoveredIdentity(recovered);
     }
 
     public synchronized void validateIdentity() throws GeneralSecurityException, IOException {
@@ -172,6 +205,39 @@ public final class ClientSession {
         deviceId = parseDeviceId(storedDeviceId);
         mlsNodeId = parseDeviceId(storedMlsNodeId);
         if (storedUserId != null) userId = parseDeviceId(storedUserId);
+    }
+
+    private void requireNoIdentityForRecovery() throws GeneralSecurityException {
+        if (identity != null || preferences.contains(HANDLE))
+            throw new GeneralSecurityException("Identity already enrolled; explicit reset required");
+    }
+
+    private HardwareIdentityStore.KeyReference adoptRecoveredIdentity(
+            HardwareIdentityStore.KeyReference recovered) throws GeneralSecurityException, IOException {
+        String recoveredDeviceId = UUID.randomUUID().toString();
+        String recoveredMlsNodeId = UUID.randomUUID().toString();
+        boolean saved = preferences.edit()
+                .putString(HANDLE, recovered.handle())
+                .putString(PUBLIC_KEY, Base64.encodeToString(recovered.publicKey(), Base64.NO_WRAP))
+                .putString(DEVICE_ID, recoveredDeviceId)
+                .putString(MLS_NODE_ID, recoveredMlsNodeId)
+                .remove(USER_ID)
+                .commit();
+        if (!saved) {
+            try {
+                identityStore.deleteIdentity(recovered);
+            } catch (GeneralSecurityException cleanup) {
+                throw new IOException("Recovered identity metadata unavailable", cleanup);
+            }
+            throw new IOException("Recovered identity metadata unavailable");
+        }
+        identity = recovered;
+        deviceId = recoveredDeviceId;
+        mlsNodeId = recoveredMlsNodeId;
+        userId = null;
+        accessToken = null;
+        accessTokenExpiresAtMs = 0;
+        return recovered;
     }
 
     private void validateChallenge(OtpClient.Challenge challenge) throws GeneralSecurityException {

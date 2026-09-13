@@ -8,6 +8,14 @@ final class NativeIdentityBridge {
     static { System.loadLibrary("links_identity_jni"); }
     private NativeIdentityBridge() {}
     static native byte[] create(Object vault) throws GeneralSecurityException, IOException;
+    static native byte[] restoreFromRecovery(Object vault, byte[] phrase, byte[] passphrase)
+            throws GeneralSecurityException, IOException;
+    static native byte[] backupWithPasskey(Object vault, byte[] handle, byte[] backupId,
+            byte[] deviceId, byte[] credentialId, byte[] salt, byte[] prfOutput)
+            throws GeneralSecurityException, IOException;
+    static native byte[] restoreFromPasskey(Object vault, byte[] backupId, byte[] deviceId,
+            byte[] credentialId, byte[] envelope, byte[] prfOutput)
+            throws GeneralSecurityException, IOException;
     static native byte[] publicKey(Object vault, byte[] handle) throws GeneralSecurityException, IOException;
     static native byte[] sign(Object vault, byte[] handle, byte[] publicKey, byte[] transcript) throws GeneralSecurityException, IOException;
     static native void delete(Object vault, byte[] handle) throws GeneralSecurityException, IOException;
