@@ -254,7 +254,13 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
 
 Bring iOS to feature parity with Android. Validate hardware-backed keys and background delivery early.
 
-- [ ] Build the iOS client on top of the shared client core.
+- [x] Build the iOS client on top of the shared client core.
+  `native/apple` now exports the `LinksClient` Swift target. `IOSClient` restores
+  and validates Secure Enclave-backed identity metadata, keeps bearer sessions
+  in memory, and requires `SharedClientCoreFactory` to bind the shared Rust
+  `ClientCore`, MLS, envelope, durable-store, and hardware signing providers. OTP, transport,
+  messaging UI, APNs recovery, and passkey/seed recovery remain later Phase 4
+  tasks; see [iOS client foundation](docs/ios-client.md).
 - [ ] Add phone OTP onboarding and Secure Enclave key storage.
 - [ ] Implement iOS connection manager with exponential backoff, reconnect, and heartbeating.
 - [ ] Implement the same 1-to-1 send and receive flows as Android.

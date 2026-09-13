@@ -8,7 +8,10 @@ let rustLibraryDirectory = ProcessInfo.processInfo.environment["LINKS_IDENTITY_L
 let package = Package(
     name: "LinksKeyStore",
     platforms: [.iOS(.v16), .macOS(.v13)],
-    products: [.library(name: "LinksKeyStore", targets: ["LinksKeyStore"])],
+    products: [
+        .library(name: "LinksKeyStore", targets: ["LinksKeyStore"]),
+        .library(name: "LinksClient", targets: ["LinksClient"])
+    ],
     targets: [
         .systemLibrary(name: "CLinksIdentity"),
         .target(name: "LinksKeyStore", dependencies: ["CLinksIdentity"], linkerSettings: [
@@ -16,6 +19,7 @@ let package = Package(
             .linkedLibrary("links_identity_ffi"),
             .linkedFramework("Security")
         ]),
+        .target(name: "LinksClient", dependencies: ["LinksKeyStore"]),
         .testTarget(name: "LinksKeyStoreTests", dependencies: ["LinksKeyStore"])
     ]
 )
