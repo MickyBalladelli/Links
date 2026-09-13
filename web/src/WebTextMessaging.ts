@@ -4,6 +4,11 @@ import {
 } from './WebConnectionManager'
 import type { WebConnectionState } from './WebConnectionManager'
 import { requireCanonicalUUID } from './LinksWebClient'
+import type {
+  WebImageMetadata,
+  WebImageUploadReceipt,
+  WebEncryptedImage
+} from './WebImages'
 
 export interface WebCoreTransport {
   send(frame: Uint8Array): boolean
@@ -37,6 +42,27 @@ export interface WebMessagingCore extends WebCoreTransport {
     conversationID: string,
     recipientUserID: string,
     text: string,
+    transport: WebCoreTransport
+  ): void
+  encodeImageBlurHash?(
+    rgbPixels: Uint8Array,
+    width: number,
+    height: number
+  ): string
+  encryptImage?(
+    image: Uint8Array,
+    attachmentID: string,
+    mimeType: string,
+    width: number,
+    height: number,
+    blurHash: string
+  ): WebEncryptedImage
+  decryptImage?(metadata: WebImageMetadata, ciphertext: Uint8Array): Uint8Array
+  sendImage?(
+    conversationID: string,
+    recipientUserID: string,
+    metadata: WebImageMetadata,
+    receipt: WebImageUploadReceipt,
     transport: WebCoreTransport
   ): void
 }
@@ -144,6 +170,28 @@ export class WebTextMessaging implements WebCoreTransport {
     this.core.sendText(conversationID, recipientUserID, text, manager)
   }
 
+  /** Send private image metadata only after the exact ciphertext receipt. */
+  sendImage(
+    conversationID: string,
+    recipientUserID: string,
+    metadata: WebImageMetadata,
+    receipt: WebImageUploadReceipt
+  ): void {
+    requireCanonicalUUID(conversationID, 'conversation ID')
+    requireCanonicalUUID(recipientUserID, 'recipient user ID')
+    if (receipt.attachmentID !== metadata.attachmentID ||
+        receipt.ciphertextSizeBytes !== metadata.ciphertextSizeBytes ||
+        !sameBytes(receipt.ciphertextSHA256, metadata.ciphertextSHA256)) {
+      throw new Error('Invalid image upload receipt')
+    }
+    const manager = this.manager
+    if (this.coreFailed || this.currentState !== 'ready' || manager === null ||
+        !manager.isConnected || this.core.sendImage === undefined) {
+      throw new Error('Web image session is not connected')
+    }
+    this.core.sendImage(conversationID, recipientUserID, metadata, receipt, manager)
+  }
+
   private createHello(): Uint8Array {
     const token = this.accessToken()
     if (typeof token !== 'string' || token.length === 0) {
@@ -198,4 +246,8 @@ export class WebTextMessaging implements WebCoreTransport {
       // UI callbacks must not break crypto, cursor commits or reconnects.
     }
   }
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
