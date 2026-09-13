@@ -43,6 +43,10 @@ metadata, transcode to lossy WebP or AVIF at approximately 80% quality, and
 preserve the displayed orientation before encryption. Android emits WebP;
 iOS tries AVIF and falls back to WebP when the platform encoder is unavailable.
 The resulting dimensions and MIME type belong in the private `MediaMetadata`.
+Image messages may also carry a fixed 4x3, 28-character BlurHash in
+MediaMetadata.blur_hash. Clients generate it from resized RGB pixels and
+render it while encrypted image bytes are unavailable; the hash is private
+message content, not a public text or routing field.
 
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field

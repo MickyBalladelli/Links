@@ -27,6 +27,7 @@ pub const OPUS_MAX_BITRATE_KBPS: u32 = 24;
 pub const OPUS_SAMPLE_RATE_HZ: [u32; 5] = [8_000, 12_000, 16_000, 24_000, 48_000];
 pub const OPUS_CHANNELS: [u32; 2] = [1, 2];
 pub const OPUS_FRAME_DURATION_MS: u32 = 20;
+pub const BLUR_HASH_LENGTH: usize = 28;
 pub const ML_KEM_768_PUBLIC_KEY_BYTES: usize = 1184;
 pub const MAX_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub const MAX_CURSOR: u64 = i64::MAX as u64;
@@ -61,6 +62,19 @@ pub fn validate_handle(value: &str) -> Result<(), ProtocolError> {
         || !value.as_bytes()[0].is_ascii_lowercase()
     {
         return Err(ProtocolError::Invalid("handle"));
+    }
+    Ok(())
+}
+
+pub fn validate_blur_hash(value: &str) -> Result<(), ProtocolError> {
+    const BASE83: &[u8; 83] =
+        b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~";
+    if value.len() != BLUR_HASH_LENGTH
+        || !value.is_ascii()
+        || !value.bytes().all(|byte| BASE83.contains(&byte))
+        || value.as_bytes()[0] != b'L'
+    {
+        return Err(ProtocolError::Invalid("blur_hash"));
     }
     Ok(())
 }
@@ -156,6 +170,9 @@ pub fn validate_media_metadata(media: &v1::MediaMetadata) -> Result<(), Protocol
         || media.height == Some(0)
     {
         return Err(ProtocolError::Invalid("media"));
+    }
+    if let Some(blur_hash) = media.blur_hash.as_deref() {
+        validate_blur_hash(blur_hash)?;
     }
     if let Some(opus) = media.opus.as_ref() {
         validate_opus_audio_metadata(opus)?;
