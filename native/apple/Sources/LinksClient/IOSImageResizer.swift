@@ -43,6 +43,17 @@ public enum IOSImageResizer {
             throw IOSImageResizeError.invalidInput
         }
 
+        if sourceWidth <= maximumImageEdge && sourceHeight <= maximumImageEdge {
+            guard let sourceType = CGImageSourceGetType(source) as String? else {
+                throw IOSImageResizeError.unableToReadImage
+            }
+            return IOSResizedImage(
+                data: data,
+                mimeType: sourceMimeType(for: sourceType),
+                width: sourceWidth,
+                height: sourceHeight)
+        }
+
         let thumbnailOptions: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -58,8 +69,8 @@ public enum IOSImageResizer {
             output, outputUTI as CFString, 1, nil) else {
             throw IOSImageResizeError.unableToEncodeImage
         }
-        let properties: [CFString: Any] = [:]
-        CGImageDestinationAddImage(destination, thumbnail, properties as CFDictionary)
+        let outputProperties: [CFString: Any] = [:]
+        CGImageDestinationAddImage(destination, thumbnail, outputProperties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             throw IOSImageResizeError.unableToEncodeImage
         }
@@ -90,6 +101,18 @@ public enum IOSImageResizer {
         if uti == UTType.heic.identifier { return "image/heic" }
         if uti == UTType.heif.identifier { return "image/heif" }
         return "image/png"
+    }
+
+    private static func sourceMimeType(for uti: String) -> String {
+        if uti == UTType.jpeg.identifier { return "image/jpeg" }
+        if uti == UTType.png.identifier { return "image/png" }
+        if uti == UTType.heic.identifier { return "image/heic" }
+        if uti == UTType.heif.identifier { return "image/heif" }
+        if uti == UTType.gif.identifier { return "image/gif" }
+        if let webp = UTType(filenameExtension: "webp"), uti == webp.identifier {
+            return "image/webp"
+        }
+        return "application/octet-stream"
     }
 }
 #endif

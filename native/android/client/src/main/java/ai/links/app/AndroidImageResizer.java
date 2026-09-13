@@ -37,10 +37,16 @@ public final class AndroidImageResizer {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outMimeType == null)
             throw new IOException("Unable to read image dimensions");
 
+        if (bounds.outWidth <= MAX_IMAGE_EDGE && bounds.outHeight <= MAX_IMAGE_EDGE) {
+            return new Result(encodedImage.clone(), bounds.outMimeType,
+                    bounds.outWidth, bounds.outHeight);
+        }
+
         Dimensions target = targetDimensions(bounds.outWidth, bounds.outHeight);
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight,
                 target.width, target.height);
+        options.inScaled = false;
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
         Bitmap decoded = BitmapFactory.decodeByteArray(encodedImage, 0, encodedImage.length,
                 options);
