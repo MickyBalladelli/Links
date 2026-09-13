@@ -82,7 +82,8 @@ through `links-client-core::mls`. The selected ML-KEM-768 + X25519 ciphersuite i
 an OpenMLS draft suite, so interoperability testing and independent review remain
 release gates. Direct groups are ready only when exactly two distinct user
 identities are present; each physical device may still occupy its own MLS leaf.
-Authenticated first-payload composition remains in the following roadmap items.
+The shared first-payload coordinator is implemented in Phase 3; Android host
+adapters for directory, MLS bootstrap, and durable outbox remain there.
 The server’s direct-group metadata also caps account members at two.
 `crypto::SealedSenderCrypto` now wraps the opaque MLS bytes with an ephemeral
 X25519 key and authenticated ChaCha20-Poly1305 ciphertext; recipient device
@@ -209,7 +210,13 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   30 seconds, rejects text/oversized frames, and reconnects with full-jitter
   backoff with a 1-second initial window and 30-second ceiling. It never places
   bearer tokens in URLs or logs.
-- [ ] Implement the 1-to-1 send flow: query recipient pre-key bundle, establish/resume MLS group, encrypt payload, and send envelope.
+- [x] Implement the 1-to-1 send flow: query recipient pre-key bundle, establish/resume MLS group, encrypt payload, and send envelope.
+  `links-client-core::send` verifies every claimed bundle, installs the verified
+  Sealed Sender key, adds missing recipient devices to the direct MLS group,
+  persists the pending commit, delivers the MLS bootstrap, merges the accepted
+  epoch, then persists and sends exact per-device envelopes. The Android host
+  still supplies the authenticated directory, MLS bootstrap transport, and
+  durable outbox adapters.
 - [ ] Implement the 1-to-1 receive flow: fetch envelope, decrypt Sealed Sender wrapper, process MLS epoch update, render message, and return delivery receipt.
 - [ ] Add FCM background fetch and missing-message recovery.
 - [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.

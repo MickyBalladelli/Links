@@ -149,6 +149,28 @@ restore ciphertext that has already been purged. Client-owned encrypted history
 backup and resync UX are separate future work. Core rejects gaps rather than
 inventing a history or moving the cursor to a high watermark.
 
+## One-to-one send order
+
+`links-client-core::send::send_message` is the shared send coordinator. It
+queries an authenticated directory snapshot for every active device of the
+recipient user, verifies each claimed PQXDH bundle against that device's
+Ed25519 identity key, and installs the verified X25519 key for Sealed Sender.
+The same snapshot must include one authenticated MLS KeyPackage per device.
+
+If the direct MLS group is missing or lacks a recipient device, the coordinator
+stages the TreeKEM commit, persists it, delivers the commit/Welcome bootstrap,
+merges the accepted pending commit, and records that acceptance. It then
+allocates one sender-local sequence, encrypts the Message once with MLS, seals
+that ciphertext independently for each recipient device, persists the exact
+outbox envelopes, and sends those bytes. A partial transport failure retries
+from the durable outbox; it never re-encrypts.
+
+The current public transport protobuf has no MLS control-message type and the
+pre-key bundle has no MLS KeyPackage field. `DirectChatDirectory` and
+`DirectChatTransport::deliver_mls_bootstrap` are therefore explicit adapter
+boundaries. A deployment must add an authenticated, versioned KeyPackage and
+commit/Welcome exchange before claiming end-to-end Android send readiness.
+
 ## Provider and platform boundaries
 
 `IdentityStore` exposes keystore references and signing, not secret key export.
