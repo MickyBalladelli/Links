@@ -171,6 +171,21 @@ pre-key bundle has no MLS KeyPackage field. `DirectChatDirectory` and
 boundaries. A deployment must add an authenticated, versioned KeyPackage and
 commit/Welcome exchange before claiming end-to-end Android send readiness.
 
+## One-to-one receive order
+
+`links-client-core::receive::receive_available` connects or replays from the
+durable device cursor. The receive adapter supplies authenticated MLS Welcome
+or Commit updates alongside each replay page; the coordinator applies them
+before opening the page's Sealed Sender envelopes. It validates the private
+Message, commits the MLS state, messages, tombstones, and cursor together,
+renders only after that commit, and then emits cumulative `QueueAck`.
+
+The returned `DeliveryReceipt` values are private E2EE receipt requests grouped
+by conversation. Hosts pass each request's `content()` to the normal MLS send
+coordinator, with a fresh message ID and sender-local sequence. They must never
+send the receipt protobuf as a plaintext gateway payload. A failed render or
+ack leaves replay safe; durable stores must deduplicate message IDs.
+
 ## Provider and platform boundaries
 
 `IdentityStore` exposes keystore references and signing, not secret key export.

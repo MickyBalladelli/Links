@@ -217,7 +217,12 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   epoch, then persists and sends exact per-device envelopes. The Android host
   still supplies the authenticated directory, MLS bootstrap transport, and
   durable outbox adapters.
-- [ ] Implement the 1-to-1 receive flow: fetch envelope, decrypt Sealed Sender wrapper, process MLS epoch update, render message, and return delivery receipt.
+- [x] Implement the 1-to-1 receive flow: fetch envelope, decrypt Sealed Sender wrapper, process MLS epoch update, render message, and return delivery receipt.
+  `links-client-core::receive::receive_available` replays encrypted mailbox
+  pages, applies authenticated Welcome/Commit updates before decrypting,
+  commits messages and MLS state before QueueAck, invokes the renderer, and
+  returns private E2EE delivery-receipt requests grouped by conversation. The
+  host sends those receipts through the normal MLS send coordinator.
 - [ ] Add FCM background fetch and missing-message recovery.
 - [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.
 - [ ] Release an internal Android text-messaging milestone before adding groups or calls.
