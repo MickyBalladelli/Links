@@ -379,7 +379,12 @@ Add media after text delivery and multi-device sync are stable.
   Native libopus now uses constrained VBR at the selected 16–24 kbps target
   and DTX for silent frames; the Ogg writer still keeps stream framing and
   packet bounds strict.
-- [ ] Add voice-note recording, upload, download, decryption, and playback to Android and iOS.
+- [x] Add voice-note recording, upload, download, decryption, and playback to Android and iOS.
+  `AndroidVoiceNotes` records API-29+ Ogg/Opus and plays verified decrypted
+  cache files; `IOSVoiceNoteSession` records PCM, uses the shared Opus and
+  attachment-core bridge, and plays verified PCM through AVAudioEngine. Both
+  clients upload ciphertext only and require an exact upload receipt before
+  sending private `MediaMetadata` through MLS.
 
 ### Images
 

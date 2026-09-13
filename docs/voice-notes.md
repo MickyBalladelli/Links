@@ -25,4 +25,25 @@ E2EE provider. `OpusAudioMetadata` is placed inside the encrypted `Message`
 and carries bitrate, sample rate, channel count, frame duration and the
 container marker. Servers see only the existing opaque encrypted attachment
 and generic `MediaMetadata`; upload/download and mobile recording/playback are
-the next voice-note task.
+handled by the mobile voice-note adapters below.
+
+## Mobile pipeline
+
+`links-client-core::attachments` creates a fresh 256-bit content key and
+12-byte nonce for every note. It encrypts the complete Ogg Opus container with
+ChaCha20-Poly1305, binds the attachment ID as authenticated data, records the
+ciphertext size and SHA-256 digest, and validates the decrypted Opus stream.
+The key, nonce, digest, and Opus profile are private `MediaMetadata`; upload
+services receive only the attachment ID and ciphertext.
+
+Android uses `AndroidVoiceNotes` with API 29+ `MediaRecorder` Ogg/Opus capture
+and a cache-scoped `MediaPlayer`. iOS uses `IOSVoiceNoteRecorder` for temporary
+16-bit PCM capture, delegates Opus encode/decode and attachment crypto to the
+shared core, and plays verified PCM through `AVAudioEngine`. Both hosts require
+an exact upload receipt before sending the private media Message. Downloaded
+bytes are checked, decrypted, and validated before any playback object is
+created; temporary plaintext files/buffers are removed after use.
+
+The shared send coordinator exposes `send_voice_note`: the host uploads the
+opaque ciphertext, verifies the returned attachment ID/size/digest receipt,
+then calls the normal MLS send path with only private `MediaMetadata`.

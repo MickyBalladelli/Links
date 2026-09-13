@@ -6,6 +6,7 @@
 //! envelope path; this crate never treats one as the other.
 
 use crate::{
+    attachments::EncryptedVoiceNote,
     crypto::{EnvelopeCrypto, RecipientKeyDirectory},
     envelopes::{ClientCore, FanoutRecipient},
     mls::{MlsEngine, PendingCommit},
@@ -234,6 +235,49 @@ where
         recipient_user_id,
         message_id,
         v1::message::Content::Text(text),
+        sent_at_ms,
+        expires_at_ms,
+    )
+    .await
+}
+
+/// Upload the opaque attachment before calling this coordinator, then send
+/// only its private MediaMetadata through the normal MLS/Sealed Sender path.
+/// The host must verify the exact upload receipt before invoking this function.
+pub async fn send_voice_note<C, M, D, T, O>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    recipient_user_id: String,
+    message_id: String,
+    attachment: &EncryptedVoiceNote,
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<DirectSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: DirectChatDirectory,
+    T: DirectChatTransport,
+    O: DirectChatStore,
+{
+    let _validated = EncryptedVoiceNote::new(
+        attachment.media.clone(),
+        attachment.ciphertext.clone(),
+    )?;
+    send_message(
+        core,
+        sequence,
+        directory,
+        transport,
+        store,
+        conversation_id,
+        recipient_user_id,
+        message_id,
+        v1::message::Content::Media(attachment.media.clone()),
         sent_at_ms,
         expires_at_ms,
     )

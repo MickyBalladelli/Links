@@ -232,6 +232,7 @@ public final class AndroidVoiceNotes {
         try {
             active.stop();
         } catch (RuntimeException error) {
+            deleteQuietly(file);
             throw new IOException("Unable to finish voice recording", error);
         } finally {
             active.release();

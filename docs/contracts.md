@@ -28,6 +28,13 @@ kbps, 20 ms frames, supported Opus sample rates, and mono/stereo channels.
 profile metadata and attachment keys stay inside the encrypted Message. The
 server never decodes or inspects the Ogg Opus container.
 
+Voice attachment upload/download is a host transport boundary. Upload accepts
+only an authenticated device token, opaque attachment ID, ciphertext bytes,
+and size/digest; it returns the same ID, size, and digest as a receipt. The
+client must verify that receipt before `send_voice_note` places the private
+`MediaMetadata` in MLS. Downloaded bytes must pass size/digest verification,
+shared-core AEAD decryption, and Opus validation before playback.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer
