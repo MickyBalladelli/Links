@@ -66,9 +66,7 @@ pub fn encode_blur_hash(width: u32, height: u32, rgb: &[u8]) -> Result<String, I
     let pixels = width
         .checked_mul(height)
         .ok_or(ImageError::InvalidDimensions)?;
-    let expected_bytes = pixels
-        .checked_mul(3)
-        .ok_or(ImageError::InvalidPixels)?;
+    let expected_bytes = pixels.checked_mul(3).ok_or(ImageError::InvalidPixels)?;
     if pixels > BLUR_HASH_MAX_PIXELS || rgb.len() != expected_bytes {
         return Err(ImageError::InvalidPixels);
     }
@@ -88,8 +86,8 @@ pub fn encode_blur_hash(width: u32, height: u32, rgb: &[u8]) -> Result<String, I
     }
 
     let mut hash = String::with_capacity(BLUR_HASH_LENGTH);
-    let size_value = (BLUR_HASH_COMPONENTS_X - 1) as u32
-        + ((BLUR_HASH_COMPONENTS_Y - 1) as u32 * 9);
+    let size_value =
+        (BLUR_HASH_COMPONENTS_X - 1) as u32 + ((BLUR_HASH_COMPONENTS_Y - 1) as u32 * 9);
     append_base83(&mut hash, size_value, 1);
 
     let maximum_ac = components
@@ -98,9 +96,7 @@ pub fn encode_blur_hash(width: u32, height: u32, rgb: &[u8]) -> Result<String, I
         .flat_map(|component| component.iter())
         .map(|value| value.abs())
         .fold(0.0_f32, f32::max);
-    let maximum_ac_quantised = ((maximum_ac * 166.0) - 0.5)
-        .floor()
-        .clamp(0.0, 255.0) as u32;
+    let maximum_ac_quantised = ((maximum_ac * 166.0) - 0.5).floor().clamp(0.0, 255.0) as u32;
     let maximum_ac_value = (maximum_ac_quantised as f32 + 1.0) / 166.0;
     append_base83(&mut hash, maximum_ac_quantised, 1);
 
@@ -158,8 +154,7 @@ fn dct_component(
     let scale = normalisation / (width * height) as f32;
     for y in 0..height {
         for x in 0..width {
-            let basis = (std::f32::consts::PI * component_x as f32 * x as f32 / width as f32)
-                .cos()
+            let basis = (std::f32::consts::PI * component_x as f32 * x as f32 / width as f32).cos()
                 * (std::f32::consts::PI * component_y as f32 * y as f32 / height as f32).cos();
             let sample = samples[y * width + x];
             value[0] += sample[0] * basis;
@@ -218,7 +213,5 @@ fn append_base83(output: &mut String, mut value: u32, length: usize) {
 }
 
 fn scaled_edge(edge: u32, longest: u32) -> u32 {
-    (((edge as u64 * MAX_IMAGE_EDGE as u64) + longest as u64 / 2)
-        / longest as u64)
-        .max(1) as u32
+    (((edge as u64 * MAX_IMAGE_EDGE as u64) + longest as u64 / 2) / longest as u64).max(1) as u32
 }

@@ -15,6 +15,9 @@ message MediaMetadata {
   // Private 4x3 BlurHash placeholder; stays inside the encrypted Message.
   optional string blur_hash = 10;
   optional OpusAudioMetadata opus = 11;
+  // Present only for chunk-encrypted large attachments; private E2EE metadata.
+  optional uint64 original_size_bytes = 12;
+  optional uint32 encryption_chunk_bytes = 13;
 }
 
 message OpusAudioMetadata {

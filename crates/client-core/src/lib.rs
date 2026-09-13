@@ -2,16 +2,16 @@
 //! Ed25519 identity, PQXDH key agreement, and an OpenMLS TreeKEM provider are
 //! available. The default outer envelope provider still fails closed; install
 //! `crypto::SealedSenderCrypto` with a platform-backed key resolver for sends.
-pub mod background;
 pub mod attachments;
+pub mod background;
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;
 pub mod images;
 pub mod mls;
+pub mod p2p_transfer;
 pub mod pairing;
 pub mod passkey_backup;
-pub mod p2p_transfer;
 pub mod pqxdh;
 pub mod prekeys;
 pub mod receive;

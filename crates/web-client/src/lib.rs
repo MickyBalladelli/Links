@@ -5,6 +5,7 @@
 //! delegates pairing format and MLS credential validation to client-core.
 
 use links_client_core::{
+    attachments::{decrypt_large_file_chunk, LargeFileEncryptor},
     identity::IdentitySeed,
     pairing::{PairingPayload, PairingRegistrationResponse},
     protocol, CoreError,
@@ -14,6 +15,180 @@ use wasm_bindgen::prelude::*;
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
+}
+
+/// Private metadata returned after a browser has staged all encrypted chunks.
+/// Sizes are decimal strings so JavaScript never loses uint64 precision.
+#[wasm_bindgen]
+pub struct WebLargeFileMetadata {
+    attachment_id: String,
+    mime_type: String,
+    original_size_bytes: String,
+    ciphertext_size_bytes: String,
+    content_key: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext_sha256: Vec<u8>,
+    width: u32,
+    height: u32,
+    duration_ms: String,
+}
+
+#[wasm_bindgen]
+impl WebLargeFileMetadata {
+    pub fn attachment_id(&self) -> String {
+        self.attachment_id.clone()
+    }
+
+    pub fn mime_type(&self) -> String {
+        self.mime_type.clone()
+    }
+
+    pub fn original_size_bytes(&self) -> String {
+        self.original_size_bytes.clone()
+    }
+
+    pub fn ciphertext_size_bytes(&self) -> String {
+        self.ciphertext_size_bytes.clone()
+    }
+
+    pub fn content_key(&self) -> Vec<u8> {
+        self.content_key.clone()
+    }
+
+    pub fn nonce(&self) -> Vec<u8> {
+        self.nonce.clone()
+    }
+
+    pub fn ciphertext_sha256(&self) -> Vec<u8> {
+        self.ciphertext_sha256.clone()
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn duration_ms(&self) -> String {
+        self.duration_ms.clone()
+    }
+}
+
+/// WASM handle for the same bounded chunk encryptor used by native hosts.
+#[wasm_bindgen]
+pub struct WebLargeFileEncryptor {
+    inner: Option<LargeFileEncryptor>,
+}
+
+#[wasm_bindgen]
+impl WebLargeFileEncryptor {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        attachment_id: &str,
+        mime_type: &str,
+        width: u32,
+        height: u32,
+        duration_ms: &str,
+    ) -> Result<Self, JsValue> {
+        let duration_ms = duration_ms.parse::<u64>().map_err(js_error)?;
+        let inner = LargeFileEncryptor::new(
+            attachment_id.to_owned(),
+            mime_type.to_owned(),
+            (width > 0).then_some(width),
+            (height > 0).then_some(height),
+            (duration_ms > 0).then_some(duration_ms),
+        )
+        .map_err(js_error)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn encrypt_chunk(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, JsValue> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| js_error("large file encryptor is finished"))?
+            .encrypt_chunk(plaintext)
+            .map_err(js_error)
+    }
+
+    pub fn finish(&mut self) -> Result<WebLargeFileMetadata, JsValue> {
+        let mut inner = self
+            .inner
+            .take()
+            .ok_or_else(|| js_error("large file encryptor is finished"))?;
+        let encrypted = inner.finish().map_err(js_error)?;
+        web_large_file_metadata(&encrypted.media).map_err(js_error)
+    }
+}
+
+/// WASM handle for chunk decryption after private MLS metadata arrives.
+#[wasm_bindgen]
+pub struct WebLargeFileDecryptor {
+    media: links_client_core::protocol::v1::MediaMetadata,
+}
+
+#[wasm_bindgen]
+impl WebLargeFileDecryptor {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        attachment_id: &str,
+        mime_type: &str,
+        original_size_bytes: &str,
+        ciphertext_size_bytes: &str,
+        content_key: &[u8],
+        nonce: &[u8],
+        ciphertext_sha256: &[u8],
+        width: u32,
+        height: u32,
+        duration_ms: &str,
+    ) -> Result<Self, JsValue> {
+        let original_size_bytes = original_size_bytes.parse::<u64>().map_err(js_error)?;
+        let ciphertext_size_bytes = ciphertext_size_bytes.parse::<u64>().map_err(js_error)?;
+        let duration_ms = duration_ms.parse::<u64>().map_err(js_error)?;
+        let media = links_client_core::protocol::v1::MediaMetadata {
+            attachment_id: attachment_id.to_owned(),
+            mime_type: mime_type.to_owned(),
+            ciphertext_size_bytes,
+            content_key: content_key.to_vec(),
+            nonce: nonce.to_vec(),
+            ciphertext_sha256: ciphertext_sha256.to_vec(),
+            width: (width > 0).then_some(width),
+            height: (height > 0).then_some(height),
+            duration_ms: (duration_ms > 0).then_some(duration_ms),
+            blur_hash: None,
+            opus: None,
+            original_size_bytes: Some(original_size_bytes),
+            encryption_chunk_bytes: Some(
+                links_client_core::attachments::LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32,
+            ),
+        };
+        links_client_core::protocol::validate_media_metadata(&media).map_err(js_error)?;
+        Ok(Self { media })
+    }
+
+    pub fn decrypt_chunk(&self, chunk_index: &str, ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let chunk_index = chunk_index.parse::<u64>().map_err(js_error)?;
+        decrypt_large_file_chunk(&self.media, chunk_index, ciphertext).map_err(js_error)
+    }
+}
+
+fn web_large_file_metadata(
+    media: &links_client_core::protocol::v1::MediaMetadata,
+) -> Result<WebLargeFileMetadata, CoreError> {
+    links_client_core::protocol::validate_media_metadata(media)?;
+    Ok(WebLargeFileMetadata {
+        attachment_id: media.attachment_id.clone(),
+        mime_type: media.mime_type.clone(),
+        original_size_bytes: media.original_size_bytes.unwrap().to_string(),
+        ciphertext_size_bytes: media.ciphertext_size_bytes.to_string(),
+        content_key: media.content_key.clone(),
+        nonce: media.nonce.clone(),
+        ciphertext_sha256: media.ciphertext_sha256.clone(),
+        width: media.width.unwrap_or(0),
+        height: media.height.unwrap_or(0),
+        duration_ms: media.duration_ms.unwrap_or(0).to_string(),
+    })
 }
 
 fn canonical_uuid(value: &str) -> Result<Uuid, CoreError> {

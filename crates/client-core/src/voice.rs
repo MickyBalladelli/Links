@@ -152,6 +152,8 @@ impl OpusVoiceProfile {
             duration_ms: Some(duration_ms),
             blur_hash: None,
             opus: Some(self.to_proto()),
+            original_size_bytes: None,
+            encryption_chunk_bytes: None,
         };
         protocol::validate_media_metadata(&media)?;
         Ok(media)
@@ -647,7 +649,8 @@ pub fn encode_ogg_opus(pcm: &[i16], profile: OpusVoiceProfile) -> Result<Vec<u8>
 pub fn decode_ogg_opus(data: &[u8], profile: OpusVoiceProfile) -> Result<Vec<i16>, VoiceError> {
     profile.validate()?;
     let stream = validate_ogg_opus(data)?;
-    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz {
+    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz
+    {
         return Err(VoiceError::InvalidConfiguration);
     }
     let packets = audio_packets(data)?;
@@ -656,8 +659,8 @@ pub fn decode_ogg_opus(data: &[u8], profile: OpusVoiceProfile) -> Result<Vec<i16
         2 => opus::Channels::Stereo,
         _ => return Err(VoiceError::InvalidConfiguration),
     };
-    let mut decoder = opus::Decoder::new(profile.sample_rate_hz, channels)
-        .map_err(|_| VoiceError::Codec)?;
+    let mut decoder =
+        opus::Decoder::new(profile.sample_rate_hz, channels).map_err(|_| VoiceError::Codec)?;
     let mut pcm = Vec::new();
     for packet in packets {
         let samples = decoder
@@ -695,16 +698,16 @@ fn audio_packets(data: &[u8]) -> Result<Vec<Vec<u8>>, VoiceError> {
     let mut packet_index = 0u64;
     let mut partial_packet = Vec::new();
     while offset < data.len() {
-        let segment_count = *data
-            .get(offset + 26)
-            .ok_or(VoiceError::InvalidContainer)? as usize;
+        let segment_count = *data.get(offset + 26).ok_or(VoiceError::InvalidContainer)? as usize;
         let table_start = offset.checked_add(27).ok_or(VoiceError::TooLarge)?;
         let body_start = table_start
             .checked_add(segment_count)
             .ok_or(VoiceError::TooLarge)?;
         let body_len = data[table_start..body_start]
             .iter()
-            .try_fold(0usize, |length, segment| length.checked_add(*segment as usize))
+            .try_fold(0usize, |length, segment| {
+                length.checked_add(*segment as usize)
+            })
             .ok_or(VoiceError::TooLarge)?;
         let body_end = body_start
             .checked_add(body_len)

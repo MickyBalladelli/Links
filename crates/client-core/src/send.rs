@@ -264,10 +264,8 @@ where
     T: DirectChatTransport,
     O: DirectChatStore,
 {
-    let _validated = EncryptedVoiceNote::new(
-        attachment.media.clone(),
-        attachment.ciphertext.clone(),
-    )?;
+    let _validated =
+        EncryptedVoiceNote::new(attachment.media.clone(), attachment.ciphertext.clone())?;
     send_message(
         core,
         sequence,
@@ -306,10 +304,7 @@ where
     T: DirectChatTransport,
     O: DirectChatStore,
 {
-    let _validated = EncryptedImage::new(
-        attachment.media.clone(),
-        attachment.ciphertext.clone(),
-    )?;
+    let _validated = EncryptedImage::new(attachment.media.clone(), attachment.ciphertext.clone())?;
     send_message(
         core,
         sequence,

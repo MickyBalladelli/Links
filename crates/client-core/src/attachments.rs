@@ -16,13 +16,435 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
+use zeroize::Zeroizing;
 
 pub const ATTACHMENT_KEY_BYTES: usize = 32;
 pub const ATTACHMENT_NONCE_BYTES: usize = 12;
 pub const ATTACHMENT_TAG_BYTES: usize = 16;
 pub const VOICE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/voice-note/attachment/v1\0";
 pub const IMAGE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/image/attachment/v1\0";
+pub const LARGE_FILE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/large-file/attachment/v1\0";
 pub const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+pub const LARGE_FILE_CIPHERTEXT_CHUNK_BYTES: usize = 256 * 1024;
+pub const LARGE_FILE_PLAINTEXT_CHUNK_BYTES: usize =
+    LARGE_FILE_CIPHERTEXT_CHUNK_BYTES - ATTACHMENT_TAG_BYTES;
+
+/// The private metadata and final digest for a chunk-encrypted attachment.
+/// The ciphertext itself is streamed separately over blob or WebRTC transport.
+pub struct EncryptedLargeFile {
+    pub media: v1::MediaMetadata,
+}
+
+/// Bounded streaming encryptor for MP4 and other large files. It never stores
+/// the complete plaintext or ciphertext in memory.
+pub struct LargeFileEncryptor {
+    attachment_id: String,
+    mime_type: String,
+    width: Option<u32>,
+    height: Option<u32>,
+    duration_ms: Option<u64>,
+    content_key: Zeroizing<[u8; ATTACHMENT_KEY_BYTES]>,
+    nonce: [u8; ATTACHMENT_NONCE_BYTES],
+    plaintext_size: u64,
+    ciphertext_size: u64,
+    ciphertext_sha256: Sha256,
+    chunk_index: u64,
+    finished: bool,
+}
+
+impl LargeFileEncryptor {
+    /// Create a video/file encryptor with a fresh attachment key and nonce.
+    pub fn new(
+        attachment_id: String,
+        mime_type: String,
+        width: Option<u32>,
+        height: Option<u32>,
+        duration_ms: Option<u64>,
+    ) -> Result<Self, CoreError> {
+        protocol::validate_id(&attachment_id)?;
+        let valid_shape = match mime_type.as_str() {
+            "video/mp4" => width.is_some_and(|width| width > 0)
+                && height.is_some_and(|height| height > 0)
+                && duration_ms.is_some_and(|duration| duration > 0),
+            "application/octet-stream" => width.is_none()
+                && height.is_none()
+                && duration_ms.is_none(),
+            _ => false,
+        };
+        if !valid_shape
+        {
+            return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
+                "large file",
+            )));
+        }
+        let mut content_key = Zeroizing::new([0u8; ATTACHMENT_KEY_BYTES]);
+        let mut nonce = [0u8; ATTACHMENT_NONCE_BYTES];
+        getrandom::fill(content_key.as_mut()).map_err(|_| CoreError::Provider)?;
+        getrandom::fill(&mut nonce).map_err(|_| CoreError::Provider)?;
+        Ok(Self {
+            attachment_id,
+            mime_type,
+            width,
+            height,
+            duration_ms,
+            content_key,
+            nonce,
+            plaintext_size: 0,
+            ciphertext_size: 0,
+            ciphertext_sha256: Sha256::new(),
+            chunk_index: 0,
+            finished: false,
+        })
+    }
+
+    /// Encrypt one plaintext chunk. The returned chunk is at most 256 KiB.
+    pub fn encrypt_chunk(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
+        if self.finished
+            || plaintext.is_empty()
+            || plaintext.len() > LARGE_FILE_PLAINTEXT_CHUNK_BYTES
+        {
+            return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
+                "large file chunk",
+            )));
+        }
+        let ciphertext = encrypt_chunk(
+            &self.content_key[..],
+            &self.nonce,
+            &self.attachment_id,
+            self.chunk_index,
+            plaintext,
+        )?;
+        self.plaintext_size = self
+            .plaintext_size
+            .checked_add(plaintext.len() as u64)
+            .ok_or(CoreError::Provider)?;
+        self.ciphertext_size = self
+            .ciphertext_size
+            .checked_add(ciphertext.len() as u64)
+            .ok_or(CoreError::Provider)?;
+        self.ciphertext_sha256.update(&ciphertext);
+        self.chunk_index = self.chunk_index.checked_add(1).ok_or(CoreError::Provider)?;
+        Ok(ciphertext)
+    }
+
+    /// Encrypt a source stream to a ciphertext sink using bounded buffers.
+    pub fn encrypt_reader<R: Read, W: Write>(
+        &mut self,
+        mut source: R,
+        mut destination: W,
+    ) -> Result<EncryptedLargeFile, CoreError> {
+        let mut buffer = vec![0u8; LARGE_FILE_PLAINTEXT_CHUNK_BYTES];
+        let mut buffered = 0;
+        loop {
+            let read = source
+                .read(&mut buffer[buffered..])
+                .map_err(|_| CoreError::Provider)?;
+            if read == 0 {
+                if buffered > 0 {
+                    let ciphertext = self.encrypt_chunk(&buffer[..buffered])?;
+                    destination
+                        .write_all(&ciphertext)
+                        .map_err(|_| CoreError::Provider)?;
+                }
+                break;
+            }
+            buffered += read;
+            if buffered == buffer.len() {
+                let ciphertext = self.encrypt_chunk(&buffer)?;
+                destination
+                    .write_all(&ciphertext)
+                    .map_err(|_| CoreError::Provider)?;
+                buffered = 0;
+            }
+        }
+        destination.flush().map_err(|_| CoreError::Provider)?;
+        self.finish()
+    }
+
+    pub fn finish(&mut self) -> Result<EncryptedLargeFile, CoreError> {
+        if self.finished || self.plaintext_size == 0 {
+            return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
+                "large file",
+            )));
+        }
+        self.finished = true;
+        let media = chunked_media_metadata(
+            &self.attachment_id,
+            &self.mime_type,
+            self.width,
+            self.height,
+            self.duration_ms,
+            self.plaintext_size,
+            self.ciphertext_size,
+            &self.content_key[..],
+            &self.nonce,
+            self.ciphertext_sha256.clone().finalize().as_slice(),
+        )?;
+        Ok(EncryptedLargeFile { media })
+    }
+}
+
+/// Stream-decrypt a chunk-encrypted attachment after validating its private
+/// metadata and complete ciphertext digest.
+pub fn decrypt_large_file<R: Read, W: Write>(
+    media: &v1::MediaMetadata,
+    mut source: R,
+    mut destination: W,
+) -> Result<(), CoreError> {
+    validate_chunked_media_metadata(media)?;
+    let original_size = media.original_size_bytes.unwrap();
+    let chunk_count = original_size
+        .checked_add(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64 - 1)
+        .and_then(|size| size.checked_div(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64))
+        .ok_or(CoreError::Authentication)?;
+    let expected_ciphertext = original_size
+        .checked_add(
+            chunk_count
+                .checked_mul(ATTACHMENT_TAG_BYTES as u64)
+                .ok_or(CoreError::Authentication)?,
+        )
+        .ok_or(CoreError::Authentication)?;
+    if expected_ciphertext != media.ciphertext_size_bytes {
+        return Err(CoreError::Authentication);
+    }
+
+    let mut ciphertext_hash = Sha256::new();
+    let mut ciphertext_offset = 0u64;
+    let mut buffer = vec![0u8; LARGE_FILE_CIPHERTEXT_CHUNK_BYTES];
+    let nonce: [u8; ATTACHMENT_NONCE_BYTES] = media
+        .nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| CoreError::Authentication)?;
+    for chunk_index in 0..chunk_count {
+        let chunk_start = chunk_index
+            .checked_mul(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64)
+            .ok_or(CoreError::Authentication)?;
+        let remaining_plaintext = original_size
+            .checked_sub(chunk_start)
+            .ok_or(CoreError::Authentication)?;
+        let plaintext_size =
+            remaining_plaintext.min(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64) as usize;
+        let ciphertext_size = plaintext_size + ATTACHMENT_TAG_BYTES;
+        source
+            .read_exact(&mut buffer[..ciphertext_size])
+            .map_err(|_| CoreError::Authentication)?;
+        ciphertext_hash.update(&buffer[..ciphertext_size]);
+        let plaintext = decrypt_chunk(
+            &media.content_key,
+            &nonce,
+            &media.attachment_id,
+            chunk_index,
+            &buffer[..ciphertext_size],
+        )?;
+        destination
+            .write_all(&plaintext)
+            .map_err(|_| CoreError::Provider)?;
+        ciphertext_offset = ciphertext_offset
+            .checked_add(ciphertext_size as u64)
+            .ok_or(CoreError::Authentication)?;
+    }
+    if ciphertext_offset != media.ciphertext_size_bytes
+        || ciphertext_hash.finalize().as_slice() != media.ciphertext_sha256.as_slice()
+    {
+        return Err(CoreError::Authentication);
+    }
+    let mut trailing = [0u8; 1];
+    if source
+        .read(&mut trailing)
+        .map_err(|_| CoreError::Authentication)?
+        != 0
+    {
+        return Err(CoreError::Authentication);
+    }
+    Ok(())
+}
+
+/// Decrypt one ciphertext chunk for a streaming receiver. The caller still
+/// verifies the complete ciphertext digest before publishing the output.
+pub fn decrypt_large_file_chunk(
+    media: &v1::MediaMetadata,
+    chunk_index: u64,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    validate_chunked_media_metadata(media)?;
+    let original_size = media.original_size_bytes.unwrap();
+    let chunk_count = original_size
+        .checked_add(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64 - 1)
+        .and_then(|size| size.checked_div(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64))
+        .ok_or(CoreError::Authentication)?;
+    if chunk_index >= chunk_count {
+        return Err(CoreError::Authentication);
+    }
+    let chunk_start = chunk_index
+        .checked_mul(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64)
+        .ok_or(CoreError::Authentication)?;
+    let plaintext_size = original_size
+        .checked_sub(chunk_start)
+        .ok_or(CoreError::Authentication)?
+        .min(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64) as usize;
+    if ciphertext.len() != plaintext_size + ATTACHMENT_TAG_BYTES {
+        return Err(CoreError::Authentication);
+    }
+    let nonce: [u8; ATTACHMENT_NONCE_BYTES] = media
+        .nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| CoreError::Authentication)?;
+    decrypt_chunk(
+        &media.content_key,
+        &nonce,
+        &media.attachment_id,
+        chunk_index,
+        ciphertext,
+    )
+}
+
+fn encrypt_chunk(
+    key: &[u8],
+    nonce: &[u8; ATTACHMENT_NONCE_BYTES],
+    attachment_id: &str,
+    chunk_index: u64,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let chunk_nonce = chunk_nonce(nonce, chunk_index);
+    let aad = chunk_aad(attachment_id, chunk_index);
+    cipher
+        .encrypt(
+            Nonce::from_slice(&chunk_nonce),
+            Payload {
+                msg: plaintext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| CoreError::Provider)
+}
+
+fn decrypt_chunk(
+    key: &[u8],
+    nonce: &[u8; ATTACHMENT_NONCE_BYTES],
+    attachment_id: &str,
+    chunk_index: u64,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let chunk_nonce = chunk_nonce(nonce, chunk_index);
+    let aad = chunk_aad(attachment_id, chunk_index);
+    cipher
+        .decrypt(
+            Nonce::from_slice(&chunk_nonce),
+            Payload {
+                msg: ciphertext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| CoreError::Authentication)
+}
+
+fn chunk_nonce(
+    base: &[u8; ATTACHMENT_NONCE_BYTES],
+    chunk_index: u64,
+) -> [u8; ATTACHMENT_NONCE_BYTES] {
+    let mut nonce = *base;
+    for (offset, byte) in chunk_index.to_be_bytes().iter().enumerate() {
+        nonce[ATTACHMENT_NONCE_BYTES - 8 + offset] ^= byte;
+    }
+    nonce
+}
+
+fn chunk_aad(attachment_id: &str, chunk_index: u64) -> Vec<u8> {
+    let mut aad =
+        Vec::with_capacity(LARGE_FILE_ATTACHMENT_AAD_PREFIX.len() + attachment_id.len() + 8);
+    aad.extend_from_slice(LARGE_FILE_ATTACHMENT_AAD_PREFIX);
+    aad.extend_from_slice(attachment_id.as_bytes());
+    aad.extend_from_slice(&chunk_index.to_be_bytes());
+    aad
+}
+
+fn chunked_media_metadata(
+    attachment_id: &str,
+    mime_type: &str,
+    width: Option<u32>,
+    height: Option<u32>,
+    duration_ms: Option<u64>,
+    plaintext_size: u64,
+    ciphertext_size: u64,
+    content_key: &[u8],
+    nonce: &[u8; ATTACHMENT_NONCE_BYTES],
+    ciphertext_sha256: &[u8],
+) -> Result<v1::MediaMetadata, CoreError> {
+    if plaintext_size == 0
+        || ciphertext_size == 0
+        || content_key.len() != ATTACHMENT_KEY_BYTES
+        || ciphertext_sha256.len() != 32
+    {
+        return Err(CoreError::Authentication);
+    }
+    let media = v1::MediaMetadata {
+        attachment_id: attachment_id.to_owned(),
+        mime_type: mime_type.to_owned(),
+        ciphertext_size_bytes: ciphertext_size,
+        content_key: content_key.to_vec(),
+        nonce: nonce.to_vec(),
+        ciphertext_sha256: ciphertext_sha256.to_vec(),
+        width,
+        height,
+        duration_ms,
+        blur_hash: None,
+        opus: None,
+        original_size_bytes: Some(plaintext_size),
+        encryption_chunk_bytes: Some(LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32),
+    };
+    validate_chunked_media_metadata(&media)?;
+    Ok(media)
+}
+
+fn validate_chunked_media_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
+    protocol::validate_media_metadata(media)?;
+    if !matches!(
+        media.mime_type.as_str(),
+        "video/mp4" | "application/octet-stream"
+    ) || media.blur_hash.is_some()
+        || media.opus.is_some()
+        || media.original_size_bytes.is_none()
+        || media.encryption_chunk_bytes != Some(LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32)
+        || media.content_key.len() != ATTACHMENT_KEY_BYTES
+        || media.nonce.len() != ATTACHMENT_NONCE_BYTES
+        || media.ciphertext_sha256.len() != 32
+    {
+        return Err(CoreError::Authentication);
+    }
+    if media.mime_type == "video/mp4"
+        && (media.width.is_none()
+            || media.height.is_none()
+            || media.duration_ms.is_none_or(|duration| duration == 0))
+    {
+        return Err(CoreError::Authentication);
+    }
+    if media.mime_type == "application/octet-stream"
+        && (media.width.is_some() || media.height.is_some() || media.duration_ms.is_some())
+    {
+        return Err(CoreError::Authentication);
+    }
+    let original_size = media.original_size_bytes.unwrap();
+    let chunk_count = original_size
+        .checked_add(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64 - 1)
+        .and_then(|size| size.checked_div(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64))
+        .ok_or(CoreError::Authentication)?;
+    let expected_ciphertext = original_size
+        .checked_add(
+            chunk_count
+                .checked_mul(ATTACHMENT_TAG_BYTES as u64)
+                .ok_or(CoreError::Authentication)?,
+        )
+        .ok_or(CoreError::Authentication)?;
+    if expected_ciphertext != media.ciphertext_size_bytes {
+        return Err(CoreError::Authentication);
+    }
+    Ok(())
+}
 
 /// A complete encrypted voice attachment. `media` is put inside the MLS
 /// message; `ciphertext` is uploaded to opaque blob storage.
@@ -53,11 +475,7 @@ pub struct EncryptedImage {
 impl EncryptedImage {
     pub fn new(media: v1::MediaMetadata, ciphertext: Vec<u8>) -> Result<Self, CoreError> {
         validate_image_metadata(&media)?;
-        validate_ciphertext(
-            &media,
-            &ciphertext,
-            MAX_IMAGE_BYTES + ATTACHMENT_TAG_BYTES,
-        )?;
+        validate_ciphertext(&media, &ciphertext, MAX_IMAGE_BYTES + ATTACHMENT_TAG_BYTES)?;
         Ok(Self { media, ciphertext })
     }
 }
@@ -78,7 +496,8 @@ pub fn encrypt_voice_note(
         )));
     }
     let stream = voice::validate_ogg_opus(plaintext)?;
-    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz {
+    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz
+    {
         return Err(CoreError::Voice(voice::VoiceError::InvalidConfiguration));
     }
 
@@ -131,7 +550,8 @@ pub fn decrypt_voice_note(
         VOICE_ATTACHMENT_AAD_PREFIX,
     )?;
     let stream = voice::validate_ogg_opus(&plaintext)?;
-    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz {
+    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz
+    {
         return Err(CoreError::Authentication);
     }
     Ok(SecretBytes::new(plaintext))
@@ -182,6 +602,8 @@ pub fn encrypt_image(
         duration_ms: None,
         blur_hash: Some(blur_hash),
         opus: None,
+        original_size_bytes: None,
+        encryption_chunk_bytes: None,
     };
     EncryptedImage::new(media, ciphertext)
 }
@@ -193,11 +615,7 @@ pub fn decrypt_image(
     ciphertext: &[u8],
 ) -> Result<SecretBytes, CoreError> {
     validate_image_metadata(media)?;
-    validate_ciphertext(
-        media,
-        ciphertext,
-        MAX_IMAGE_BYTES + ATTACHMENT_TAG_BYTES,
-    )?;
+    validate_ciphertext(media, ciphertext, MAX_IMAGE_BYTES + ATTACHMENT_TAG_BYTES)?;
     let plaintext = decrypt_bytes(
         &media.content_key,
         &media.nonce,
@@ -233,7 +651,7 @@ fn validate_image_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
 fn validate_ciphertext(
     media: &v1::MediaMetadata,
     ciphertext: &[u8],
-        maximum_ciphertext_bytes: usize,
+    maximum_ciphertext_bytes: usize,
 ) -> Result<(), CoreError> {
     if media.content_key.len() != ATTACHMENT_KEY_BYTES
         || media.nonce.len() != ATTACHMENT_NONCE_BYTES

@@ -174,6 +174,12 @@ pub fn validate_media_metadata(media: &v1::MediaMetadata) -> Result<(), Protocol
     if let Some(blur_hash) = media.blur_hash.as_deref() {
         validate_blur_hash(blur_hash)?;
     }
+    match (media.original_size_bytes, media.encryption_chunk_bytes) {
+        (None, None) => {}
+        (Some(original_size), Some(chunk_size))
+            if original_size > 0 && chunk_size > 0 && chunk_size <= 256 * 1024 => {}
+        _ => return Err(ProtocolError::Invalid("chunked media metadata")),
+    }
     if let Some(opus) = media.opus.as_ref() {
         validate_opus_audio_metadata(opus)?;
         let expected_mime = match v1::opus_audio_metadata::Container::try_from(opus.container) {
