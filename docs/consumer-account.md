@@ -84,6 +84,10 @@ application, proxy, provider SDK, or analytics layer.
 | `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's public identity key, MLS node ID and MLS credential. |
 | `GET /v1/contact-discovery/parameters` | Bearer session | OPRF public key and opaque active phone-directory membership filter. |
 | `POST /v1/contact-discovery/query` | Bearer session plus bounded blinded Ristretto points | One verifiable OPRF evaluation per blinded input. |
+| `GET /v1/privacy-pass/parameters` | None | Privacy Pass VOPRF public key and key identifier. |
+| `GET /v1/privacy-pass/challenge` | None | Short-lived challenge for a new-chat admission token. |
+| `POST /v1/privacy-pass/issue` | Bearer session plus one blinded P-384 point | Blind VOPRF evaluation; the issuer does not see the challenge or nonce. |
+| `POST /v1/privacy-pass/redeem` | Challenge, token | One-time anonymous admission check; no account identifier is accepted or stored. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
 | `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
 
@@ -105,6 +109,17 @@ membership filter. The server sees the authenticated account, source address,
 query count, and timing, but not the phone values. The client sees opaque OPRF
 tokens, not the server's phone numbers. Queries are limited to 256 contacts per
 request and rate-limited per account and source address.
+
+New-chat admission uses a separate Privacy Pass flow. The client obtains a
+short-lived challenge, blinds a fresh token locally, and gets its blind
+signature through the authenticated issuance route. It then redeems the
+unblinded token without bearer authentication. Issuance is quota-limited per
+account and source address; redemption is limited per source address and uses
+only a one-time token digest plus expiry for replay prevention. No account,
+device, conversation, or chat-request identifier is stored with redemption.
+The gateway or new-chat host must require a successful redemption before
+accepting a new-chat request. Keep issuance and redemption logs and operational
+contexts separate, because correlating them would weaken the anonymity goal.
 
 The phone must already be canonical E.164: `+` followed by 8–15 ASCII digits, with
 a nonzero country-code prefix. This is format validation, not proof that a number

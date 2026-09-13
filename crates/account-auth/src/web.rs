@@ -2,7 +2,7 @@ use crate::{
     service::{
         AccountAuth, ContactPsiQueryRequest, DeviceRegistrationRequest, EncryptedKeyBackupRequest,
         FinishRequest, PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest,
-        StartRequest,
+        PrivacyPassIssueRequest, PrivacyPassRedeemRequest, StartRequest,
     },
     AuthError,
 };
@@ -54,12 +54,19 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         )
         .route("/v1/contact-discovery/query", post(contact_psi_query))
         .layer(DefaultBodyLimit::max(64 * 1024));
+    let privacy_pass_routes = Router::new()
+        .route("/v1/privacy-pass/parameters", get(privacy_pass_parameters))
+        .route("/v1/privacy-pass/challenge", get(privacy_pass_challenge))
+        .route("/v1/privacy-pass/issue", post(privacy_pass_issue))
+        .route("/v1/privacy-pass/redeem", post(privacy_pass_redeem))
+        .layer(DefaultBodyLimit::max(4096));
     Router::new()
         .merge(auth_routes)
         .merge(passkey_routes)
         .merge(prekey_routes)
         .merge(directory_routes)
         .merge(contact_psi_routes)
+        .merge(privacy_pass_routes)
         .layer(middleware::from_fn(no_store))
         .with_state(auth)
 }
@@ -146,6 +153,42 @@ async fn contact_psi_query(
             request.map_err(|_| AuthError::Invalid)?.0,
         )
         .await?,
+    ))
+}
+async fn privacy_pass_parameters(
+    State(auth): State<Arc<AccountAuth>>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.privacy_pass_parameters()?))
+}
+async fn privacy_pass_challenge(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.privacy_pass_challenge(peer.ip()).await?))
+}
+async fn privacy_pass_issue(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    request: Result<Json<PrivacyPassIssueRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.privacy_pass_issue(
+            bearer(&headers)?,
+            peer.ip(),
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn privacy_pass_redeem(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Result<Json<PrivacyPassRedeemRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.privacy_pass_redeem(peer.ip(), request.map_err(|_| AuthError::Invalid)?.0)
+            .await?,
     ))
 }
 async fn me(

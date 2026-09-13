@@ -15,6 +15,7 @@ pub mod pairing;
 pub mod passkey_backup;
 pub mod pqxdh;
 pub mod prekeys;
+pub mod privacy_pass;
 pub mod receive;
 pub mod send;
 pub mod sequences;
@@ -36,6 +37,8 @@ pub enum CoreError {
     Video(#[from] video::VideoError),
     #[error(transparent)]
     P2pTransfer(#[from] p2p_transfer::P2pTransferError),
+    #[error(transparent)]
+    PrivacyPass(#[from] protocol::privacy_pass::PrivacyPassError),
     #[error("cryptographic provider unavailable")]
     CryptoUnavailable,
     #[error("authentication failed")]

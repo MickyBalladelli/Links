@@ -474,7 +474,9 @@ Add discovery options after the basic phone-based account works.
 
 ### Anti-spam
 
-- [ ] Integrate Privacy Pass anonymous blind signatures to rate-limit new chat requests without tracking identities.
+- [x] Integrate Privacy Pass anonymous blind signatures to rate-limit new chat requests without tracking identities.
+  RFC 9578 P-384/SHA-384 VOPRF issuance uses authenticated account/IP quotas;
+  anonymous redemption stores only a one-time token digest and expiry.
 - [ ] Implement client-side proof-of-work micro-challenges for unverified accounts initiating 1-to-1 connections.
 
 ---

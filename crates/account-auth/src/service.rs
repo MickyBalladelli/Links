@@ -22,6 +22,7 @@ use zeroize::{Zeroize, Zeroizing};
 pub const CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
 pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
+pub const PRIVACY_PASS_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
@@ -123,6 +124,53 @@ pub struct ContactPsiParametersResponse {
     pub filter: String,
     pub filter_hash_count: u8,
     pub filter_item_count: u64,
+}
+
+#[derive(Serialize)]
+pub struct PrivacyPassParametersResponse {
+    pub protocol_version: u32,
+    pub token_type: u16,
+    pub public_key: String,
+    pub token_key_id: String,
+}
+
+#[derive(Serialize)]
+pub struct PrivacyPassChallengeResponse {
+    pub protocol_version: u32,
+    pub token_type: u16,
+    pub challenge: String,
+    pub expires_at_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrivacyPassIssueRequest {
+    pub protocol_version: u32,
+    pub token_type: u16,
+    pub truncated_token_key_id: u8,
+    pub blinded_message: String,
+}
+
+#[derive(Serialize)]
+pub struct PrivacyPassIssueResponse {
+    pub protocol_version: u32,
+    pub token_type: u16,
+    pub evaluated_message: String,
+    pub proof: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrivacyPassRedeemRequest {
+    pub protocol_version: u32,
+    pub token: String,
+    pub challenge: String,
+}
+
+#[derive(Serialize)]
+pub struct PrivacyPassRedeemResponse {
+    pub protocol_version: u32,
+    pub accepted: bool,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Challenge {
@@ -286,10 +334,24 @@ fn random_wide() -> Result<[u8; 64], AuthError> {
     Ok(bytes)
 }
 
+fn random_scalar_bytes() -> Result<[u8; links_protocol::privacy_pass::SCALAR_BYTES], AuthError> {
+    let mut bytes = [0u8; links_protocol::privacy_pass::SCALAR_BYTES];
+    getrandom::getrandom(&mut bytes).map_err(|_| AuthError::Unavailable)?;
+    Ok(bytes)
+}
+
+fn derive_privacy_pass_key(seed: &[u8; 32]) -> Zeroizing<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"links/privacy-pass/issuer-seed/v1\0");
+    hasher.update(seed);
+    Zeroizing::new(hasher.finalize().into())
+}
+
 pub struct AccountAuth {
     pool: PgPool,
     provider: Arc<dyn OtpProvider>,
     phone_lookup_key: Zeroizing<[u8; 32]>,
+    privacy_pass_key: Zeroizing<[u8; 32]>,
     clock: Arc<dyn Clock>,
     passkey: Option<PasskeyConfig>,
 }
@@ -303,10 +365,12 @@ impl AccountAuth {
         if *phone_lookup_key == [0; 32] {
             return Err(AuthError::Invalid);
         }
+        let privacy_pass_key = derive_privacy_pass_key(&phone_lookup_key);
         Ok(Self {
             pool,
             provider,
             phone_lookup_key,
+            privacy_pass_key,
             clock,
             passkey: None,
         })
@@ -457,6 +521,80 @@ impl AccountAuth {
             return Err(AuthError::RateLimited);
         }
         Ok(())
+    }
+
+    async fn enforce_rate_limit_set<const N: usize>(
+        &self,
+        limits: [([u8; 32], i64, i32); N],
+    ) -> Result<(), AuthError> {
+        let mut tx = self.pool.begin().await?;
+        let mut limited = false;
+        for (key, window, limit) in limits {
+            let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
+                .bind(key.as_slice())
+                .bind(self.now()?)
+                .bind(window)
+                .bind(limit)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if count.is_none() {
+                limited = true;
+                break;
+            }
+        }
+        tx.commit().await?;
+        if limited {
+            return Err(AuthError::RateLimited);
+        }
+        Ok(())
+    }
+
+    async fn enforce_privacy_pass_issue_rate_limits(
+        &self,
+        user_id: Uuid,
+        peer_ip: IpAddr,
+    ) -> Result<(), AuthError> {
+        self.enforce_rate_limit_set([
+            (
+                self.digest(
+                    b"links/privacy-pass-issue-user-minute/v1\0",
+                    user_id.as_bytes(),
+                ),
+                60_000,
+                5,
+            ),
+            (
+                self.digest(
+                    b"links/privacy-pass-issue-user-hour/v1\0",
+                    user_id.as_bytes(),
+                ),
+                3_600_000,
+                30,
+            ),
+            (
+                self.digest(
+                    b"links/privacy-pass-issue-ip-hour/v1\0",
+                    peer_ip.to_string().as_bytes(),
+                ),
+                3_600_000,
+                100,
+            ),
+        ])
+        .await
+    }
+
+    async fn enforce_privacy_pass_ip_rate_limit(
+        &self,
+        domain: &'static [u8],
+        peer_ip: IpAddr,
+        limit: i32,
+    ) -> Result<(), AuthError> {
+        self.enforce_rate_limit_set([(
+            self.digest(domain, peer_ip.to_string().as_bytes()),
+            3_600_000,
+            limit,
+        )])
+        .await
     }
 
     async fn issue_session(
@@ -1340,6 +1478,139 @@ impl AccountAuth {
         })
     }
 
+    /// Return the public Privacy Pass issuer key. This response is safe to
+    /// cache only in memory; HTTP callers still receive no-store headers.
+    pub fn privacy_pass_parameters(&self) -> Result<PrivacyPassParametersResponse, AuthError> {
+        let parameters =
+            links_protocol::privacy_pass::IssuerParameters::from_seed(&*self.privacy_pass_key)
+                .map_err(|_| AuthError::Unavailable)?;
+        Ok(PrivacyPassParametersResponse {
+            protocol_version: links_protocol::privacy_pass::VERSION,
+            token_type: links_protocol::privacy_pass::TOKEN_TYPE,
+            public_key: encode(&parameters.public_key),
+            token_key_id: encode(&parameters.token_key_id),
+        })
+    }
+
+    /// Issue a blind signature after authenticating the client. The issuer
+    /// sees the account and quota use, but never the token challenge or nonce.
+    pub async fn privacy_pass_issue(
+        &self,
+        token: &str,
+        peer_ip: IpAddr,
+        request: PrivacyPassIssueRequest,
+    ) -> Result<PrivacyPassIssueResponse, AuthError> {
+        if request.protocol_version != links_protocol::privacy_pass::VERSION
+            || request.token_type != links_protocol::privacy_pass::TOKEN_TYPE
+        {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        self.enforce_privacy_pass_issue_rate_limits(account.user_id, peer_ip)
+            .await?;
+        let parameters =
+            links_protocol::privacy_pass::IssuerParameters::from_seed(&*self.privacy_pass_key)
+                .map_err(|_| AuthError::Unavailable)?;
+        if request.truncated_token_key_id
+            != parameters.token_key_id[links_protocol::privacy_pass::TOKEN_KEY_ID_BYTES - 1]
+        {
+            return Err(AuthError::Invalid);
+        }
+        let blinded_message =
+            decode::<{ links_protocol::privacy_pass::POINT_BYTES }>(&request.blinded_message)?;
+        let response = links_protocol::privacy_pass::evaluate(
+            &*self.privacy_pass_key,
+            &links_protocol::privacy_pass::TokenRequest {
+                token_type: request.token_type,
+                truncated_token_key_id: request.truncated_token_key_id,
+                blinded_message,
+            },
+            &random_scalar_bytes()?,
+        )
+        .map_err(|_| AuthError::Invalid)?;
+        Ok(PrivacyPassIssueResponse {
+            protocol_version: links_protocol::privacy_pass::VERSION,
+            token_type: links_protocol::privacy_pass::TOKEN_TYPE,
+            evaluated_message: encode(&response.evaluated_message),
+            proof: encode(&response.proof),
+        })
+    }
+
+    /// Create an origin challenge without creating an identity-bound record.
+    pub async fn privacy_pass_challenge(
+        &self,
+        peer_ip: IpAddr,
+    ) -> Result<PrivacyPassChallengeResponse, AuthError> {
+        let now = self.now()?;
+        self.enforce_privacy_pass_ip_rate_limit(
+            b"links/privacy-pass-challenge-ip-hour/v1\0",
+            peer_ip,
+            120,
+        )
+        .await?;
+        let expires_at_ms = now
+            .checked_add(PRIVACY_PASS_CHALLENGE_TTL_MS as i64)
+            .ok_or(AuthError::Unavailable)? as u64;
+        let mut challenge = [0u8; links_protocol::privacy_pass::CHALLENGE_BYTES];
+        let challenge_nonce = Zeroizing::new(random()?);
+        challenge[..32].copy_from_slice(&*challenge_nonce);
+        challenge[32..].copy_from_slice(&expires_at_ms.to_be_bytes());
+        Ok(PrivacyPassChallengeResponse {
+            protocol_version: links_protocol::privacy_pass::VERSION,
+            token_type: links_protocol::privacy_pass::TOKEN_TYPE,
+            challenge: encode(&challenge),
+            expires_at_ms,
+        })
+    }
+
+    /// Redeem a token without bearer authentication. Only an opaque token
+    /// digest and expiry are stored, so redemption is not linked to a user.
+    pub async fn privacy_pass_redeem(
+        &self,
+        peer_ip: IpAddr,
+        request: PrivacyPassRedeemRequest,
+    ) -> Result<PrivacyPassRedeemResponse, AuthError> {
+        if request.protocol_version != links_protocol::privacy_pass::VERSION {
+            return Err(AuthError::Invalid);
+        }
+        self.enforce_privacy_pass_ip_rate_limit(
+            b"links/privacy-pass-redeem-ip-hour/v1\0",
+            peer_ip,
+            200,
+        )
+        .await?;
+        let token_bytes = decode::<{ links_protocol::privacy_pass::TOKEN_BYTES }>(&request.token)?;
+        let challenge =
+            decode::<{ links_protocol::privacy_pass::CHALLENGE_BYTES }>(&request.challenge)?;
+        let token = links_protocol::privacy_pass::PrivacyPassToken::from_bytes(&token_bytes)
+            .map_err(|_| AuthError::Denied)?;
+        let now = self.now()? as u64;
+        links_protocol::privacy_pass::verify_token(
+            &token,
+            &challenge,
+            now,
+            &*self.privacy_pass_key,
+        )
+        .map_err(|_| AuthError::Denied)?;
+        let expires_at_ms = links_protocol::privacy_pass::challenge_expiry_ms(&challenge);
+        let expires_at_ms = i64::try_from(expires_at_ms).map_err(|_| AuthError::Denied)?;
+        let token_hash = Sha256::digest(token_bytes);
+        let inserted = sqlx::query(
+            "INSERT INTO privacy_pass_redeemed (token_hash,expires_at_ms) VALUES ($1,$2) ON CONFLICT (token_hash) DO NOTHING",
+        )
+        .bind(token_hash.as_slice())
+        .bind(expires_at_ms)
+        .execute(&self.pool)
+        .await?;
+        if inserted.rows_affected() != 1 {
+            return Err(AuthError::Denied);
+        }
+        Ok(PrivacyPassRedeemResponse {
+            protocol_version: links_protocol::privacy_pass::VERSION,
+            accepted: true,
+        })
+    }
+
     pub async fn purge_expired(&self) -> Result<(), AuthError> {
         let now = self.now()?;
         sqlx::query("DELETE FROM auth_sessions WHERE expires_at_ms <= $1")
@@ -1357,6 +1628,10 @@ impl AccountAuth {
             .await?;
         sqlx::query("DELETE FROM auth_rate_limits WHERE window_start_ms <= $1")
             .bind(now - 3_600_000)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM privacy_pass_redeemed WHERE expires_at_ms <= $1")
+            .bind(now)
             .execute(&self.pool)
             .await?;
         Ok(())

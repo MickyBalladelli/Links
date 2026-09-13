@@ -1848,6 +1848,7 @@ name = "links-protocol"
 version = "0.1.0"
 dependencies = [
  "curve25519-dalek 4.1.3",
+ "p384",
  "prost",
  "prost-build",
  "protoc-bin-vendored",
