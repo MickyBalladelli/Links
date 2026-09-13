@@ -1,0 +1,12 @@
+[package]
+name = "links-queue"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+links-gateway = { path = "../gateway" }
+links-protocol.workspace = true
+prost.workspace = true
+thiserror.workspace = true

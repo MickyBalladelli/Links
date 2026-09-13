@@ -81,6 +81,13 @@ Structured errors carry stable codes and optional retry delays, not identifiers,
 SQL errors or exception text. Unsupported versions require a client update;
 unauthenticated connections must re-authenticate, not retry indefinitely.
 
+Cross-region gateway forwarding uses the opaque `GatewayDelivery` protobuf and
+the exact NATS subject `links.v1.gateway.<subject_gateway_id>.deliver` (the
+gateway ID is escaped inside the subject token). Queue workers
+may validate the outer envelope boundary, but must not decrypt, inspect, label
+or log sealed payload bytes. Delivery is at-least-once and safe to retry by
+envelope ID; the destination gateway does not append a duplicate mailbox row.
+
 ## Sync and durability
 
 Every recipient device has an independent mailbox. Appending allocates a strictly

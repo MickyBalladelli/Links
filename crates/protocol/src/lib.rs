@@ -12,6 +12,7 @@ pub const MAX_ENVELOPE_BYTES: usize = 256 * 1024;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_BATCH_ITEMS: usize = 100;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_ONE_TIME_PREKEYS: usize = 100;
 pub const ML_KEM_768_PUBLIC_KEY_BYTES: usize = 1184;
@@ -163,6 +164,43 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<v1::Envelope, ProtocolError> {
     Ok(envelope)
 }
 
+/// Validate the cross-gateway queue wrapper. This checks only routing and
+/// protobuf boundaries; sealed payload bytes remain opaque to the server.
+pub fn validate_gateway_delivery(delivery: &v1::GatewayDelivery) -> Result<(), ProtocolError> {
+    if delivery.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_gateway_locator(&delivery.source_gateway_id)?;
+    validate_gateway_locator(&delivery.destination_gateway_id)?;
+    if delivery.source_gateway_id == delivery.destination_gateway_id {
+        return Err(ProtocolError::Invalid("same gateway"));
+    }
+    if delivery.cursor == 0 || delivery.cursor > MAX_CURSOR {
+        return Err(ProtocolError::Invalid("queue cursor"));
+    }
+    if delivery.serialized_envelope.is_empty() {
+        return Err(ProtocolError::Invalid("queue envelope"));
+    }
+    if delivery.encoded_len() > MAX_QUEUE_MESSAGE_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    decode_envelope(&delivery.serialized_envelope)?;
+    Ok(())
+}
+
+pub fn decode_gateway_delivery(bytes: &[u8]) -> Result<v1::GatewayDelivery, ProtocolError> {
+    if bytes.is_empty() || bytes.len() > MAX_QUEUE_MESSAGE_BYTES {
+        return Err(if bytes.len() > MAX_QUEUE_MESSAGE_BYTES {
+            ProtocolError::TooLarge
+        } else {
+            ProtocolError::Malformed
+        });
+    }
+    let delivery = v1::GatewayDelivery::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
+    validate_gateway_delivery(&delivery)?;
+    Ok(delivery)
+}
+
 pub fn decode_message(bytes: &[u8]) -> Result<v1::Message, ProtocolError> {
     if bytes.len() > MAX_MESSAGE_BYTES {
         return Err(ProtocolError::TooLarge);
@@ -170,6 +208,18 @@ pub fn decode_message(bytes: &[u8]) -> Result<v1::Message, ProtocolError> {
     let message = v1::Message::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
     validate_message(&message)?;
     Ok(message)
+}
+
+pub fn validate_gateway_locator(value: &str) -> Result<(), ProtocolError> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-' | b'.'))
+    {
+        return Err(ProtocolError::Invalid("gateway locator"));
+    }
+    Ok(())
 }
 
 pub fn validate_prekey_upload(upload: &v1::PreKeyUpload) -> Result<(), ProtocolError> {

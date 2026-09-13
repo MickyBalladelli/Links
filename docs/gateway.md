@@ -25,12 +25,15 @@ Forward or push failure leaves the mailbox row available for replay. Retrying
 the same envelope ID is idempotent. A client sends `Replay` after `Welcome` and
 sends `QueueAck` only after its local message/MLS transaction is durable.
 
-`RegionBus` is the adapter boundary for NATS, Kafka, or another authenticated
-cross-region bus. It must preserve the destination gateway ID, envelope bytes
-and mailbox cursor, use TLS/mTLS, reject unknown gateways and apply bounded
-backpressure. Do not publish bearer tokens, phone numbers, conversation IDs or
-plaintext messages. The destination adapter passes the authenticated delivery
-to `Gateway::handle_forwarded`; it does not append a second mailbox row.
+`RegionBus` is implemented for the first queue target by
+`links-queue::NatsRegionBus`. Its `GatewayDelivery` wrapper preserves the
+destination gateway ID, exact envelope bytes and mailbox cursor, uses a
+durable NATS JetStream publish, and applies bounded backpressure. Do not
+publish bearer tokens, phone numbers, conversation IDs or plaintext messages.
+The destination consumer checks the subject and destination ID, then passes
+the authenticated delivery to `Gateway::handle_forwarded`; it does not append
+a second mailbox row. Kafka or RabbitMQ can implement the same `RegionBus`
+contract if deployment needs change.
 
 `PushNotifier` is the APNs/FCM boundary. Its payload is a device-scoped silent
 wakeup containing only the recipient device ID and mailbox cursor. It must not
