@@ -5,6 +5,11 @@ public protocol IOSCoreTransport: AnyObject {
     func send(_ frame: Data) -> Bool
 }
 
+public enum IOSCoreFrameResult: Sendable {
+    case pending
+    case recoveryComplete
+}
+
 public struct IOSReceivedTextMessage: Sendable {
     public let conversationID: String
     public let senderDeviceID: String
@@ -183,7 +188,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         lock.unlock()
         guard let sharedCore, active === manager, !failed else { return }
         do {
-            try sharedCore.handleServerFrame(frame, transport: manager) { [weak self] message in
+            _ = try sharedCore.handleServerFrame(
+                frame, transport: manager, fullSync: false) { [weak self] message in
                 self?.notifyMessage(message)
             }
         } catch {

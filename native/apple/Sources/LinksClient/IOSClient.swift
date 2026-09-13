@@ -31,8 +31,11 @@ public protocol SharedClientCore: AnyObject {
     var deviceID: String { get }
     func durableCursor() throws -> UInt64
     func createHello(accessToken: String, lastSeenCursor: UInt64) throws -> Data
+    @discardableResult
     func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
-                           onTextMessage: @escaping (IOSReceivedTextMessage) -> Void) throws
+                           fullSync: Bool,
+                           onTextMessage: @escaping (IOSReceivedTextMessage) -> Void)
+        throws -> IOSCoreFrameResult
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
 }
