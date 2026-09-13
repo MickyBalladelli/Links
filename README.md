@@ -19,6 +19,7 @@ remain open.
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt and durable sync validation. |
 | `crates/web-client` | WASM Web identity and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
+| `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, append-only encrypted payload store, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |

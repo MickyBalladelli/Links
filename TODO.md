@@ -346,7 +346,12 @@ These clients join an existing account as additional MLS device nodes. They do n
   `LocalIdentity`, the public credential, and cloneable signing handles to
   `links-client-core`. UI, OS keychain persistence, registration transport,
   sync, reconnect, and recovery remain the next desktop task.
-- [ ] Implement desktop device registration, encrypted sync, reconnect, and recovery behavior.
+- [x] Implement desktop device registration, encrypted sync, reconnect, and recovery behavior.
+  `links-desktop-client` now accepts the validated mobile registration response,
+  binds a core-owned encrypted text session, reconnects native sockets with
+  bounded full-jitter backoff and heartbeats, and forces replay from the latest
+  durable cursor during recovery. The desktop host supplies the native TLS
+  WebSocket, durable core providers, and UI event loop.
 
 ---
 

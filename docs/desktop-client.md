@@ -17,7 +17,21 @@ After pairing, the desktop host binds the shared core with:
 3. The host's own `ClientCore` crypto, MLS provider, durable store, and network
    adapters.
 
+`DesktopTextSession` adds the desktop lifecycle around that binding. Its
+`DesktopSocketFactory` must return a TLS binary `links.v1` socket; the session
+creates a fresh core Hello from the in-memory bearer and durable cursor on each
+connection attempt. `poll()` drains binary frames into the shared core and
+emits only committed text events. Outbound text delegates to the core, which
+owns MLS encryption, Sealed Sender envelopes, durable outbox state, and device
+fanout.
+
+The connection manager sends native ping heartbeats every 30 seconds and uses
+full-jitter reconnect delays from 1 to 30 seconds. `recover()` deliberately
+reconnects so the next Hello starts at the latest durable cursor, then drains
+replay until the core reports recovery complete. A failed core frame stops the
+session and requires an explicit restart.
+
 The seed is held in process memory by the foundation. Production desktop
 applications must supply an audited OS keychain/provider and durable local
-metadata boundary before relying on restart persistence. Device registration,
-encrypted sync, reconnect, and recovery are the next desktop work item.
+metadata boundary before relying on restart persistence. The native socket,
+durable `ClientCore` provider, and UI event loop remain host integration work.

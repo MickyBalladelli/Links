@@ -4,6 +4,16 @@
 //! owns the paired-device identity boundary and hands public registration data,
 //! the MLS credential, and a signing handle to `links-client-core`.
 
+mod session;
+
+pub use session::{
+    DesktopAccessTokenProvider, DesktopConnectionManager, DesktopConnectionState,
+    DesktopEvent, DesktopFrameResult, DesktopFrameTransport, DesktopMessagingCore,
+    DesktopReceivedTextMessage, DesktopSocket, DesktopSocketFactory, DesktopTextSession,
+    DESKTOP_HEARTBEAT_INTERVAL_MS, DESKTOP_INITIAL_BACKOFF_MS, DESKTOP_MAX_BACKOFF_MS,
+    DESKTOP_MAX_FRAME_BYTES, DESKTOP_MAX_TEXT_BYTES, DESKTOP_STABLE_CONNECTION_MS,
+};
+
 use links_client_core::{
     identity::{IdentitySeed, LocalIdentity},
     pairing::{PairingPayload, PairingRegistrationResponse},
