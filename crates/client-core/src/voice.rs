@@ -53,7 +53,7 @@ impl OpusContainer {
     pub fn mime_type(self) -> &'static str {
         match self {
             Self::Ogg => "audio/ogg",
-            Self::Opus => "audio/opus",
+            Self::Opus => "audio/ogg; codecs=opus",
         }
     }
 }
@@ -172,7 +172,7 @@ impl OggOpusWriter {
             profile,
             serial,
             page_sequence: 0,
-            granule_position: 0,
+            granule_position: OPUS_PRESKIP_SAMPLES as u64,
             output: Vec::new(),
             last_audio_page: None,
             audio_packets: 0,
@@ -240,9 +240,11 @@ impl OggOpusWriter {
         self.output.extend_from_slice(b"OggS");
         self.output.push(0);
         self.output.push(header_type);
-        self.output.extend_from_slice(&granule_position.to_le_bytes());
+        self.output
+            .extend_from_slice(&granule_position.to_le_bytes());
         self.output.extend_from_slice(&self.serial.to_le_bytes());
-        self.output.extend_from_slice(&self.page_sequence.to_le_bytes());
+        self.output
+            .extend_from_slice(&self.page_sequence.to_le_bytes());
         self.output.extend_from_slice(&[0, 0, 0, 0]);
         self.output.push(segment_count as u8);
         for index in 0..full_segments {
@@ -268,8 +270,7 @@ impl OggOpusWriter {
         self.output[page_start + 22..page_start + 26].fill(0);
         let page_end = page_end(&self.output, page_start)?;
         let checksum = ogg_crc(&self.output[page_start..page_end]);
-        self.output[page_start + 22..page_start + 26]
-            .copy_from_slice(&checksum.to_le_bytes());
+        self.output[page_start + 22..page_start + 26].copy_from_slice(&checksum.to_le_bytes());
         Ok(())
     }
 }
@@ -351,7 +352,9 @@ pub fn validate_ogg_opus(data: &[u8]) -> Result<OpusStreamInfo, VoiceError> {
         }
         let body_len = data[segment_table_start..body_start]
             .iter()
-            .try_fold(0usize, |length, segment| length.checked_add(*segment as usize))
+            .try_fold(0usize, |length, segment| {
+                length.checked_add(*segment as usize)
+            })
             .ok_or(VoiceError::TooLarge)?;
         let page_end = body_start
             .checked_add(body_len)
@@ -454,7 +457,11 @@ fn parse_opus_head(packet: &[u8]) -> Result<(u32, u32, u16), VoiceError> {
     {
         return Err(VoiceError::InvalidContainer);
     }
-    Ok((channels, sample_rate_hz, u16::from_le_bytes([packet[10], packet[11]])))
+    Ok((
+        channels,
+        sample_rate_hz,
+        u16::from_le_bytes([packet[10], packet[11]]),
+    ))
 }
 
 fn parse_opus_tags(packet: &[u8]) -> Result<(), VoiceError> {
@@ -465,9 +472,7 @@ fn parse_opus_tags(packet: &[u8]) -> Result<(), VoiceError> {
     let comments_start = 12usize
         .checked_add(vendor_len)
         .ok_or(VoiceError::TooLarge)?;
-    let comments_count_end = comments_start
-        .checked_add(4)
-        .ok_or(VoiceError::TooLarge)?;
+    let comments_count_end = comments_start.checked_add(4).ok_or(VoiceError::TooLarge)?;
     if comments_count_end > packet.len() {
         return Err(VoiceError::InvalidContainer);
     }
@@ -506,22 +511,20 @@ fn page_end(data: &[u8], page_start: usize) -> Result<usize, VoiceError> {
     }
     let body_len = data[page_start + 27..table_end]
         .iter()
-        .try_fold(0usize, |length, segment| length.checked_add(*segment as usize))
+        .try_fold(0usize, |length, segment| {
+            length.checked_add(*segment as usize)
+        })
         .ok_or(VoiceError::TooLarge)?;
     table_end.checked_add(body_len).ok_or(VoiceError::TooLarge)
 }
 
 fn read_u32(bytes: &[u8]) -> Result<u32, VoiceError> {
-    let array: [u8; 4] = bytes
-        .try_into()
-        .map_err(|_| VoiceError::InvalidContainer)?;
+    let array: [u8; 4] = bytes.try_into().map_err(|_| VoiceError::InvalidContainer)?;
     Ok(u32::from_le_bytes(array))
 }
 
 fn read_u64(bytes: &[u8]) -> Result<u64, VoiceError> {
-    let array: [u8; 8] = bytes
-        .try_into()
-        .map_err(|_| VoiceError::InvalidContainer)?;
+    let array: [u8; 8] = bytes.try_into().map_err(|_| VoiceError::InvalidContainer)?;
     Ok(u64::from_le_bytes(array))
 }
 
@@ -566,8 +569,9 @@ impl NativeOpusEncoder {
             2 => opus::Channels::Stereo,
             _ => return Err(VoiceError::InvalidConfiguration),
         };
-        let mut encoder = opus::Encoder::new(profile.sample_rate_hz, channels, opus::Application::Voip)
-            .map_err(|_| VoiceError::Codec)?;
+        let mut encoder =
+            opus::Encoder::new(profile.sample_rate_hz, channels, opus::Application::Voip)
+                .map_err(|_| VoiceError::Codec)?;
         encoder
             .set_bitrate(opus::Bitrate::Bits((profile.bitrate_kbps * 1_000) as i32))
             .map_err(|_| VoiceError::Codec)?;

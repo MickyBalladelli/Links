@@ -16,7 +16,7 @@ remain open.
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors, boundary validation and bounded Zstd dictionary sync compression. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt and durable sync validation. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation and Opus voice-note muxing. |
 | `crates/web-client` | WASM Web identity and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
@@ -45,6 +45,7 @@ remain open.
 | `web/src/WebConnectionManager.ts` | Browser `wss://` connection lifecycle for binary `links.v1`. |
 | `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
+| `docs/voice-notes.md` | Opus profile, Ogg container, encryption boundary and platform codec contract. |
 
 ## Build and test
 

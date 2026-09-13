@@ -131,9 +131,7 @@ pub fn validate_message(message: &v1::Message) -> Result<(), ProtocolError> {
     }
 }
 
-pub fn validate_opus_audio_metadata(
-    audio: &v1::OpusAudioMetadata,
-) -> Result<(), ProtocolError> {
+pub fn validate_opus_audio_metadata(audio: &v1::OpusAudioMetadata) -> Result<(), ProtocolError> {
     if !matches!(
         v1::opus_audio_metadata::Container::try_from(audio.container),
         Ok(v1::opus_audio_metadata::Container::Ogg | v1::opus_audio_metadata::Container::Opus)
@@ -163,7 +161,7 @@ pub fn validate_media_metadata(media: &v1::MediaMetadata) -> Result<(), Protocol
         validate_opus_audio_metadata(opus)?;
         let expected_mime = match v1::opus_audio_metadata::Container::try_from(opus.container) {
             Ok(v1::opus_audio_metadata::Container::Ogg) => "audio/ogg",
-            Ok(v1::opus_audio_metadata::Container::Opus) => "audio/opus",
+            Ok(v1::opus_audio_metadata::Container::Opus) => "audio/ogg; codecs=opus",
             _ => return Err(ProtocolError::Invalid("opus container")),
         };
         if media.mime_type != expected_mime

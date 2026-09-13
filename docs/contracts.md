@@ -22,6 +22,12 @@ that permits mailbox payload purge, but it is neither a read receipt nor proof
 of successful peer decryption. E2EE `Receipts` remain private to the
 conversation. `User` and `Device` are directory records, not authentication proofs.
 
+Voice-note `MediaMetadata.opus` uses the validated Links Opus profile: 16–24
+kbps, 20 ms frames, supported Opus sample rates, and mono/stereo channels.
+`.ogg` maps to `audio/ogg`; `.opus` maps to `audio/ogg; codecs=opus`. The
+profile metadata and attachment keys stay inside the encrypted Message. The
+server never decodes or inspects the Ogg Opus container.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer
