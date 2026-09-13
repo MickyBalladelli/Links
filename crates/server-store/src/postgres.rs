@@ -54,6 +54,21 @@ pub struct EncryptedKeyBackupRecord {
     pub credential_id: Vec<u8>,
     pub encrypted_envelope: Vec<u8>,
 }
+
+/// Public device material returned by the global username directory.
+/// This record intentionally contains no pre-key private material, session
+/// data, phone-derived subject, or routing state.
+pub struct DirectoryDeviceRecord {
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub identity_public_key: Vec<u8>,
+    pub mls_credential: Vec<u8>,
+}
+
+pub struct HandleDirectoryRecord {
+    pub user_id: Uuid,
+    pub devices: Vec<DirectoryDeviceRecord>,
+}
 impl GroupKind {
     fn as_str(self) -> &'static str {
         match self {
@@ -129,6 +144,43 @@ impl RelationalStore {
         validate_handle(handle)?;
         Ok(sqlx::query_scalar("SELECT h.user_id FROM handles h JOIN accounts a USING (user_id) WHERE handle = $1 AND a.disabled_at IS NULL")
             .bind(handle).fetch_optional(&self.pool).await?)
+    }
+    pub async fn lookup_handle_directory(
+        &self,
+        handle: &str,
+    ) -> Result<Option<HandleDirectoryRecord>, StoreError> {
+        validate_handle(handle)?;
+        let rows = sqlx::query(
+            "SELECT h.user_id,d.device_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND a.disabled_at IS NULL AND d.revoked_at IS NULL ORDER BY d.device_id",
+        )
+        .bind(handle)
+        .fetch_all(&self.pool)
+        .await?;
+        let Some(first) = rows.first() else {
+            return Ok(None);
+        };
+        let user_id: Uuid = first.get("user_id");
+        let mut devices = Vec::with_capacity(rows.len());
+        for row in rows {
+            if row.get::<Uuid, _>("user_id") != user_id {
+                return Err(StoreError::CorruptObject);
+            }
+            let identity_public_key: Vec<u8> = row.get("identity_public_key");
+            let mls_credential: Vec<u8> = row.get("mls_credential");
+            if identity_public_key.len() != 32
+                || mls_credential.is_empty()
+                || mls_credential.len() > 65_536
+            {
+                return Err(StoreError::CorruptObject);
+            }
+            devices.push(DirectoryDeviceRecord {
+                device_id: row.get("device_id"),
+                mls_node_id: row.get("mls_node_id"),
+                identity_public_key,
+                mls_credential,
+            });
+        }
+        Ok(Some(HandleDirectoryRecord { user_id, devices }))
     }
     pub async fn register_device(
         &self,
