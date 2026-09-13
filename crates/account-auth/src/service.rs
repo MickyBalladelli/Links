@@ -81,6 +81,21 @@ pub struct UsernameAuthResponse {
     pub handle: String,
     pub mls_credential: String,
 }
+
+#[derive(Serialize)]
+pub struct UsernameDirectoryResponse {
+    pub handle: String,
+    pub user_id: Uuid,
+    pub devices: Vec<UsernameDirectoryDeviceResponse>,
+}
+
+#[derive(Serialize)]
+pub struct UsernameDirectoryDeviceResponse {
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub identity_public_key: String,
+    pub mls_credential: String,
+}
 #[derive(Serialize, Deserialize)]
 pub struct Challenge {
     pub challenge_id: Uuid,
@@ -322,6 +337,43 @@ impl AccountAuth {
         Ok(())
     }
 
+    async fn enforce_directory_rate_limits(
+        &self,
+        handle: &str,
+        peer_ip: IpAddr,
+        now: i64,
+    ) -> Result<(), AuthError> {
+        let handle_minute_key =
+            self.digest(b"links/directory-handle-minute/v1\0", handle.as_bytes());
+        let handle_hour_key =
+            self.digest(b"links/directory-handle-hour/v1\0", handle.as_bytes());
+        let ip_key = self.digest(b"links/directory-ip/v1\0", peer_ip.to_string().as_bytes());
+        let mut tx = self.pool.begin().await?;
+        let mut limited = false;
+        for (key, window, limit) in [
+            (handle_minute_key, 60_000_i64, 60_i32),
+            (handle_hour_key, 3_600_000_i64, 1_000_i32),
+            (ip_key, 3_600_000_i64, 300_i32),
+        ] {
+            let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
+                .bind(key.as_slice())
+                .bind(now)
+                .bind(window)
+                .bind(limit)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if count.is_none() {
+                limited = true;
+                break;
+            }
+        }
+        tx.commit().await?;
+        if limited {
+            return Err(AuthError::RateLimited);
+        }
+        Ok(())
+    }
+
     async fn issue_session(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -479,6 +531,54 @@ impl AccountAuth {
             handle: request.handle,
             mls_credential: encode(&credential),
         })
+    }
+
+    /// Return the active public device directory for a canonical username.
+    /// Pre-key bundles stay behind the authenticated claim endpoint so a
+    /// directory read never consumes one-time pre-keys.
+    pub async fn lookup_username_directory(
+        &self,
+        handle: &str,
+        peer_ip: IpAddr,
+    ) -> Result<Option<UsernameDirectoryResponse>, AuthError> {
+        validate_handle(handle).map_err(|_| AuthError::Invalid)?;
+        let now = self.now()?;
+        self.enforce_directory_rate_limits(handle, peer_ip, now)
+            .await?;
+        let directory = RelationalStore::from_pool(self.pool.clone())
+            .lookup_handle_directory(handle)
+            .await?;
+        let Some(directory) = directory else {
+            return Ok(None);
+        };
+        let mut devices = Vec::with_capacity(directory.devices.len());
+        for device in directory.devices {
+            let public_key: [u8; 32] = device
+                .identity_public_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| AuthError::Unavailable)?;
+            let binding = DeviceBinding {
+                user_id: directory.user_id,
+                device_id: device.device_id,
+                mls_node_id: device.mls_node_id,
+                public_key,
+            };
+            if binding.mls_credential()? != device.mls_credential {
+                return Err(AuthError::Unavailable);
+            }
+            devices.push(UsernameDirectoryDeviceResponse {
+                device_id: device.device_id,
+                mls_node_id: device.mls_node_id,
+                identity_public_key: encode(&public_key),
+                mls_credential: encode(&device.mls_credential),
+            });
+        }
+        Ok(Some(UsernameDirectoryResponse {
+            handle: handle.to_owned(),
+            user_id: directory.user_id,
+            devices,
+        }))
     }
 
     pub async fn start(

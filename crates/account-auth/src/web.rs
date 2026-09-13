@@ -43,10 +43,14 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/prekeys/status", get(prekey_inventory))
         .route("/v1/prekeys/{device_id}/claim", post(claim_prekeys))
         .layer(DefaultBodyLimit::max(MAX_PREKEY_UPLOAD_BYTES));
+    let directory_routes = Router::new()
+        .route("/v1/directory/{handle}", get(directory_lookup))
+        .layer(DefaultBodyLimit::max(4096));
     Router::new()
         .merge(auth_routes)
         .merge(passkey_routes)
         .merge(prekey_routes)
+        .merge(directory_routes)
         .layer(middleware::from_fn(no_store))
         .with_state(auth)
 }
@@ -95,6 +99,23 @@ async fn username_login(
         auth.login_username(request.map_err(|_| AuthError::Invalid)?.0, peer.ip())
             .await?,
     ))
+}
+async fn directory_lookup(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(handle): Path<String>,
+) -> Result<Response, AuthError> {
+    let handle = handle.strip_prefix('@').unwrap_or(&handle);
+    if handle.is_empty() || handle.starts_with('@') {
+        return Err(AuthError::Invalid);
+    }
+    match auth
+        .lookup_username_directory(handle, peer.ip())
+        .await?
+    {
+        Some(directory) => Ok(Json(directory).into_response()),
+        None => Ok(StatusCode::NOT_FOUND.into_response()),
+    }
 }
 async fn me(
     State(auth): State<Arc<AccountAuth>>,
