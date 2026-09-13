@@ -273,7 +273,12 @@ Bring iOS to feature parity with Android. Validate hardware-backed keys and back
   30-second ping heartbeats, and reconnects with full-jitter backoff from one
   to thirty seconds. It accepts Hello bytes from the shared core and never
   places bearer tokens in URLs or diagnostics; see [iOS client foundation](docs/ios-client.md).
-- [ ] Implement the same 1-to-1 send and receive flows as Android.
+- [x] Implement the same 1-to-1 send and receive flows as Android.
+  `IOSDirectMessaging` binds the authenticated iOS client, shared Rust core,
+  and `IOSConnectionManager`. It validates text IDs and the 64 KiB limit, then
+  delegates send sequencing, MLS encryption, Sealed Sender fanout, durable
+  outbox state, replay decrypt, message commit, and delivery receipts to the
+  shared core. Message UI and APNs scheduling remain separate tasks.
 - [ ] Add APNs background fetch and missing-message recovery.
 - [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.
 - [ ] Release an internal iOS text-messaging milestone before adding groups or calls.

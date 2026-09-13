@@ -31,7 +31,10 @@ public protocol SharedClientCore: AnyObject {
     var deviceID: String { get }
     func durableCursor() throws -> UInt64
     func createHello(accessToken: String, lastSeenCursor: UInt64) throws -> Data
-    func handleServerFrame(_ frame: Data) throws
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           onTextMessage: @escaping (IOSReceivedTextMessage) -> Void) throws
+    func sendText(conversationID: String, recipientUserID: String, text: String,
+                  transport: any IOSCoreTransport) throws
 }
 
 public protocol SharedCoreIdentitySigner: AnyObject {

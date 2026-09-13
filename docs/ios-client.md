@@ -20,12 +20,19 @@ over 1 MiB, sends ping heartbeats every 30 seconds, and reconnects with
 full-jitter backoff from 1 to 30 seconds. It reports frames to the host; the
 host passes them to `SharedClientCore.handleServerFrame`.
 
+`IOSDirectMessaging` supplies the connected 1-to-1 flow. It checks canonical
+conversation and recipient IDs plus the 64 KiB text limit, then delegates
+`send_text` and receive processing to the shared core. The core owns MLS epoch
+updates, Sealed Sender envelopes, durable outbox/inbox commits, replay cursors,
+and delivery receipts. Core work runs off the main queue; the host receives
+committed text events on its chosen callback queue.
+
 The factory boundary prevents a Swift protocol or crypto fork. Its production
 implementation must bind Rust `ClientCore`, MLS state, Sealed Sender key
 resolution, and durable inbox/outbox storage. Missing providers fail closed.
 
-This target is the iOS foundation, OTP, and connection layer. Send/receive UI,
-APNs recovery, and account recovery remain the following Phase 4 tasks. The iOS
-release gate still requires live OTP, Android interop,
+This target is the iOS foundation, OTP, connection, and direct messaging layer.
+Message UI, APNs recovery, and account recovery remain the following Phase 4
+tasks. The iOS release gate still requires live OTP, Android interop,
 restart/replay, tamper, Secure Enclave, background, and battery evidence on
 physical devices.
