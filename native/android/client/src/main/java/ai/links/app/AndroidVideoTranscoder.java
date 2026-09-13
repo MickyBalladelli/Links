@@ -98,6 +98,24 @@ public final class AndroidVideoTranscoder {
 
     public TranscodedVideo transcode(File source, File destination, Profile profile)
             throws Exception {
+        if (destination == null || destination.exists())
+            throw new IOException("Invalid video destination");
+        File parent = destination.getAbsoluteFile().getParentFile();
+        if (parent == null || !parent.isDirectory())
+            throw new IOException("Missing video destination directory");
+        File staging = File.createTempFile(".links-video-", ".mp4", parent);
+        if (!staging.delete()) throw new IOException("Cannot prepare video staging file");
+        try {
+            TranscodedVideo result = transcodeToFile(source, staging, profile);
+            Mp4FastStart.rewrite(staging, destination);
+            return new TranscodedVideo(destination, profile, result.durationUs, result.hasAudio);
+        } finally {
+            if (staging.exists()) staging.delete();
+        }
+    }
+
+    private TranscodedVideo transcodeToFile(File source, File destination, Profile profile)
+            throws Exception {
         if (source == null || destination == null || !source.isFile()
                 || source.length() == 0 || source.length() > MAX_INPUT_BYTES
                 || destination.exists())

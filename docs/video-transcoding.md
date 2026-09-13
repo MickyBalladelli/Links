@@ -7,10 +7,12 @@ attachment encryption:
   `AVMutableVideoComposition`, and encodes H.264 or HEVC with a
   `VTCompressionSession`. Hardware encoders are required; iOS 17.4+ also passes
   VideoToolbox's explicit hardware-only encoder specification. Compatible AAC
-  audio is copied into the MP4.
+  audio is copied into the MP4, and `shouldOptimizeForNetworkUse` places the
+  `moov` atom before media data.
 - Android `AndroidVideoTranscoder` uses hardware `MediaCodec` decoder and
   encoder surfaces joined by an EGL scaler, then muxes MP4 with compatible AAC
-  audio. Software codec names are rejected.
+  audio. Software codec names are rejected. `Mp4FastStart` then moves `moov`
+  before `mdat` and updates absolute `stco`/`co64` chunk offsets.
 
 Both adapters expose the same profiles: 1280x720 at 1.5 Mbps and 1920x1080 at
 3 Mbps, 30 fps. The shared `links-client-core::video` module owns these profile

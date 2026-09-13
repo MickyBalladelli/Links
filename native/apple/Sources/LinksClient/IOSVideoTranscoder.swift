@@ -105,6 +105,7 @@ public final class IOSVideoTranscoder {
         if let audioOutput { reader.add(audioOutput) }
 
         let writer = try AVAssetWriter(outputURL: destination, fileType: .mp4)
+        writer.shouldOptimizeForNetworkUse = true
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: nil)
         videoInput.expectsMediaDataInRealTime = false
         guard writer.canAdd(videoInput) else { throw IOSVideoError.writerUnavailable }
