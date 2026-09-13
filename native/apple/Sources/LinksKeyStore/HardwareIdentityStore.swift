@@ -70,11 +70,103 @@ public final class HardwareIdentityStore {
         }
         return Data(signature)
     }
+
+    /// Build the exact signed phone-auth transcript used by AccountAuth.
+    public func phoneAuthTranscript(_ identity: IdentityKeyReference, phone: String,
+                                    channel: String, deviceID: UUID,
+                                    mlsNodeID: UUID) throws -> Data {
+        let phoneBytes = Array(phone.utf8)
+        let channelBytes = Array(channel.utf8)
+        let deviceBytes = uuidBytes(deviceID)
+        let nodeBytes = uuidBytes(mlsNodeID)
+        let publicKey = Array(identity.publicKey)
+        guard !phoneBytes.isEmpty, phoneBytes.count <= 16,
+              !channelBytes.isEmpty, channelBytes.count <= 8 else {
+            throw IdentityError.invalidInput
+        }
+        var output = [UInt8](repeating: 0, count: Int(LINKS_IDENTITY_MAX_TRANSCRIPT))
+        var outputLength = 0
+        let status = phoneBytes.withUnsafeBufferPointer { phoneBuffer in
+            channelBytes.withUnsafeBufferPointer { channelBuffer in
+                deviceBytes.withUnsafeBufferPointer { deviceBuffer in
+                    nodeBytes.withUnsafeBufferPointer { nodeBuffer in
+                        publicKey.withUnsafeBufferPointer { publicBuffer in
+                            output.withUnsafeMutableBufferPointer { outputBuffer in
+                                links_phone_auth_transcript(
+                                    phoneBuffer.baseAddress, phoneBuffer.count,
+                                    channelBuffer.baseAddress, channelBuffer.count,
+                                    deviceBuffer.baseAddress, nodeBuffer.baseAddress,
+                                    publicBuffer.baseAddress, outputBuffer.baseAddress,
+                                    outputBuffer.count, &outputLength)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return try transcript(status: status, output: output, length: outputLength)
+    }
+
+    /// Build the exact nonce-bound enrollment transcript used by AccountAuth.
+    public func enrollmentTranscript(_ identity: IdentityKeyReference, userID: UUID,
+                                     deviceID: UUID, mlsNodeID: UUID,
+                                     challengeID: UUID, nonce: Data,
+                                     expiresAtMs: UInt64, mlsCredential: Data) throws -> Data {
+        guard nonce.count == 32, mlsCredential.count <= Int(LINKS_IDENTITY_MAX_TRANSCRIPT) else {
+            throw IdentityError.invalidInput
+        }
+        let userBytes = uuidBytes(userID)
+        let deviceBytes = uuidBytes(deviceID)
+        let nodeBytes = uuidBytes(mlsNodeID)
+        let challengeBytes = uuidBytes(challengeID)
+        let publicKey = Array(identity.publicKey)
+        let nonceBytes = Array(nonce)
+        let credentialBytes = Array(mlsCredential)
+        var output = [UInt8](repeating: 0, count: Int(LINKS_IDENTITY_MAX_TRANSCRIPT))
+        var outputLength = 0
+        let status = userBytes.withUnsafeBufferPointer { userBuffer in
+            deviceBytes.withUnsafeBufferPointer { deviceBuffer in
+                nodeBytes.withUnsafeBufferPointer { nodeBuffer in
+                    publicKey.withUnsafeBufferPointer { publicBuffer in
+                        challengeBytes.withUnsafeBufferPointer { challengeBuffer in
+                            nonceBytes.withUnsafeBufferPointer { nonceBuffer in
+                                credentialBytes.withUnsafeBufferPointer { credentialBuffer in
+                                    output.withUnsafeMutableBufferPointer { outputBuffer in
+                                        links_enrollment_transcript(
+                                            userBuffer.baseAddress, deviceBuffer.baseAddress,
+                                            nodeBuffer.baseAddress, publicBuffer.baseAddress,
+                                            challengeBuffer.baseAddress, nonceBuffer.baseAddress,
+                                            expiresAtMs, credentialBuffer.baseAddress,
+                                            credentialBuffer.count, outputBuffer.baseAddress,
+                                            outputBuffer.count, &outputLength)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return try transcript(status: status, output: output, length: outputLength)
+    }
+
     /// Explicit device removal only; never call on a network retry or ordinary login.
     public func deleteIdentity(_ identity: IdentityKeyReference) throws {
         let handle = Array(identity.handle.utf8)
         try withVault { try check(links_identity_delete($0, handle)) }
     }
+
+    private func transcript(status: Int32, output: [UInt8], length: Int) throws -> Data {
+        try check(status)
+        guard length > 0, length <= output.count else { throw IdentityError.providerFailure }
+        return Data(output[0..<length])
+    }
+
+    private func uuidBytes(_ value: UUID) -> [UInt8] {
+        var tuple = value.uuid
+        return withUnsafeBytes(of: &tuple) { Array($0) }
+    }
+
     private func check(_ status: Int32) throws {
         switch status {
         case Int32(LINKS_OK): return

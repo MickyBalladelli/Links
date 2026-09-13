@@ -4,6 +4,8 @@
 `LinksKeyStore` hardware adapter. `IOSClient` owns the first iOS client boundary:
 
 - creates and validates the Secure Enclave-backed identity;
+- signs the exact phone and enrollment transcripts through the Rust identity
+  FFI and completes HTTPS `/v1/auth/start` and `/v1/auth/finish`;
 - stores only the hardware handle, public identity key, device ID, MLS node ID,
   and optional account ID in `UserDefaults`;
 - keeps the bearer token in memory only;
@@ -16,7 +18,8 @@ The factory boundary prevents a Swift protocol or crypto fork. Its production
 implementation must bind Rust `ClientCore`, MLS state, Sealed Sender key
 resolution, and durable inbox/outbox storage. Missing providers fail closed.
 
-This target is the iOS foundation only. OTP transport, TLS WebSocket lifecycle,
+This target is the iOS foundation and OTP layer. TLS WebSocket lifecycle,
 send/receive UI, APNs recovery, and account recovery remain the following Phase
-4 tasks. The iOS release gate still requires Android interop, restart/replay,
-tamper, Secure Enclave, background, and battery evidence on physical devices.
+4 tasks. The iOS release gate still requires live OTP, Android interop,
+restart/replay, tamper, Secure Enclave, background, and battery evidence on
+physical devices.

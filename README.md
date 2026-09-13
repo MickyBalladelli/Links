@@ -22,7 +22,7 @@ remain open.
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, Android identity/OTP onboarding, and the internal text-messaging shell. |
+| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations and identity/OTP onboarding, plus the internal Android text-messaging shell. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |

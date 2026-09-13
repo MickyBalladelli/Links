@@ -261,7 +261,12 @@ Bring iOS to feature parity with Android. Validate hardware-backed keys and back
   `ClientCore`, MLS, envelope, durable-store, and hardware signing providers. OTP, transport,
   messaging UI, APNs recovery, and passkey/seed recovery remain later Phase 4
   tasks; see [iOS client foundation](docs/ios-client.md).
-- [ ] Add phone OTP onboarding and Secure Enclave key storage.
+- [x] Add phone OTP onboarding and Secure Enclave key storage.
+  `LinksClient` now signs the exact Rust identity-FFI phone and enrollment
+  transcripts with the Secure Enclave-backed identity, calls HTTPS
+  `/v1/auth/start` and `/v1/auth/finish`, validates challenge/device/key
+  bindings, and keeps the returned bearer in memory only. Physical Secure
+  Enclave and live provider acceptance remain release gates.
 - [ ] Implement iOS connection manager with exponential backoff, reconnect, and heartbeating.
 - [ ] Implement the same 1-to-1 send and receive flows as Android.
 - [ ] Add APNs background fetch and missing-message recovery.

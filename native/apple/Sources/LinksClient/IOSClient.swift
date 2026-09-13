@@ -55,7 +55,7 @@ public enum IOSClientError: Error {
 
 /// Base iOS client session. It owns hardware identity enrollment and public
 /// device metadata, then hands the authenticated identity to shared Rust core.
-/// OTP, transport, message UI, APNs and recovery are separate host layers.
+/// Transport, message UI, APNs and recovery are separate host layers.
 public final class IOSClient: SharedCoreIdentitySigner {
     private struct StoredMetadata: Codable {
         let handle: String
@@ -162,6 +162,65 @@ public final class IOSClient: SharedCoreIdentitySigner {
         return try identityStore.sign(identity, transcript: transcript)
     }
 
+    /// Start phone verification with a proof signed by this hardware identity.
+    public func startOTP(using api: IOSOTPClient, phone: String,
+                         channel: IOSOTPChannel) async throws -> IOSOTPChallenge {
+        guard let identity, let deviceID, let mlsNodeID,
+              let deviceUUID = UUID(uuidString: deviceID),
+              let nodeUUID = UUID(uuidString: mlsNodeID) else {
+            throw IOSClientError.identityNotEnrolled
+        }
+        var transcript = try identityStore.phoneAuthTranscript(
+            identity, phone: phone, channel: channel.rawValue,
+            deviceID: deviceUUID, mlsNodeID: nodeUUID)
+        var signature = try sign(transcript)
+        defer {
+            transcript.resetBytes(in: 0..<transcript.count)
+            signature.resetBytes(in: 0..<signature.count)
+        }
+        let challenge = try await api.start(
+            phone: phone, channel: channel, deviceID: deviceID,
+            mlsNodeID: mlsNodeID, publicKey: identity.publicKey, signature: signature)
+        try validate(challenge, identity: identity, deviceID: deviceID, mlsNodeID: mlsNodeID)
+        return challenge
+    }
+
+    /// Finish phone verification with a fresh enrollment proof, then keep the
+    /// returned bearer only in memory through setAuthenticatedSession().
+    @discardableResult
+    public func finishOTP(using api: IOSOTPClient, challenge: IOSOTPChallenge,
+                          code: String) async throws -> IOSOTPAuthSession {
+        guard let identity, let deviceID, let mlsNodeID,
+              let userUUID = UUID(uuidString: challenge.userID),
+              let deviceUUID = UUID(uuidString: deviceID),
+              let nodeUUID = UUID(uuidString: mlsNodeID),
+              let challengeUUID = UUID(uuidString: challenge.challengeID) else {
+            throw IOSClientError.identityNotEnrolled
+        }
+        try validate(challenge, identity: identity, deviceID: deviceID, mlsNodeID: mlsNodeID)
+        guard challenge.expiresAtMs > IOSOTPClient.nowMs() else {
+            throw IOSOTPError.invalidChallenge
+        }
+        var transcript = try identityStore.enrollmentTranscript(
+            identity, userID: userUUID, deviceID: deviceUUID, mlsNodeID: nodeUUID,
+            challengeID: challengeUUID, nonce: challenge.nonce,
+            expiresAtMs: challenge.expiresAtMs, mlsCredential: challenge.mlsCredential)
+        var signature = try sign(transcript)
+        defer {
+            transcript.resetBytes(in: 0..<transcript.count)
+            signature.resetBytes(in: 0..<signature.count)
+        }
+        let session = try await api.finish(
+            challengeID: challenge.challengeID, code: code, signature: signature)
+        guard session.userID == challenge.userID, session.deviceID == deviceID else {
+            throw IOSOTPError.challengeIdentityMismatch
+        }
+        try setAuthenticatedSession(
+            userID: session.userID, accessToken: session.accessToken,
+            expiresAtMs: session.expiresAtMs)
+        return session
+    }
+
     /// Construct the shared core only after account authentication is valid.
     /// The factory must bind this identity to the Rust ClientCore providers.
     public func makeCore(using factory: SharedClientCoreFactory) throws -> any SharedClientCore {
@@ -214,6 +273,15 @@ public final class IOSClient: SharedCoreIdentitySigner {
         deviceID = metadata.deviceID
         mlsNodeID = metadata.mlsNodeID
         userID = metadata.userID
+    }
+
+    private func validate(_ challenge: IOSOTPChallenge, identity: IdentityKeyReference,
+                          deviceID: String, mlsNodeID: String) throws {
+        guard challenge.deviceID == deviceID,
+              challenge.mlsNodeID == mlsNodeID,
+              challenge.publicKey == identity.publicKey else {
+            throw IOSOTPError.challengeIdentityMismatch
+        }
     }
 
     private func saveMetadata(_ metadata: StoredMetadata) throws {
