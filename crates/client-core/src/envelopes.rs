@@ -15,6 +15,16 @@ pub struct FanoutRecipient {
     pub envelope_id: String,
 }
 
+impl FanoutRecipient {
+    pub fn new(recipient_device_id: String) -> Result<Self, CoreError> {
+        protocol::validate_id(&recipient_device_id)?;
+        Ok(Self {
+            recipient_device_id,
+            envelope_id: random_envelope_id()?,
+        })
+    }
+}
+
 /// Build one fresh envelope identity for every non-revoked device in an
 /// authenticated directory snapshot. The caller must verify the directory's
 /// authenticity before passing these users to this helper.
@@ -30,8 +40,7 @@ pub fn fanout_recipients_for_users(users: &[v1::User]) -> Result<Vec<FanoutRecip
         for device in &user.devices {
             if device.revoked_at_ms.is_none() {
                 recipients.push(FanoutRecipient {
-                    recipient_device_id: device.device_id.clone(),
-                    envelope_id: random_envelope_id()?,
+                    ..FanoutRecipient::new(device.device_id.clone())?
                 });
             }
         }
@@ -56,6 +65,18 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
 
     pub fn device_id(&self) -> &str {
         self.identity.device_id()
+    }
+
+    pub fn user_id(&self) -> &str {
+        self.identity.user_id()
+    }
+
+    pub fn crypto_mut(&mut self) -> &mut C {
+        &mut self.crypto
+    }
+
+    pub fn mls_mut(&mut self) -> &mut M {
+        &mut self.mls
     }
 
     /// Assign the next sender-local conversation sequence before MLS sealing.

@@ -6,7 +6,7 @@ use openmls_traits::{
     signatures::{Signer, SignerError},
     OpenMlsProvider as RawOpenMlsProvider,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 const DIRECT_MAX_USERS: usize = 2;
@@ -48,6 +48,21 @@ pub trait MlsEngine {
         plaintext: &[u8],
     ) -> Result<Vec<u8>, CoreError>;
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedApplication, CoreError>;
+
+    /// Ensure a direct group contains the supplied recipient device leaves.
+    /// The returned commit must be delivered before it is merged locally.
+    fn ensure_direct_group(
+        &mut self,
+        _: &str,
+        _: &[&[u8]],
+    ) -> Result<Option<PendingCommit>, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
+    /// Merge the local commit after the bootstrap delivery is accepted.
+    fn merge_pending_direct_commit(&mut self, _: &str) -> Result<(), CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
 }
 
 impl MlsEngine for crate::crypto::UnavailableCrypto {
@@ -528,6 +543,86 @@ where
 
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedApplication, CoreError> {
         self.decrypt_message(ciphertext)
+    }
+
+    fn ensure_direct_group(
+        &mut self,
+        conversation_id: &str,
+        key_packages: &[&[u8]],
+    ) -> Result<Option<PendingCommit>, CoreError> {
+        self.ensure_direct_group_members(conversation_id, key_packages)
+    }
+
+    fn merge_pending_direct_commit(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        self.merge_pending_commit(conversation_id)
+    }
+}
+
+impl<P, S, V> OpenMlsEngine<P, S, V>
+where
+    P: openmls::storage::OpenMlsProvider,
+    S: MlsIdentitySigner,
+    V: MlsCredentialVerifier,
+{
+    fn ensure_direct_group_members(
+        &mut self,
+        conversation_id: &str,
+        key_package_bytes: &[&[u8]],
+    ) -> Result<Option<PendingCommit>, CoreError> {
+        if key_package_bytes.is_empty() {
+            return Err(CoreError::Authentication);
+        }
+
+        let group_id = group_id(conversation_id)?;
+        let mut packages = Vec::with_capacity(key_package_bytes.len());
+        let mut target_devices = HashSet::with_capacity(key_package_bytes.len());
+        let mut target_user = None;
+        for bytes in key_package_bytes {
+            let package = self.validate_key_package(bytes)?;
+            let binding = verify_leaf(&self.verifier, package.leaf_node())?;
+            if binding.user_id == self.local_binding.user_id
+                || !target_devices.insert(binding.device_id)
+                || target_user.is_some_and(|user_id| user_id != binding.user_id)
+            {
+                return Err(CoreError::Authentication);
+            }
+            target_user = Some(binding.user_id);
+            packages.push((*bytes, binding.device_id));
+        }
+
+        let existing = MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|_| CoreError::Provider)?;
+        let Some(group) = existing else {
+            self.create_group_with_id(group_id)?;
+            return self.add_members(conversation_id, key_package_bytes).map(Some);
+        };
+
+        let users = verified_group_user_counts(&self.verifier, &group)?;
+        ensure_direct_user_limit(&users)?;
+        if !users.contains_key(&self.local_binding.user_id)
+            || matches!(target_user, Some(user_id) if
+                users.len() == DIRECT_MAX_USERS && !users.contains_key(&user_id))
+        {
+            return Err(CoreError::Authentication);
+        }
+
+        let existing_devices = group
+            .members()
+            .map(|member| {
+                verify_credential(&self.verifier, &member.credential, &member.signature_key)
+                    .map(|binding| binding.device_id)
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
+        let missing = packages
+            .iter()
+            .filter(|(_, device_id)| !existing_devices.contains(device_id))
+            .map(|(bytes, _)| *bytes)
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
+            return Ok(None);
+        }
+        self.add_members(conversation_id, &missing).map(Some)
     }
 }
 

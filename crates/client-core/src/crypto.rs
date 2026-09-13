@@ -59,6 +59,17 @@ pub trait SealedSenderKeyResolver {
     ) -> Result<Zeroizing<[u8; 32]>, CoreError>;
 }
 
+/// Mutable directory hook used by the send coordinator after it verifies a
+/// recipient's signed PQXDH bundle. Implementations must replace keys only
+/// through their authenticated device-directory policy.
+pub trait RecipientKeyDirectory {
+    fn install_recipient_public_key(
+        &mut self,
+        recipient_device_id: &str,
+        public_key: [u8; 32],
+    ) -> Result<(), CoreError>;
+}
+
 /// Sealed Sender envelope provider.
 ///
 /// The wrapper carries only a version, an ephemeral X25519 public key, a nonce,
@@ -77,6 +88,24 @@ impl<R> SealedSenderCrypto<R> {
 
     pub fn resolver(&self) -> &R {
         &self.resolver
+    }
+
+    pub fn resolver_mut(&mut self) -> &mut R {
+        &mut self.resolver
+    }
+}
+
+impl<R> RecipientKeyDirectory for SealedSenderCrypto<R>
+where
+    R: RecipientKeyDirectory,
+{
+    fn install_recipient_public_key(
+        &mut self,
+        recipient_device_id: &str,
+        public_key: [u8; 32],
+    ) -> Result<(), CoreError> {
+        self.resolver
+            .install_recipient_public_key(recipient_device_id, public_key)
     }
 }
 
@@ -185,6 +214,16 @@ impl EnvelopeCrypto for UnavailableCrypto {
         Err(CoreError::CryptoUnavailable)
     }
     fn open(&mut self, _: &str, _: &[u8], _: &[u8]) -> Result<SecretBytes, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+}
+
+impl RecipientKeyDirectory for UnavailableCrypto {
+    fn install_recipient_public_key(
+        &mut self,
+        _: &str,
+        _: [u8; 32],
+    ) -> Result<(), CoreError> {
         Err(CoreError::CryptoUnavailable)
     }
 }
