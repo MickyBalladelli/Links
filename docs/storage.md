@@ -99,7 +99,7 @@ each map independently to the constructor's entry limit and prunes expired entri
 on writes. Invalid zero costs/capacities/refill rates and over-capacity costs fail.
 Keys must be namespaced opaque digests supplied by the service, not raw PII.
 
-A production Redis adapter must implement the same CAS and token math atomically
+A production Redis adapter used by `links-gateway` must implement the same CAS and token math atomically
 using Lua/transactions and Redis server time, plus TTLs. Use same-slot keys in
 Redis Cluster. Backend errors are errors, not permission to bypass rate limits;
 gateways fail closed for new sends and reconnect rather than assuming a missing

@@ -6,7 +6,7 @@ WebAuthn/Passkey PRF-encrypted identity backup, the
 Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
 provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
 messenger or a production post-quantum security claim.** One-to-one client
-lifecycle wiring, delivery gateways, and client applications remain in later
+lifecycle wiring, production gateway rollout and client applications remain in later
 phases. Native hardware acceptance and the cryptographic audit remain open.
 
 ## Workspace
@@ -19,6 +19,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `crates/server-store` | PostgreSQL repository/migrations, encrypted payload-store contract, Redis-shaped state contract and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
+| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and APNs/FCM wakeup contracts. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters and acceptance tests. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
@@ -28,6 +29,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 | `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
+| `docs/gateway.md` | Multi-region WebSocket gateway flow, routing, push fallback and deployment gates. |
 
 ## Build and test
 

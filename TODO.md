@@ -119,7 +119,10 @@ Make encrypted messages reliably move between devices before adding richer clien
 
 ### Edge and routing infrastructure
 
-- [ ] Deploy multi-region WebSocket connection gateways managing client sockets and APNs / FCM fallbacks.
+- [x] Deploy multi-region WebSocket connection gateways managing client sockets and APNs / FCM fallbacks.
+-  `links-gateway` provides the strict WebSocket frame/session state machine,
+   cross-region forwarding and silent push fallback contracts. Production Redis,
+   bus, APNs/FCM adapters and cloud rollout remain an operational release gate.
 - [ ] Deploy distributed message queues using NATS, Kafka, or RabbitMQ to route encrypted Sealed Sender envelopes without inspecting contents.
 - [ ] Build ephemeral Redis state for active WebSocket sessions, routing tables, and rate-limit buckets.
 - [ ] Deploy the append-only encrypted payload store for undelivered envelopes.

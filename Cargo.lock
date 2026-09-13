@@ -1749,6 +1749,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "links-gateway"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "links-account-auth",
+ "links-protocol",
+ "links-server-store",
+ "prost",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "links-identity"
 version = "0.1.0"
 dependencies = [

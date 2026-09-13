@@ -1,0 +1,15 @@
+[package]
+name = "links-gateway"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+links-protocol.workspace = true
+links-server-store.workspace = true
+links-account-auth = { path = "../account-auth" }
+prost.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid = { workspace = true, features = ["v4"] }

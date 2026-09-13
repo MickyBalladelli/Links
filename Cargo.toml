@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/protocol", "crates/client-core", "crates/server-store", "crates/identity", "crates/account-auth", "crates/identity-ffi"]
+members = ["crates/protocol", "crates/client-core", "crates/server-store", "crates/identity", "crates/account-auth", "crates/identity-ffi", "crates/gateway"]
 resolver = "2"
 
 [workspace.package]
@@ -32,3 +32,4 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "migrate", "macros"] }
 links-protocol = { path = "crates/protocol" }
 links-client-core = { path = "crates/client-core" }
+links-server-store = { path = "crates/server-store" }

@@ -42,7 +42,9 @@ Public bidirectional transport is **WebSocket over TLS (`wss`)**, not two parall
 client protocols. The endpoint contract is `/v1/connect`, subprotocol `links.v1`.
 Each binary WebSocket message contains exactly one protobuf ClientFrame or
 ServerFrame. Text frames and compression extensions are disabled. Require TLS
-1.3 for public connections. The gateway itself is implemented in Phase 2.
+1.3 for public connections. The transport-neutral implementation is
+`links-gateway`; a socket adapter must use its frame decoder/encoder and session
+state machine.
 
 HTTP/2 gRPC is reserved for future internal service RPCs; there is no public gRPC
 client or HTTP/2 requirement for the initial WebSocket handshake. This avoids
@@ -50,7 +52,7 @@ assuming native bidirectional gRPC support in companion browsers.
 
 The first frame must be Hello within 5 seconds. It contains protocol version,
 device ID, a short-lived device-scoped access token, and the last durable cursor.
-Do not put tokens into query strings or log them. The future gateway validates
+Do not put tokens into query strings or log them. The gateway validates
 the token against an active account/device, binds all replay/ack actions to that
 device, validates browser Origin against an allowlist, and returns Welcome.
 The request ID is a UUID used only for response correlation, not authentication
@@ -70,7 +72,7 @@ frame, at most 100 entries per sync batch. Batch producers must also fit a byte
 budget of `MAX_FRAME_BYTES - 128` so wrapping a batch in ServerFrame fits the frame
 cap. Enforce size limits **before** decoding or decompression/allocation. Receipt
 batches contain at most 100 unique message IDs. Core decoders cover message and
-envelope boundaries; the future gateway must validate authentication, transport
+envelope boundaries; the gateway must validate authentication, transport
 frames, rate limits and connection state before using generated types.
 
 `Accepted` is returned only after durable enqueue and idempotency commit; it says

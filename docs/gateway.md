@@ -1,0 +1,65 @@
+# Multi-region connection gateway
+
+`links-gateway` is the transport-neutral core for the public WebSocket edge. A
+small adapter owns the actual `wss://.../v1/connect` socket and calls
+`decode_client_frame`, `Gateway::open`, `Gateway::handle` and
+`encode_server_frame`. The core never logs or decrypts sealed message bytes.
+
+## Regional flow
+
+Each gateway instance has an explicit `GatewayConfig { gateway_id, region }`.
+The gateway authenticates the first `Hello`, binds a random session lease in
+the shared `EphemeralState`, and replaces any previous lease for that device.
+The lease contains only device ID, session ID, gateway locator and a 120-second
+expiry. Renew and close are compare-and-swap operations; an old socket cannot
+clear or use a newer connection after a cross-region reconnect.
+
+Sending follows this order:
+
+1. Validate the opaque envelope and append it to the durable encrypted mailbox.
+2. Return `Accepted` only after the append/idempotency commit succeeds.
+3. Deliver to the active local socket, forward to the gateway in the lease, or
+   send a silent APNs/FCM wakeup when no socket is active.
+
+Forward or push failure leaves the mailbox row available for replay. Retrying
+the same envelope ID is idempotent. A client sends `Replay` after `Welcome` and
+sends `QueueAck` only after its local message/MLS transaction is durable.
+
+`RegionBus` is the adapter boundary for NATS, Kafka, or another authenticated
+cross-region bus. It must preserve the destination gateway ID, envelope bytes
+and mailbox cursor, use TLS/mTLS, reject unknown gateways and apply bounded
+backpressure. Do not publish bearer tokens, phone numbers, conversation IDs or
+plaintext messages. The destination adapter passes the authenticated delivery
+to `Gateway::handle_forwarded`; it does not append a second mailbox row.
+
+`PushNotifier` is the APNs/FCM boundary. Its payload is a device-scoped silent
+wakeup containing only the recipient device ID and mailbox cursor. It must not
+contain ciphertext, sender identity, conversation metadata or access tokens.
+The client wakes, reconnects over TLS and replays from its durable cursor.
+
+## Production deployment
+
+Run at least two gateway instances per region behind a TLS 1.3 load balancer.
+Use a shared Redis-compatible `EphemeralState` with server-time Lua/CAS
+operations and a durable encrypted payload store shared by all regions. Route
+records must use the gateway's stable deployment ID, not a pod IP. Health checks
+must remove a gateway from new connections before termination; existing sockets
+receive a reconnect/close signal and their leases expire or are explicitly
+unbound.
+
+Required edge policy:
+
+- WebSocket subprotocol is `links.v1`; reject text frames and compression.
+- Require `Hello` within 5 seconds, heartbeat every 30 seconds, and close after
+  90 seconds without liveness.
+- Cap complete frames at 1 MiB before protobuf decode or allocation.
+- Validate browser `Origin` against the configured allowlist.
+- Apply per-device/account/IP connection and send limits in shared state.
+- Keep gateway, bus, push-provider and queue credentials in a secret manager.
+- Aggregate metrics without device IDs, account IDs, payload labels or raw IPs.
+- Drain before deploy; never delete a queue row because a socket disconnected.
+
+The repository provides the gateway core and provider interfaces. Concrete
+Redis, bus, APNs and FCM adapters plus cloud load-balancer/IaC rollout are
+deployment work and must pass regional failover, duplicate delivery, stale
+lease, queue outage, push outage and reconnect acceptance checks before release.
