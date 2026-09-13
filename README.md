@@ -36,6 +36,7 @@ remain open.
 | `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 | `docs/directory.md` | Global `@username` lookup, active-device public keys, revocation visibility and pre-key handoff. |
+| `docs/contact-discovery.md` | Local E.164 address-book hashing with Argon2id and a persistent client salt. |
 | `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 | `docs/pairing.md` | Canonical device-pairing QR URI, signature verification and client flow. |

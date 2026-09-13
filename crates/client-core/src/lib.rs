@@ -4,6 +4,7 @@
 //! `crypto::SealedSenderCrypto` with a platform-backed key resolver for sends.
 pub mod attachments;
 pub mod background;
+pub mod contact_discovery;
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;

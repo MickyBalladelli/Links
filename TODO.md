@@ -461,7 +461,10 @@ Add discovery options after the basic phone-based account works.
 
 ### Private contact discovery
 
-- [ ] Hash local address-book phone numbers with Argon2id and a client salt.
+- [x] Hash local address-book phone numbers with Argon2id and a client salt.
+  Shared client core validates canonical E.164 input, uses a random persistent
+  16-byte per-client salt, and derives 32-byte Argon2id hashes locally without
+  sending phone numbers or hashes to the server.
 - [ ] Build the server/network PSI zero-knowledge matching API without leaking full contact books.
 
 ### Anti-spam
