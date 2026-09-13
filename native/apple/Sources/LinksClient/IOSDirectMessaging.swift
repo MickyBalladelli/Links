@@ -161,6 +161,66 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             transport: manager)
     }
 
+    /// Encode PCM with links-client-core's Opus profile. The shared core
+    /// remains the only component that decides framing and codec settings.
+    public func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data {
+        lock.lock()
+        let sharedCore = core
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, ready else { throw IOSMessagingError.notConnected }
+        return try sharedCore.encodeVoiceNote(pcmFrames: pcmFrames, profile: profile)
+    }
+
+    /// Encrypt a complete Opus container with attachment metadata hidden in MLS.
+    public func encryptVoiceNote(_ container: Data, attachmentID: String,
+                                 durationMs: UInt64, profile: IOSVoiceNoteProfile)
+        throws -> IOSEncryptedVoiceNote {
+        lock.lock()
+        let sharedCore = core
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, ready else { throw IOSMessagingError.notConnected }
+        return try sharedCore.encryptVoiceNote(
+            container, attachmentID: attachmentID, durationMs: durationMs, profile: profile)
+    }
+
+    /// Verify the downloaded ciphertext through the shared core.
+    public func decryptVoiceNote(_ metadata: IOSVoiceNoteMetadata, ciphertext: Data) throws -> Data {
+        lock.lock()
+        let sharedCore = core
+        lock.unlock()
+        guard let sharedCore else { throw IOSMessagingError.notConnected }
+        return try sharedCore.decryptVoiceNote(metadata, ciphertext: ciphertext)
+    }
+
+    /// Decode verified Opus into PCM for AVAudioEngine playback.
+    public func decodeVoiceNote(_ container: Data, profile: IOSVoiceNoteProfile) throws -> [Int16] {
+        lock.lock()
+        let sharedCore = core
+        lock.unlock()
+        guard let sharedCore else { throw IOSMessagingError.notConnected }
+        return try sharedCore.decodeVoiceNote(container, profile: profile)
+    }
+
+    /// Send the media Message only after the uploader accepted the exact blob.
+    public func sendVoiceNote(conversationID: String, recipientUserID: String,
+                              metadata: IOSVoiceNoteMetadata,
+                              receipt: IOSVoiceNoteUploadReceipt) throws {
+        guard receipt.matches(metadata) else { throw IOSVoiceNoteError.invalidUploadReceipt }
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        try sharedCore.sendVoiceNote(
+            conversationID: conversationID, recipientUserID: recipientUserID,
+            metadata: metadata, receipt: receipt, transport: manager)
+    }
+
     public func connectionManager(_ manager: IOSConnectionManager,
                                   didChange state: IOSConnectionManager.State) {
         lock.lock()
