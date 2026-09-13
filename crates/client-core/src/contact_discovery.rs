@@ -92,6 +92,14 @@ pub struct ContactPsiClientState {
     blinded_inputs: Vec<[u8; contact_psi::POINT_BYTES]>,
 }
 
+impl Drop for ContactPsiClientState {
+    fn drop(&mut self) {
+        self.inputs.zeroize();
+        self.blinds.zeroize();
+        self.blinded_inputs.zeroize();
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContactPsiQuery {
     pub protocol_version: u32,
@@ -131,7 +139,9 @@ impl ContactPsiClientState {
             let input = contact_psi::contact_input(phone.as_ref())?;
             let mut randomness = [0u8; 64];
             fill(&mut randomness).map_err(|_| ContactPsiClientError::Provider)?;
-            let (blinded, blind) = contact_psi::blind_input(&input, &randomness)?;
+            let result = contact_psi::blind_input(&input, &randomness);
+            randomness.zeroize();
+            let (blinded, blind) = result?;
             inputs.push(input);
             blinds.push(blind);
             blinded_inputs.push(blinded);

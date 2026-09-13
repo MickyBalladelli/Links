@@ -47,7 +47,8 @@ The server learns the authenticated account, source address, batch size, query
 count, and timing. It does not receive raw phone numbers, local Argon2id hashes,
 or unblinded OPRF values. The client receives an opaque pseudorandom membership
 filter rather than the server's phone numbers. Rate limits cap requests at 10 batches per
-minute and 60 per hour per account, plus 100 per hour per source address; each
-batch has at most 256 contacts. This is a practical one-sided PSI boundary,
-not a promise of metadata anonymity or a substitute for an external
-cryptographic audit.
+minute and 60 per hour per account, plus 100 per hour per source address. They also
+cap evaluated candidates at 10,000 per hour per account and 20,000 per hour per
+source address. Each batch has at most 256 contacts. This is a practical
+one-sided PSI boundary, not a promise of metadata anonymity or a substitute for
+an external cryptographic audit.

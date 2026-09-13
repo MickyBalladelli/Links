@@ -470,6 +470,7 @@ Add discovery options after the basic phone-based account works.
   verifiable DLEQ-backed OPRF evaluations, and clients match opaque directory
   tokens locally. Raw contact numbers and local Argon2id hashes never cross the
   network; query volume and account metadata remain visible to the service.
+  Request and candidate budgets limit directory-enumeration attempts.
 
 ### Anti-spam
 

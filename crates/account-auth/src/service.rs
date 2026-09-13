@@ -412,26 +412,39 @@ impl AccountAuth {
         user_id: Uuid,
         peer_ip: IpAddr,
         now: i64,
+        batch_size: usize,
     ) -> Result<(), AuthError> {
+        let batch_cost = i32::try_from(batch_size).map_err(|_| AuthError::Invalid)?;
         let user_minute_key =
             self.digest(b"links/contact-psi-user-minute/v1\0", user_id.as_bytes());
         let user_hour_key = self.digest(b"links/contact-psi-user-hour/v1\0", user_id.as_bytes());
+        let user_items_key = self.digest(
+            b"links/contact-psi-user-items-hour/v1\0",
+            user_id.as_bytes(),
+        );
         let ip_key = self.digest(
             b"links/contact-psi-ip-hour/v1\0",
             peer_ip.to_string().as_bytes(),
         );
+        let ip_items_key = self.digest(
+            b"links/contact-psi-ip-items-hour/v1\0",
+            peer_ip.to_string().as_bytes(),
+        );
         let mut tx = self.pool.begin().await?;
         let mut limited = false;
-        for (key, window, limit) in [
-            (user_minute_key, 60_000_i64, 10_i32),
-            (user_hour_key, 3_600_000_i64, 60_i32),
-            (ip_key, 3_600_000_i64, 100_i32),
+        for (key, window, limit, cost) in [
+            (user_minute_key, 60_000_i64, 10_i32, 1_i32),
+            (user_hour_key, 3_600_000_i64, 60_i32, 1_i32),
+            (user_items_key, 3_600_000_i64, 10_000_i32, batch_cost),
+            (ip_key, 3_600_000_i64, 100_i32, 1_i32),
+            (ip_items_key, 3_600_000_i64, 20_000_i32, batch_cost),
         ] {
-            let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
+            let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,$5) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $5 ELSE auth_rate_limits.attempts+$5 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts+$5 <= $4 RETURNING attempts")
                 .bind(key.as_slice())
                 .bind(now)
                 .bind(window)
                 .bind(limit)
+                .bind(cost)
                 .fetch_optional(&mut *tx)
                 .await?;
             if count.is_none() {
@@ -1256,7 +1269,7 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<ContactPsiParametersResponse, AuthError> {
         let account = self.authenticate(token).await?;
-        self.enforce_contact_psi_rate_limits(account.user_id, peer_ip, self.now()?)
+        self.enforce_contact_psi_rate_limits(account.user_id, peer_ip, self.now()?, 1)
             .await?;
         let rows = sqlx::query(
             "SELECT a.contact_directory_token FROM accounts a WHERE a.disabled_at IS NULL AND a.contact_directory_token IS NOT NULL AND EXISTS (SELECT 1 FROM devices d WHERE d.user_id=a.user_id AND d.revoked_at IS NULL) ORDER BY a.contact_directory_token",
@@ -1300,8 +1313,13 @@ impl AccountAuth {
             return Err(AuthError::Invalid);
         }
         let account = self.authenticate(token).await?;
-        self.enforce_contact_psi_rate_limits(account.user_id, peer_ip, self.now()?)
-            .await?;
+        self.enforce_contact_psi_rate_limits(
+            account.user_id,
+            peer_ip,
+            self.now()?,
+            request.blinded_inputs.len(),
+        )
+        .await?;
         let mut evaluations = Vec::with_capacity(request.blinded_inputs.len());
         for encoded in request.blinded_inputs {
             let blinded = decode::<{ links_protocol::contact_psi::POINT_BYTES }>(&encoded)?;
