@@ -4,6 +4,7 @@ import Foundation
 public enum IOSLargeFileError: Error {
     case invalidInput
     case invalidMetadata
+    case invalidUploadReceipt
     case encryptionFailed
     case decryptionFailed
     case integrityFailure
