@@ -3,8 +3,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
     fs,
-    io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -464,6 +463,45 @@ pub trait DesktopMessagingCore: Send {
         text: &str,
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError>;
+    /// Encode the private fixed-size BlurHash from normalized RGB pixels.
+    fn encode_image_blur_hash(
+        &mut self,
+        _rgb_pixels: &[u8],
+        _width: u32,
+        _height: u32,
+    ) -> Result<String, CoreError> {
+        Err(CoreError::Provider)
+    }
+    /// Encrypt normalized image bytes and return metadata for the private MLS
+    /// message plus ciphertext for opaque blob storage.
+    fn encrypt_image(
+        &mut self,
+        _image: &[u8],
+        _attachment_id: &str,
+        _mime_type: &str,
+        _width: u32,
+        _height: u32,
+        _blur_hash: &str,
+    ) -> Result<DesktopEncryptedImage, CoreError> {
+        Err(CoreError::Provider)
+    }
+    fn decrypt_image(
+        &mut self,
+        _metadata: &DesktopImageMetadata,
+        _ciphertext: &[u8],
+    ) -> Result<Vec<u8>, CoreError> {
+        Err(CoreError::Provider)
+    }
+    fn send_image(
+        &mut self,
+        _conversation_id: &str,
+        _recipient_user_id: &str,
+        _metadata: &DesktopImageMetadata,
+        _receipt: &DesktopImageUploadReceipt,
+        _transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::Provider)
+    }
 }
 
 pub type DesktopAccessTokenProvider = Arc<dyn Fn() -> Result<String, CoreError> + Send + Sync>;
@@ -473,6 +511,7 @@ pub type DesktopAccessTokenProvider = Arc<dyn Fn() -> Result<String, CoreError> 
 pub struct DesktopTextSession<C, F: DesktopSocketFactory> {
     core: Arc<Mutex<C>>,
     manager: DesktopConnectionManager<F>,
+    access_token: DesktopAccessTokenProvider,
 }
 
 impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSession<C, F> {
@@ -501,7 +540,11 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
             Ok(hello)
         };
         let manager = DesktopConnectionManager::new(endpoint, hello_provider, factory)?;
-        Ok(Self { core, manager })
+        Ok(Self {
+            core,
+            manager,
+            access_token,
+        })
     }
 
     pub fn state(&self) -> DesktopConnectionState {
@@ -569,6 +612,125 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
             now,
         };
         core.send_text(conversation_id, recipient_user_id, text, &mut transport)
+    }
+
+    /// Encrypt normalized image bytes. The host supplies decoded RGB pixels so
+    /// the shared core, not the UI, creates the private BlurHash.
+    pub fn prepare_and_encrypt_image(
+        &mut self,
+        image: &[u8],
+        rgb_pixels: &[u8],
+        mime_type: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<DesktopEncryptedImage, CoreError> {
+        if image.is_empty()
+            || !matches!(mime_type, "image/webp" | "image/avif")
+            || width == 0
+            || height == 0
+        {
+            return Err(CoreError::Authentication);
+        }
+        let attachment_id = uuid::Uuid::new_v4().to_string();
+        let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
+        let blur_hash = core.encode_image_blur_hash(rgb_pixels, width, height)?;
+        let image = core.encrypt_image(
+            image,
+            &attachment_id,
+            mime_type,
+            width,
+            height,
+            &blur_hash,
+        )?;
+        image.metadata.validate()?;
+        Ok(image)
+    }
+
+    pub fn upload_image(
+        &mut self,
+        uploader: &mut dyn DesktopImageUploader,
+        image: &DesktopEncryptedImage,
+    ) -> Result<DesktopImageUploadReceipt, CoreError> {
+        let token = self.require_access_token()?;
+        let receipt = uploader.upload(&token, image)?;
+        if !receipt.matches(&image.metadata) {
+            return Err(CoreError::Authentication);
+        }
+        Ok(receipt)
+    }
+
+    /// Send private metadata only after the opaque ciphertext upload receipt
+    /// exactly matches the bytes and attachment ID.
+    pub fn send_image(
+        &mut self,
+        now: Instant,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        image: &DesktopEncryptedImage,
+        receipt: &DesktopImageUploadReceipt,
+    ) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        protocol::validate_id(recipient_user_id)?;
+        image.metadata.validate()?;
+        if receipt.matches(&image.metadata)
+            && recipient_user_id
+                != self.core.lock().map_err(|_| CoreError::Provider)?.user_id()
+            && self.is_connected()
+        {
+            let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
+            let mut transport = ManagerTransport {
+                manager: &mut self.manager,
+                now,
+            };
+            return core.send_image(
+                conversation_id,
+                recipient_user_id,
+                &image.metadata,
+                receipt,
+                &mut transport,
+            );
+        }
+        Err(CoreError::Authentication)
+    }
+
+    /// Fetch ciphertext from cache or authenticated blob storage, verify it,
+    /// decrypt it in the shared core, render it, then wipe plaintext bytes.
+    pub fn download_and_render_image(
+        &mut self,
+        uploader: &mut dyn DesktopImageUploader,
+        cache: &mut dyn DesktopImageCache,
+        metadata: &DesktopImageMetadata,
+        renderer: &mut dyn DesktopImageRenderer,
+    ) -> Result<(), CoreError> {
+        metadata.validate()?;
+        let mut ciphertext = match cache.read(metadata)? {
+            Some(ciphertext) => ciphertext,
+            None => {
+                let token = self.require_access_token()?;
+                let ciphertext = uploader.download(&token, metadata)?;
+                let image = DesktopEncryptedImage::new(metadata.clone(), ciphertext)?;
+                cache.write(&image)?;
+                image.ciphertext
+            }
+        };
+        let verified = DesktopEncryptedImage::new(metadata.clone(), ciphertext)?;
+        ciphertext = verified.ciphertext;
+        let mut plaintext = {
+            let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
+            core.decrypt_image(metadata, &ciphertext)?
+        };
+        let result = renderer.render(&plaintext, metadata);
+        plaintext.fill(0);
+        ciphertext.fill(0);
+        result
+    }
+
+    fn require_access_token(&self) -> Result<String, CoreError> {
+        let token = (self.access_token)()?;
+        if token.is_empty() {
+            return Err(CoreError::Authentication);
+        }
+        Ok(token)
     }
 
     fn drain_frames(
