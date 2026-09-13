@@ -44,10 +44,13 @@ the authenticated delivery to `Gateway::handle_forwarded`; it does not append
 a second mailbox row. Kafka or RabbitMQ can implement the same `RegionBus`
 contract if deployment needs change.
 
-`PushNotifier` is the APNs/FCM boundary. Its payload is a device-scoped silent
-wakeup containing only the recipient device ID and mailbox cursor. It must not
-contain ciphertext, sender identity, conversation metadata or access tokens.
-The client wakes, reconnects over TLS and replays from its durable cursor.
+`PushNotifier` is the APNs/FCM boundary. `PushWakeup::apns_request` configures
+the APNs `background` push type with priority `5` and an `aps.content-available`
+body. `PushWakeup::fcm_request` configures a high-priority data-only FCM body;
+it has no notification payload. Both carry only the recipient device ID and
+mailbox cursor. They must not contain ciphertext, sender identity, conversation
+metadata or access tokens. `conversation_id` and `sequence_id` are E2EE-private,
+so the client wakes, reconnects over TLS and replays from its durable cursor.
 
 ## Production deployment
 

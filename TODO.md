@@ -165,7 +165,12 @@ Make encrypted messages reliably move between devices before adding richer clien
 
 ### Push and retention
 
-- [ ] Configure silent / data-only APNs and FCM pushes carrying only `conversation_id` and `sequence_id`.
+- [x] Configure silent / data-only APNs and FCM pushes carrying only device-scoped wakeup metadata.
+  `PushWakeup::apns_request` emits an APNs background payload and priority 5;
+  `PushWakeup::fcm_request` emits high-priority data-only fields. Both carry
+  only the recipient device ID and mailbox cursor. `conversation_id` and
+  `sequence_id` remain inside E2EE because the gateway cannot know them; the
+  client wakes, replays from the cursor, and decrypts them locally.
 - [ ] Implement client background workers that fetch and decrypt missing payloads over TLS/E2EE channels.
 - [ ] Purge encrypted blobs after receipt confirmation (`delivery_receipt`).
 - [ ] Add TTL deletion for uncollected offline messages, with a 30-day maximum retention target.

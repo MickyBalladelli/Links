@@ -19,7 +19,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `crates/server-store` | PostgreSQL repository/migrations, append-only encrypted payload store, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
-| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and APNs/FCM wakeup contracts. |
+| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters and acceptance tests. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |

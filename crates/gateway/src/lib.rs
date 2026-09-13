@@ -20,6 +20,9 @@ use uuid::Uuid;
 pub const HELLO_DEADLINE_MS: u64 = 5_000;
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 pub const HEARTBEAT_TIMEOUT_MS: u64 = 90_000;
+pub const APNS_BACKGROUND_PUSH_TYPE: &str = "background";
+pub const APNS_BACKGROUND_PRIORITY: &str = "5";
+pub const FCM_HIGH_PRIORITY: &str = "HIGH";
 const MAX_ACCESS_TOKEN_BYTES: usize = 512;
 
 #[derive(Debug, Error)]
@@ -139,6 +142,68 @@ pub trait RegionBus: Send + Sync {
 pub struct PushWakeup {
     pub recipient_device_id: String,
     pub cursor: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApnsSilentPush {
+    pub push_type: &'static str,
+    pub priority: &'static str,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FcmSilentPush {
+    pub priority: &'static str,
+    pub data: Vec<(String, String)>,
+}
+
+impl PushWakeup {
+    pub fn new(recipient_device_id: String, cursor: u64) -> Result<Self, GatewayError> {
+        protocol::validate_id(&recipient_device_id)?;
+        if cursor == 0 || cursor > protocol::MAX_CURSOR {
+            return Err(GatewayError::Invalid);
+        }
+        Ok(Self {
+            recipient_device_id,
+            cursor,
+        })
+    }
+
+    /// APNs adapter input. The adapter adds its device token and topic to the
+    /// request; this body is background-only and contains no notification.
+    pub fn apns_request(&self) -> Result<ApnsSilentPush, GatewayError> {
+        self.validate()?;
+        let payload = format!(
+            "{{\"aps\":{{\"content-available\":1}},\"recipient_device_id\":\"{}\",\"cursor\":\"{}\"}}",
+            self.recipient_device_id, self.cursor
+        )
+        .into_bytes();
+        Ok(ApnsSilentPush {
+            push_type: APNS_BACKGROUND_PUSH_TYPE,
+            priority: APNS_BACKGROUND_PRIORITY,
+            payload,
+        })
+    }
+
+    /// FCM HTTP v1 adapter input. `notification` is intentionally absent, so
+    /// this is data-only and wakes the client to replay its mailbox.
+    pub fn fcm_request(&self) -> Result<FcmSilentPush, GatewayError> {
+        self.validate()?;
+        Ok(FcmSilentPush {
+            priority: FCM_HIGH_PRIORITY,
+            data: vec![
+                (
+                    "recipient_device_id".into(),
+                    self.recipient_device_id.clone(),
+                ),
+                ("cursor".into(), self.cursor.to_string()),
+            ],
+        })
+    }
+
+    fn validate(&self) -> Result<(), GatewayError> {
+        Self::new(self.recipient_device_id.clone(), self.cursor).map(|_| ())
+    }
 }
 
 #[async_trait]
@@ -327,10 +392,7 @@ where
         let recipient_device_id = delivery.envelope.recipient_device_id.clone();
         let Some(lease) = self.state.route(&recipient_device_id, now_ms).await? else {
             self.push
-                .notify(PushWakeup {
-                    recipient_device_id,
-                    cursor: delivery.cursor,
-                })
+                .notify(PushWakeup::new(recipient_device_id, delivery.cursor)?)
                 .await?;
             return Ok(None);
         };
@@ -386,10 +448,7 @@ where
                     }
                 } else {
                     self.push
-                        .notify(PushWakeup {
-                            recipient_device_id,
-                            cursor: append.cursor,
-                        })
+                        .notify(PushWakeup::new(recipient_device_id, append.cursor)?)
                         .await?;
                     Ok(vec![GatewayAction::Server(accepted)])
                 }
