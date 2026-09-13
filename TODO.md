@@ -191,7 +191,12 @@ Make encrypted messages reliably move between devices before adding richer clien
 
 The first usable client. Keep the first slice small: phone account, 1-to-1 text, reliable delivery, and recovery.
 
-- [ ] Build the Android client on top of the shared client core.
+- [x] Build the Android client on top of the shared client core.
+  `native/android/client` is the first Android application module. It uses the
+  Rust-backed `HardwareIdentityStore`, keeps only public identity metadata in
+  app preferences, restores existing identities fail-closed, and provides the
+  off-main-thread first-run shell. OTP, transport, messaging UI and background
+  scheduling remain the following Android tasks.
 - [ ] Add phone OTP onboarding and Android Keystore key storage.
 - [ ] Implement Android connection manager with exponential backoff, reconnect, and heartbeating.
 - [ ] Implement the 1-to-1 send flow: query recipient pre-key bundle, establish/resume MLS group, encrypt payload, and send envelope.

@@ -103,9 +103,9 @@ and callback methods are preserved through consumer R8 rules.
 rustup target add aarch64-linux-android x86_64-linux-android
 sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;28.0.13004108" "cmake;3.22.1"
 # JDK 17, Gradle 8.11.1; cargo must be on PATH.
-gradle -p native/android assembleDebug assembleDebugAndroidTest
+gradle -p native/android assembleDebug assembleDebugAndroidTest :client:assembleDebug
 # Unlocked physical device with secure screen lock and TEE/StrongBox:
-gradle -p native/android connectedDebugAndroidTest
+gradle -p native/android connectedDebugAndroidTest :client:connectedDebugAndroidTest
 ```
 
 ## Automated verification

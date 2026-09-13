@@ -212,8 +212,11 @@ keys require eventual cleanup; they contain no recoverable plaintext seed alone.
 
 The Apple library is a Swift package for iOS 16+/macOS 13+. Use a signed app/test
 host with the correct Keychain entitlements; no developer team or provisioning
-identity is hardcoded. The Android library uses AGP 8.9.2, Gradle 8.11.1, JDK 17,
-and SDK 35. The repository does not bundle a Gradle distribution/wrapper.
+identity is hardcoded. The Android identity library uses AGP 8.9.2, Gradle 8.11.1,
+JDK 17, and SDK 35. `native/android/client` is the first application module and
+depends on that library. Its first-run shell creates/restores the Rust-backed
+hardware identity off the main thread and stores only the public handle, public
+key, and device ID. The repository does not bundle a Gradle distribution/wrapper.
 
 ## Verification and remaining gates
 
@@ -229,7 +232,7 @@ bash native/android/tests/run-host-tests.sh
 # In an entitled hardware-capable Apple test environment:
 LINKS_TEST_SECURE_ENCLAVE=1 swift test --package-path native/apple
 # With the Android SDK and an unlocked physical TEE/StrongBox device:
-gradle -p native/android connectedDebugAndroidTest
+gradle -p native/android connectedDebugAndroidTest :client:connectedDebugAndroidTest
 ```
 
 PostgreSQL tests cover enrollment, returning-device login, proof rejection,
