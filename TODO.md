@@ -267,7 +267,12 @@ Bring iOS to feature parity with Android. Validate hardware-backed keys and back
   `/v1/auth/start` and `/v1/auth/finish`, validates challenge/device/key
   bindings, and keeps the returned bearer in memory only. Physical Secure
   Enclave and live provider acceptance remain release gates.
-- [ ] Implement iOS connection manager with exponential backoff, reconnect, and heartbeating.
+- [x] Implement iOS connection manager with exponential backoff, reconnect, and heartbeating.
+  `IOSConnectionManager` enforces `wss`, negotiates binary `links.v1`, requires
+  a bounded Hello within five seconds, rejects text/oversized frames, sends
+  30-second ping heartbeats, and reconnects with full-jitter backoff from one
+  to thirty seconds. It accepts Hello bytes from the shared core and never
+  places bearer tokens in URLs or diagnostics; see [iOS client foundation](docs/ios-client.md).
 - [ ] Implement the same 1-to-1 send and receive flows as Android.
 - [ ] Add APNs background fetch and missing-message recovery.
 - [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.

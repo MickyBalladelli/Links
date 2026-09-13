@@ -14,12 +14,18 @@
   `links-client-core` providers, passing signing through `HardwareIdentityStore`
   instead of exporting a seed.
 
+`IOSConnectionManager` supplies the native transport boundary. It accepts a
+core-produced Hello, negotiates `links.v1` over `wss`, rejects text and frames
+over 1 MiB, sends ping heartbeats every 30 seconds, and reconnects with
+full-jitter backoff from 1 to 30 seconds. It reports frames to the host; the
+host passes them to `SharedClientCore.handleServerFrame`.
+
 The factory boundary prevents a Swift protocol or crypto fork. Its production
 implementation must bind Rust `ClientCore`, MLS state, Sealed Sender key
 resolution, and durable inbox/outbox storage. Missing providers fail closed.
 
-This target is the iOS foundation and OTP layer. TLS WebSocket lifecycle,
-send/receive UI, APNs recovery, and account recovery remain the following Phase
-4 tasks. The iOS release gate still requires live OTP, Android interop,
+This target is the iOS foundation, OTP, and connection layer. Send/receive UI,
+APNs recovery, and account recovery remain the following Phase 4 tasks. The iOS
+release gate still requires live OTP, Android interop,
 restart/replay, tamper, Secure Enclave, background, and battery evidence on
 physical devices.
