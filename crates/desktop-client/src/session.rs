@@ -39,7 +39,6 @@ pub struct DesktopReceivedTextMessage {
 pub enum DesktopEvent {
     State(DesktopConnectionState),
     Text(DesktopReceivedTextMessage),
-    Failure,
 }
 
 /// Transport used by the shared core for opaque protobuf frames.
@@ -432,7 +431,14 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
             };
             core.handle_server_frame(frame, &mut transport, full_sync, &mut |message| {
                 messages.push(message)
-            })?
+            })
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.manager.stop();
+                return Err(error);
+            }
         };
         events.extend(messages.into_iter().map(DesktopEvent::Text));
         Ok(result)
