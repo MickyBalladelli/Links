@@ -13,4 +13,18 @@ message MediaMetadata {
   optional uint32 height = 8;
   optional uint64 duration_ms = 9;
   optional string blur_hash = 10;
+  optional OpusAudioMetadata opus = 11;
+}
+
+message OpusAudioMetadata {
+  enum Container {
+    CONTAINER_UNSPECIFIED = 0;
+    OGG = 1;
+    OPUS = 2;
+  }
+  Container container = 1;
+  uint32 bitrate_kbps = 2;
+  uint32 sample_rate_hz = 3;
+  uint32 channels = 4;
+  uint32 frame_duration_ms = 5;
 }

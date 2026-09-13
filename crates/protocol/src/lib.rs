@@ -22,6 +22,11 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_ONE_TIME_PREKEYS: usize = 100;
+pub const OPUS_MIN_BITRATE_KBPS: u32 = 16;
+pub const OPUS_MAX_BITRATE_KBPS: u32 = 24;
+pub const OPUS_SAMPLE_RATE_HZ: [u32; 5] = [8_000, 12_000, 16_000, 24_000, 48_000];
+pub const OPUS_CHANNELS: [u32; 2] = [1, 2];
+pub const OPUS_FRAME_DURATION_MS: u32 = 20;
 pub const ML_KEM_768_PUBLIC_KEY_BYTES: usize = 1184;
 pub const MAX_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub const MAX_CURSOR: u64 = i64::MAX as u64;
@@ -103,21 +108,7 @@ pub fn validate_message(message: &v1::Message) -> Result<(), ProtocolError> {
     {
         v1::message::Content::Text(text) if text.is_empty() => Err(ProtocolError::Invalid("text")),
         v1::message::Content::Text(_) => Ok(()),
-        v1::message::Content::Media(media) => {
-            validate_id(&media.attachment_id)?;
-            if media.mime_type.is_empty()
-                || media.ciphertext_size_bytes == 0
-                || media.content_key.is_empty()
-                || media.nonce.is_empty()
-                || media.ciphertext_sha256.len() != 32
-                || media.width == Some(0)
-                || media.height == Some(0)
-            {
-                return Err(ProtocolError::Invalid("media"));
-            }
-            // Algorithm-specific key and nonce sizes are the crypto provider's responsibility.
-            Ok(())
-        }
+        v1::message::Content::Media(media) => validate_media_metadata(media),
         v1::message::Content::Receipts(receipts) => {
             if !matches!(
                 v1::receipts::Kind::try_from(receipts.kind),
@@ -138,6 +129,51 @@ pub fn validate_message(message: &v1::Message) -> Result<(), ProtocolError> {
             Ok(())
         }
     }
+}
+
+pub fn validate_opus_audio_metadata(
+    audio: &v1::OpusAudioMetadata,
+) -> Result<(), ProtocolError> {
+    if !matches!(
+        v1::opus_audio_metadata::Container::try_from(audio.container),
+        Ok(v1::opus_audio_metadata::Container::Ogg | v1::opus_audio_metadata::Container::Opus)
+    ) || !(OPUS_MIN_BITRATE_KBPS..=OPUS_MAX_BITRATE_KBPS).contains(&audio.bitrate_kbps)
+        || !OPUS_SAMPLE_RATE_HZ.contains(&audio.sample_rate_hz)
+        || !OPUS_CHANNELS.contains(&audio.channels)
+        || audio.frame_duration_ms != OPUS_FRAME_DURATION_MS
+    {
+        return Err(ProtocolError::Invalid("opus audio"));
+    }
+    Ok(())
+}
+
+pub fn validate_media_metadata(media: &v1::MediaMetadata) -> Result<(), ProtocolError> {
+    validate_id(&media.attachment_id)?;
+    if media.mime_type.is_empty()
+        || media.ciphertext_size_bytes == 0
+        || media.content_key.is_empty()
+        || media.nonce.is_empty()
+        || media.ciphertext_sha256.len() != 32
+        || media.width == Some(0)
+        || media.height == Some(0)
+    {
+        return Err(ProtocolError::Invalid("media"));
+    }
+    if let Some(opus) = media.opus.as_ref() {
+        validate_opus_audio_metadata(opus)?;
+        let expected_mime = match v1::opus_audio_metadata::Container::try_from(opus.container) {
+            Ok(v1::opus_audio_metadata::Container::Ogg) => "audio/ogg",
+            Ok(v1::opus_audio_metadata::Container::Opus) => "audio/opus",
+            _ => return Err(ProtocolError::Invalid("opus container")),
+        };
+        if media.mime_type != expected_mime
+            || media.duration_ms.is_none_or(|duration| duration == 0)
+        {
+            return Err(ProtocolError::Invalid("opus media"));
+        }
+    }
+    // Algorithm-specific key and nonce sizes are the crypto provider's responsibility.
+    Ok(())
 }
 
 /// Validate storage/routing shape without treating expiration as a wire error on replay.

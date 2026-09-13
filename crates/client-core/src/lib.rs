@@ -15,6 +15,7 @@ pub mod receive;
 pub mod send;
 pub mod sequences;
 pub mod sync;
+pub mod voice;
 pub use links_protocol as protocol;
 
 use thiserror::Error;

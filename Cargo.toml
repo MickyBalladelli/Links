@@ -12,6 +12,7 @@ async-trait = "0.1"
 base64 = "0.22"
 bip39 = { version = "2.2.2", default-features = false, features = ["alloc", "zeroize"] }
 prost = "0.14"
+opus = "0.4"
 zstd = "0.13"
 thiserror = "2"
 uuid = "1"
