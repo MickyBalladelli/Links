@@ -32,11 +32,15 @@ pub struct PasskeyPrfKey(Zeroizing<[u8; 32]>);
 
 impl PasskeyPrfKey {
     pub fn from_output(output: &[u8]) -> Result<Self, CoreError> {
-        let bytes: [u8; 32] = output.try_into().map_err(|_| CoreError::Authentication)?;
-        if bytes == [0; 32] {
+        let bytes = Zeroizing::new(
+            output
+                .try_into()
+                .map_err(|_| CoreError::Authentication)?,
+        );
+        if *bytes == [0; 32] {
             return Err(CoreError::Authentication);
         }
-        Ok(Self(Zeroizing::new(bytes)))
+        Ok(Self(bytes))
     }
 }
 
@@ -113,15 +117,17 @@ impl PasskeyBackupEnvelope {
         }
         let key = encryption_key(prf_key, PasskeyBackupSalt::from_bytes(parsed.salt))?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
-        let plaintext = cipher
-            .decrypt(
+        let plaintext = Zeroizing::new(
+            cipher
+                .decrypt(
                 Nonce::from_slice(parsed.nonce),
                 Payload {
                     msg: parsed.ciphertext,
                     aad: parsed.header,
                 },
             )
-            .map_err(|_| CoreError::Authentication)?;
+            .map_err(|_| CoreError::Authentication)?,
+        );
         let seed: [u8; SEED_BYTES] = plaintext
             .as_slice()
             .try_into()

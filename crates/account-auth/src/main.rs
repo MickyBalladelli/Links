@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use links_account_auth::{
     provider::TwilioVerify,
+    passkeys::PasskeyConfig,
     service::{AccountAuth, SystemClock},
     web,
 };
@@ -37,13 +38,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(10)
         .connect(&std::env::var("DATABASE_URL")?)
         .await?;
+    let passkey = match (
+        std::env::var("PASSKEY_RP_ID"),
+        std::env::var("PASSKEY_ORIGIN"),
+    ) {
+        (Ok(rp_id), Ok(origin)) => Some(PasskeyConfig::new(rp_id, origin)?),
+        (Err(std::env::VarError::NotPresent), Err(std::env::VarError::NotPresent)) => None,
+        _ => return Err("PASSKEY_RP_ID and PASSKEY_ORIGIN must be set together".into()),
+    };
     // Run the explicit server-store migration command before launching this process.
-    let auth = Arc::new(AccountAuth::new(
-        pool.clone(),
-        provider,
-        key,
-        Arc::new(SystemClock),
-    )?);
+    let auth = Arc::new(match passkey {
+        Some(passkey) => AccountAuth::new_with_passkey(
+            pool.clone(),
+            provider,
+            key,
+            Arc::new(SystemClock),
+            passkey,
+        )?,
+        None => AccountAuth::new(pool.clone(), provider, key, Arc::new(SystemClock))?,
+    });
     auth.purge_expired().await?; // Fail startup on missing schema, not on first user request.
     let cleanup = auth.clone();
     let job = tokio::spawn(async move {
