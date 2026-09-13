@@ -36,7 +36,7 @@ public final class AndroidMissingMessageRecovery implements MissingMessageRecove
 
     @Override
     public Outcome recover(long cursorHint, boolean fullSync) throws Exception {
-        if (!session.isAuthenticated() || bridge == null) {
+        if (session == null || !session.isAuthenticated() || bridge == null) {
             return Outcome.AUTHENTICATION_REQUIRED;
         }
         long durableCursor = bridge.durableCursor();
