@@ -39,6 +39,21 @@ public protocol SharedClientCore: AnyObject {
         throws -> IOSCoreFrameResult
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
+    /// Encode PCM with the shared Opus profile and return a complete Ogg Opus container.
+    func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data
+    /// Encrypt the complete container; metadata stays inside the MLS Message.
+    func encryptVoiceNote(_ container: Data, attachmentID: String,
+                          durationMs: UInt64, profile: IOSVoiceNoteProfile)
+        throws -> IOSEncryptedVoiceNote
+    /// Verify attachment metadata, digest, AEAD and Opus framing before playback.
+    func decryptVoiceNote(_ metadata: IOSVoiceNoteMetadata, ciphertext: Data) throws -> Data
+    /// Decode verified Opus into PCM for AVAudioEngine playback.
+    func decodeVoiceNote(_ container: Data, profile: IOSVoiceNoteProfile) throws -> [Int16]
+    /// Send private media metadata after the opaque upload accepted exact ciphertext.
+    func sendVoiceNote(conversationID: String, recipientUserID: String,
+                       metadata: IOSVoiceNoteMetadata,
+                       receipt: IOSVoiceNoteUploadReceipt,
+                       transport: any IOSCoreTransport) throws
 }
 
 public protocol SharedCoreIdentitySigner: AnyObject {
