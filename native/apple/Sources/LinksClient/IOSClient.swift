@@ -39,6 +39,17 @@ public protocol SharedClientCore: AnyObject {
         throws -> IOSCoreFrameResult
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
+    /// Encode normalized RGB pixels with the shared fixed BlurHash contract.
+    func encodeImageBlurHash(rgbPixels: Data, width: Int, height: Int) throws -> String
+    /// Encrypt normalized image bytes; metadata stays inside MLS.
+    func encryptImage(_ image: Data, attachmentID: String, mimeType: String,
+                      width: Int, height: Int, blurHash: String) throws -> IOSEncryptedImage
+    /// Verify image metadata, digest, AEAD, and dimensions before rendering.
+    func decryptImage(_ metadata: IOSImageMetadata, ciphertext: Data) throws -> Data
+    /// Send private image metadata only after its ciphertext upload receipt.
+    func sendImage(conversationID: String, recipientUserID: String,
+                   metadata: IOSImageMetadata, receipt: IOSImageUploadReceipt,
+                   transport: any IOSCoreTransport) throws
     /// Encode PCM with the shared Opus profile and return a complete Ogg Opus container.
     func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data
     /// Encrypt the complete container; metadata stays inside the MLS Message.
