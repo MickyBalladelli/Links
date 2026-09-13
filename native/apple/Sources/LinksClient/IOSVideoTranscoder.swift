@@ -87,14 +87,18 @@ public final class IOSVideoTranscoder {
         }
 
         let asset = AVURLAsset(url: source)
-        guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+        let duration = try await asset.load(.duration)
+        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
             throw IOSVideoError.invalidInput
         }
+        let preferredTransform = try await videoTrack.load(.preferredTransform)
         let reader = try AVAssetReader(asset: asset)
-        let videoOutput = try makeVideoOutput(asset: asset, track: videoTrack, profile: profile)
+        let videoOutput = makeVideoOutput(
+            duration: duration, track: videoTrack,
+            preferredTransform: preferredTransform, profile: profile)
         reader.add(videoOutput)
 
-        let audioTrack = asset.tracks(withMediaType: .audio).first
+        let audioTrack = try await asset.loadTracks(withMediaType: .audio).first
         let audioOutput = audioTrack.map { AVAssetReaderTrackOutput(track: $0, outputSettings: nil) }
         if let audioOutput { reader.add(audioOutput) }
 
@@ -186,7 +190,7 @@ public final class IOSVideoTranscoder {
         await writer.finishWriting()
         guard writer.status == .completed else { throw IOSVideoError.writerUnavailable }
 
-        let seconds = CMTimeGetSeconds(asset.duration)
+        let seconds = CMTimeGetSeconds(duration)
         guard seconds.isFinite, seconds > 0 else { throw IOSVideoError.invalidInput }
         return IOSTranscodedVideo(
             fileURL: destination,
@@ -197,9 +201,9 @@ public final class IOSVideoTranscoder {
             hasAudio: audioInput != nil)
     }
 
-    private func makeVideoOutput(asset: AVAsset, track: AVAssetTrack,
-                                 profile: IOSVideoProfile) throws
-        -> AVAssetReaderVideoCompositionOutput {
+    private func makeVideoOutput(duration: CMTime, track: AVAssetTrack,
+                                 preferredTransform: CGAffineTransform,
+                                 profile: IOSVideoProfile) -> AVAssetReaderVideoCompositionOutput {
         let output = AVAssetReaderVideoCompositionOutput(
             videoTracks: [track],
             videoSettings: [
@@ -209,9 +213,9 @@ public final class IOSVideoTranscoder {
         composition.renderSize = CGSize(width: profile.width, height: profile.height)
         composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(profile.frameRate))
         let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
         let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
-        layer.setTransform(track.preferredTransform, at: .zero)
+        layer.setTransform(preferredTransform, at: .zero)
         instruction.layerInstructions = [layer]
         composition.instructions = [instruction]
         output.videoComposition = composition
