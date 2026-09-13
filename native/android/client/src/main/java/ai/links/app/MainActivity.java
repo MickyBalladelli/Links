@@ -72,6 +72,7 @@ public final class MainActivity extends Activity {
         codeInput.setHint("Verification code");
         codeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         codeInput.setSingleLine(true);
+        codeInput.setSaveEnabled(false);
         layout.addView(codeInput);
 
         verifyButton = new Button(this);
@@ -135,6 +136,8 @@ public final class MainActivity extends Activity {
         if (session == null || !session.isEnrolled() || otpClient == null) return;
         String phone = phoneInput.getText().toString();
         String channel = channelInput.getSelectedItem().toString();
+        pendingChallenge = null;
+        codeInput.setText("");
         sendCodeButton.setEnabled(false);
         verifyButton.setEnabled(false);
         status.setText("Sending verification code…");

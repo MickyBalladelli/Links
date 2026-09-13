@@ -6,8 +6,9 @@ WebAuthn/Passkey PRF-encrypted identity backup, the
 Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
 provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
 messenger or a production post-quantum security claim.** One-to-one client
-lifecycle wiring, production gateway rollout and client applications remain in later
-phases. Native hardware acceptance and the cryptographic audit remain open.
+lifecycle wiring, production gateway rollout and remaining client applications
+remain in later phases. Native hardware acceptance and the cryptographic audit
+remain open.
 
 ## Workspace
 
@@ -21,7 +22,7 @@ phases. Native hardware acceptance and the cryptographic audit remain open.
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, and the Android client shell. |
+| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, and the Android identity/OTP onboarding shell. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
