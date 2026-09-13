@@ -12,12 +12,20 @@ android {
         applicationId = "ai.links.app"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         buildConfigField("String", "AUTH_BASE_URL", "\"https://api.links.invalid\"")
+        buildConfigField("String", "TEXT_MESSAGING_MILESTONE", "\"android-text-internal-1\"")
     }
 
     buildTypes {
+        create("internal") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".internal"
+            versionNameSuffix = "-internal"
+            isDebuggable = true
+            isMinifyEnabled = false
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(

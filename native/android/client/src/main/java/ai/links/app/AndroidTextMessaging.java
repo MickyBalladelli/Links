@@ -1,0 +1,160 @@
+package ai.links.app;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+
+/**
+ * Android one-to-one text session. The injected bridge owns shared Rust
+ * send/receive state, MLS persistence, protobuf framing and local rendering.
+ * This shell exposes no group, media or call operation.
+ */
+public final class AndroidTextMessaging {
+    public static final int MAX_TEXT_BYTES = 64 * 1024;
+
+    public enum State { STOPPED, CONNECTING, READY, FAILED }
+
+    public interface CoreBridge {
+        long durableCursor() throws Exception;
+        byte[] createHello(String deviceId, String accessToken, long durableCursor) throws Exception;
+        /** Process one authenticated server frame and report only committed messages. */
+        void handleServerFrame(byte[] frame, ConnectionManager connection, Listener listener)
+                throws Exception;
+        /** Call links-client-core::send::send_text and persist its exact outbox result. */
+        void sendText(String conversationId, String recipientUserId, String text,
+                ConnectionManager connection) throws Exception;
+    }
+
+    public interface Listener {
+        void onState(State state);
+        void onTextMessage(String conversationId, String senderDeviceId, String text,
+                long sequenceId, long sentAtMs);
+        void onFailure();
+    }
+
+    private final Object lock = new Object();
+    private final String endpoint;
+    private final ClientSession session;
+    private final CoreBridge bridge;
+    private final Listener listener;
+    private ConnectionManager connection;
+    private State state = State.STOPPED;
+
+    public AndroidTextMessaging(String endpoint, ClientSession session, CoreBridge bridge,
+            Listener listener) throws IOException {
+        if (endpoint == null || endpoint.isEmpty() || session == null || bridge == null
+                || listener == null)
+            throw new IOException("Invalid text session");
+        this.endpoint = endpoint;
+        this.session = session;
+        this.bridge = bridge;
+        this.listener = listener;
+    }
+
+    public State state() {
+        synchronized (lock) { return state; }
+    }
+
+    public void start() throws Exception {
+        synchronized (lock) {
+            if (state == State.CONNECTING || state == State.READY) return;
+            if (!session.isAuthenticated()) throw new IOException("Authenticated session required");
+            state = State.CONNECTING;
+        }
+        listener.onState(State.CONNECTING);
+        final ConnectionManager[] holder = new ConnectionManager[1];
+        ConnectionManager created = new ConnectionManager(endpoint,
+                () -> {
+                    long cursor = bridge.durableCursor();
+                    return bridge.createHello(session.deviceId(), session.accessToken(), cursor);
+                },
+                new ConnectionManager.Listener() {
+                    @Override
+                    public void onConnected() {
+                        updateState(State.READY);
+                    }
+
+                    @Override
+                    public void onBinaryFrame(byte[] frame) {
+                        try {
+                            bridge.handleServerFrame(frame, holder[0], listener);
+                        } catch (Exception error) {
+                            updateState(State.FAILED);
+                            listener.onFailure();
+                            holder[0].stop();
+                        }
+                    }
+
+                    @Override
+                    public void onDisconnected() {
+                        boolean notify;
+                        synchronized (lock) {
+                            notify = state != State.STOPPED && state != State.FAILED;
+                            if (notify) state = State.CONNECTING;
+                        }
+                        if (notify) listener.onState(State.CONNECTING);
+                    }
+
+                    @Override
+                    public void onFailure() {
+                        updateState(State.FAILED);
+                        listener.onFailure();
+                    }
+                });
+        holder[0] = created;
+        synchronized (lock) {
+            if (state != State.CONNECTING) {
+                created.shutdown();
+                return;
+            }
+            connection = created;
+        }
+        created.start();
+    }
+
+    /** Send one text message through the shared Rust direct-chat coordinator. */
+    public void sendText(String conversationId, String recipientUserId, String text)
+            throws Exception {
+        requireUuid(conversationId, "conversation ID");
+        requireUuid(recipientUserId, "recipient user ID");
+        if (text == null || text.isEmpty()
+                || text.getBytes(StandardCharsets.UTF_8).length > MAX_TEXT_BYTES)
+            throw new IOException("Invalid text message");
+        ConnectionManager active;
+        synchronized (lock) {
+            active = connection;
+            if (state != State.READY || active == null || !active.isConnected())
+                throw new IOException("Text session is not connected");
+        }
+        bridge.sendText(conversationId, recipientUserId, text, active);
+    }
+
+    public void stop() {
+        ConnectionManager active;
+        synchronized (lock) {
+            state = State.STOPPED;
+            active = connection;
+            connection = null;
+        }
+        if (active != null) active.shutdown();
+        listener.onState(State.STOPPED);
+    }
+
+    private void updateState(State next) {
+        synchronized (lock) {
+            if (state == State.STOPPED && next != State.STOPPED) return;
+            state = next;
+        }
+        listener.onState(next);
+    }
+
+    private static void requireUuid(String value, String name) throws IOException {
+        try {
+            UUID uuid = UUID.fromString(value);
+            if (uuid.equals(new UUID(0, 0)) || !uuid.toString().equals(value))
+                throw new IllegalArgumentException();
+        } catch (IllegalArgumentException | NullPointerException error) {
+            throw new IOException("Invalid " + name, error);
+        }
+    }
+}

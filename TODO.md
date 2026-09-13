@@ -240,7 +240,13 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   Credential Manager/WebAuthn adapter and an authenticated bootstrap session for
   the current bearer-only backup routes. Recovery assigns a fresh physical
   device/node and still requires normal device enrollment afterward.
-- [ ] Release an internal Android text-messaging milestone before adding groups or calls.
+- [x] Release an internal Android text-messaging milestone before adding groups or calls.
+  Internal build profile `0.2.0-internal` / `android-text-internal-1` and the
+  text-only `AndroidTextMessaging` shell are ready. The release is restricted to
+  authenticated one-to-one text; groups, media and calls have no API or UI.
+  Two-device keystore, reconnect, FCM replay, tamper and battery acceptance is
+  documented in `docs/android-text-milestone.md` and remains required before
+  sharing the internal APK.
 
 ---
 

@@ -22,7 +22,7 @@ remain open.
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, and the Android identity/OTP onboarding shell. |
+| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, Android identity/OTP onboarding, and the internal text-messaging shell. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
@@ -33,6 +33,7 @@ remain open.
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 | `docs/gateway.md` | Multi-region WebSocket gateway flow, routing, push fallback and deployment gates. |
 | `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
+| `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |
 
 ## Build and test
 
