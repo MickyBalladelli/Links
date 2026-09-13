@@ -5,7 +5,10 @@ small adapter owns the actual `wss://.../v1/connect` socket and calls
 `decode_client_frame`, `Gateway::open`, `Gateway::handle` and
 `encode_server_frame`. `Gateway::open` returns `Welcome` followed by the
 initial `SyncBatch` when `Hello.last_seen_cursor` has missing items. The core
-never logs or decrypts sealed message bytes.
+may send the same batch as a smaller `CompressedSyncBatch` when the client
+advertises `SYNC_COMPRESSION_ZSTD_DICTIONARY_V1`; the shared protocol/client
+core owns dictionary validation and bounded decompression. The core never logs
+or decrypts sealed message bytes.
 
 ## Regional flow
 
@@ -66,7 +69,9 @@ unbound.
 
 Required edge policy:
 
-- WebSocket subprotocol is `links.v1`; reject text frames and compression.
+- WebSocket subprotocol is `links.v1`; reject text frames and WebSocket
+  compression extensions. Application-level `CompressedSyncBatch` is allowed
+  only after Hello negotiation.
 - Require `Hello` within 5 seconds, heartbeat every 30 seconds, and close after
   90 seconds without liveness.
 - Cap complete frames at 1 MiB before protobuf decode or allocation.

@@ -361,7 +361,12 @@ Add media after text delivery and multi-device sync are stable.
 
 ### Text and synchronization
 
-- [ ] Integrate Zstandard (Zstd) dictionary compression for bulk state synchronization.
+- [x] Integrate Zstandard (Zstd) dictionary compression for bulk state synchronization.
+  `CompressedSyncBatch` uses the version-1 fixed dictionary and negotiated
+  `Hello.supported_sync_compression` capability. Gateway compression is only
+  used when it makes the complete frame smaller; decompression validates the
+  dictionary, declared size, exact output length and sync cursor/envelope shape
+  before protobuf use. Legacy clients continue receiving plain `SyncBatch`.
 
 ### Voice notes
 

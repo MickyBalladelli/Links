@@ -60,6 +60,13 @@ device, validates browser Origin against an allowlist, and returns Welcome.
 The gateway immediately reads the mailbox after `last_seen_cursor` and returns
 the first missing contiguous `SyncBatch` after Welcome; a stale cursor fails
 with `CURSOR_EXPIRED` and requires explicit resync.
+Clients may advertise `SYNC_COMPRESSION_ZSTD_DICTIONARY_V1` in
+`Hello.supported_sync_compression`. For those sessions, the gateway may replace
+a `SyncBatch` with `CompressedSyncBatch` when the version-1 fixed Zstd
+dictionary makes the complete frame smaller. Clients decode the compressed
+frame through the shared protocol/client-core helper; decompression is bounded
+by the declared uncompressed size and the frame budget before protobuf decode.
+Clients that do not advertise the value always receive the plain batch.
 The request ID is a UUID used only for response correlation, not authentication
 or durable message idempotency. Outbound envelopes may target another device;
 inbound queue reads and acks may only target the authenticated local device.
@@ -75,7 +82,9 @@ backpressure sends when a dependency is unavailable; do not silently drop them.
 Limits: 64 KiB encoded Message, 256 KiB encoded Envelope, 1 MiB complete transport
 frame, at most 100 entries per sync batch. Batch producers must also fit a byte
 budget of `MAX_FRAME_BYTES - 128` so wrapping a batch in ServerFrame fits the frame
-cap. Enforce size limits **before** decoding or decompression/allocation. Receipt
+cap. Enforce size limits **before** decoding or decompression/allocation;
+Zstd dictionary decompression must honor the declared output limit and exact
+output length. WebSocket compression extensions remain disabled. Receipt
 batches contain at most 100 unique message IDs. Core decoders cover message and
 envelope boundaries; the gateway must validate authentication, transport
 frames, rate limits and connection state before using generated types.

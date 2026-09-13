@@ -15,7 +15,7 @@ remain open.
 | Path | Responsibility |
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
-| `crates/protocol` | Generated common types, descriptors and boundary validation. |
+| `crates/protocol` | Generated common types, descriptors, boundary validation and bounded Zstd dictionary sync compression. |
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt and durable sync validation. |
 | `crates/web-client` | WASM Web identity and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
