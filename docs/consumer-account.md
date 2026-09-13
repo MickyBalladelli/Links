@@ -94,8 +94,11 @@ An existing account can log in with its already registered, unrevoked device and
 the same public key/node/credential. An additional physical client uses the
 authenticated `POST /v1/devices` flow: the approving device supplies its bearer
 session, and the new device signs a fresh nonce-bound transcript with its own
-identity key. **OTP alone cannot replace existing identity keys**. QR transport
-for carrying this pairing payload remains a client UX task.
+identity key. **OTP alone cannot replace existing identity keys**.
+`links-client-core::pairing::PairingPayload` now carries these public fields and
+the signature in a strict `links://connect?...` URI. The approving device must
+parse and verify it, confirm the displayed account identity, then submit the
+decoded fields to `POST /v1/devices`.
 Ineligible requests receive provisional challenges without disclosing the real
 account UUID. They never receive a session even with a correct OTP. This is not
 a formal guarantee of enumeration resistance or of constant-time behavior.

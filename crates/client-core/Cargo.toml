@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 links-protocol.workspace = true
+base64.workspace = true
 prost.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true

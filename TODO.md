@@ -305,7 +305,12 @@ These clients join an existing account as additional MLS device nodes. They do n
 
 ### Device pairing and discovery
 
-- [ ] Build QR code generation and parsing for public identity keys and signature payloads (`links://connect?...`).
+- [x] Build QR code generation and parsing for public identity keys and signature payloads (`links://connect?...`).
+  `links-client-core::pairing::PairingPayload` creates and strictly parses the
+  canonical URI, carries no private key or bearer token, and verifies the new
+  device's Ed25519 pairing signature before registration. Platform QR libraries
+  encode/decode this URI text; the server request uses the existing pairing
+  transcript contract.
 - [ ] Pair a Web or desktop device with a mobile device and register it as an MLS identity node.
 
 ### Web companion client
