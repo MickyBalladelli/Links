@@ -32,6 +32,7 @@ jobs:
       - run: cargo test --workspace --doc --locked
       - run: cargo test --workspace --all-targets --locked -- --ignored
       - run: cargo check -p links-client-core --target wasm32-unknown-unknown --locked
+      - run: cargo check -p links-web-client --target wasm32-unknown-unknown --locked
   apple-vault:
     runs-on: macos-latest
     steps:

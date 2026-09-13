@@ -62,10 +62,10 @@ request and checks that the returned credential is the expected Links MLS
 BasicCredential.
 
 The Web/desktop side persists the returned `mls_credential` with its own
-identity-key reference, constructs `OpenMlsEngine` with that credential and its
-signer, and calls `generate_key_package()`. It uploads that KeyPackage through
-the existing authenticated pre-key flow. Mobile approval does not copy a
-private key or bearer token to the Web/desktop client.
+identity-key/provider state, constructs `OpenMlsEngine` with that credential and
+its signer, and calls `generate_key_package()`. It uploads that KeyPackage
+through the existing authenticated pre-key flow. Mobile approval does not copy
+a private key or bearer token to the Web/desktop client.
 
 `PairingPayload::signed_with_identity` is available for software-held test or
 recovery seeds. Production mobile clients should sign the transcript through

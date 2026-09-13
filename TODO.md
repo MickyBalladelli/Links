@@ -319,7 +319,12 @@ These clients join an existing account as additional MLS device nodes. They do n
 
 ### Web companion client
 
-- [ ] Build the Web client on top of the shared client core.
+- [x] Build the Web client on top of the shared client core.
+  `crates/web-client` exposes the shared Rust identity and pairing logic to
+  WASM. The `web` TypeScript host creates a Web device identity, emits signed
+  pairing URI text, and accepts only a matching validated MLS credential from
+  mobile approval. Browser storage, WebSocket sync, and text UI remain the
+  following Web client tasks.
 - [ ] Implement Web connection manager with exponential backoff, reconnect, and heartbeating.
 - [ ] Implement encrypted 1-to-1 text sync across mobile and Web.
 

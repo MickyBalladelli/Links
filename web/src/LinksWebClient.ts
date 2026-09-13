@@ -41,7 +41,7 @@ export interface WebClientSnapshot {
 const MAX_CREDENTIAL_BYTES = 1024
 
 function requireCanonicalUUID(value: string, field: string): string {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value) ||
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) ||
       value === '00000000-0000-0000-0000-000000000000') {
     throw new Error(`Invalid ${field}`)
   }
@@ -62,6 +62,11 @@ function decodeBase64URL(value: string, field: string, expectedLength?: number):
   }
   const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
   if (expectedLength !== undefined && bytes.length !== expectedLength) {
+    throw new Error(`Invalid ${field}`)
+  }
+  const canonical = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+  if (canonical !== value) {
     throw new Error(`Invalid ${field}`)
   }
   return bytes

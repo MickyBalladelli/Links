@@ -17,12 +17,14 @@ remain open.
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors and boundary validation. |
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt and durable sync validation. |
+| `crates/web-client` | WASM Web identity and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/server-store` | PostgreSQL repository/migrations, append-only encrypted payload store, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Random Ed25519 keys, signed phone/enrollment transcripts and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, durable account enrollment/login, authenticated additional-device registration, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract and durable publish adapter for cross-region gateway routing. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, and the internal Android text-messaging shell. |
+| `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
@@ -37,6 +39,7 @@ remain open.
 | `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |
 | `docs/ios-client.md` | iOS client foundation, shared-core boundary and release limits. |
 | `docs/ios-text-milestone.md` | Internal iOS one-to-one text build scope and two-device acceptance gate. |
+| `docs/web-client.md` | Web/WASM client bootstrap, key custody boundary and current release limits. |
 
 ## Build and test
 
@@ -50,6 +53,7 @@ cargo test --workspace --all-targets --locked
 cargo test --workspace --doc --locked
 rustup target add wasm32-unknown-unknown
 cargo check -p links-client-core --target wasm32-unknown-unknown --locked
+cargo check -p links-web-client --target wasm32-unknown-unknown --locked
 ```
 
 The ordinary test command explicitly reports PostgreSQL integration tests as
