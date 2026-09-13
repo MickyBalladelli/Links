@@ -26,6 +26,15 @@ dictionary `CompressedSyncBatch` frames before committing inbox state. Outbound
 text delegates to the core, which owns MLS encryption, Sealed Sender envelopes,
 durable outbox state, and device fanout.
 
+`DesktopTextSession` exposes the matching image boundary. The desktop host
+provides already normalized/transcoded WebP or AVIF bytes and RGB pixels;
+`prepare_and_encrypt_image()` asks the shared core for the private BlurHash and
+image ciphertext. `DesktopImageUploader` uploads opaque ciphertext and the
+receipt must match before `send_image()` sends private `MediaMetadata`. Download
+uses `DesktopImageCache` (with `DesktopImageFileCache` as the ciphertext-only
+reference), verifies the blob, decrypts through the core, and passes plaintext
+only to `DesktopImageRenderer` for immediate rendering.
+
 The connection manager sends native ping heartbeats every 30 seconds and uses
 full-jitter reconnect delays from 1 to 30 seconds. `recover()` deliberately
 reconnects so the next Hello starts at the latest durable cursor, then drains

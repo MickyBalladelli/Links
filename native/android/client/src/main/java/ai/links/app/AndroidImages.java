@@ -141,6 +141,10 @@ public final class AndroidImages {
             if (metadata == null) throw new IOException("Missing image metadata");
             File file = fileFor(metadata.attachmentId);
             if (!file.isFile()) return null;
+            if (file.length() > MAX_CIPHERTEXT_BYTES) {
+                deleteQuietly(file);
+                return null;
+            }
             byte[] ciphertext = Files.readAllBytes(file.toPath());
             if (!ciphertextMatches(metadata, ciphertext)) {
                 deleteQuietly(file);

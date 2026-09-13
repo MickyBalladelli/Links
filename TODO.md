@@ -405,7 +405,11 @@ Add media after text delivery and multi-device sync are stable.
   `S3CompatibleBlobStore` accepts only client ciphertext, uses immutable UUID
   object keys and conditional writes, verifies download receipts, and supports
   private R2/S3 origins behind signed CDN URLs.
-- [ ] Add encrypted image send, receive, caching, and rendering to Android and iOS, then Web and desktop.
+- [x] Add encrypted image send, receive, caching, and rendering to Android and iOS, then Web and desktop.
+  Android and iOS normalize images before shared-core AEAD encryption; all four
+  clients upload and cache ciphertext only, verify size/digest receipts, and
+  decrypt before rendering. Web and desktop expose the same uploader, cache,
+  and renderer boundaries.
 
 ### Videos and large files
 

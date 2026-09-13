@@ -48,6 +48,17 @@ MediaMetadata.blur_hash. Clients generate it from resized RGB pixels and
 render it while encrypted image bytes are unavailable; the hash is private
 message content, not a public text or routing field.
 
+The image transfer sequence is: normalize and transcode on the sending device,
+derive the private BlurHash from the normalized RGB pixels, encrypt the image
+through the shared core with image-specific AEAD associated data, upload only
+the ciphertext under the opaque attachment ID, verify the exact size/digest
+upload receipt, then send private `MediaMetadata` through MLS. On receipt, a
+client first checks its ciphertext-only cache, otherwise downloads and verifies
+the opaque blob, decrypts through the shared core, and renders only the
+decrypted image. Android, iOS, Web, and desktop adapters supply platform
+upload/download, cache, and rendering implementations; no server, CDN, or
+cache stores image keys or plaintext pixels.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer

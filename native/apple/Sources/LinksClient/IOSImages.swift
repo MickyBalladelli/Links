@@ -115,6 +115,12 @@ public final class IOSImageCache {
         defer { lock.unlock() }
         let url = try fileURL(for: metadata.attachmentID)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attributes[.size] as? NSNumber,
+           size.uint64Value > 32 * 1024 * 1024 + 16 {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
         let ciphertext = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard isValid(ciphertext, metadata: metadata) else {
             try? FileManager.default.removeItem(at: url)
@@ -157,18 +163,24 @@ public final class IOSImageSession {
     private let cache: IOSImageCache
 
     public init(messaging: IOSDirectMessaging, client: IOSClient,
-                uploader: IOSImageUploader, cache: IOSImageCache = try IOSImageCache())
-        throws {
+                uploader: IOSImageUploader, cache: IOSImageCache) {
         self.messaging = messaging
         self.client = client
         self.uploader = uploader
         self.cache = cache
     }
 
+    public convenience init(messaging: IOSDirectMessaging, client: IOSClient,
+                            uploader: IOSImageUploader) throws {
+        try self.init(messaging: messaging, client: client,
+                      uploader: uploader, cache: IOSImageCache())
+    }
+
     /// Normalize, create a private BlurHash, then encrypt before upload.
     public func prepareAndEncrypt(_ source: Data) throws -> IOSEncryptedImage {
         let normalized = try IOSImageResizer.resize(source)
-        let pixels = try Self.rgbPixels(for: normalized.data)
+        var pixels = try Self.rgbPixels(for: normalized.data)
+        defer { pixels.data.resetBytes(in: 0..<pixels.data.count) }
         let blurHash = try messaging.encodeImageBlurHash(
             rgbPixels: pixels.data, width: pixels.width, height: pixels.height)
         return try messaging.encryptImage(

@@ -46,6 +46,15 @@ is validated by the host and then passed to the core, which creates and queues
 the encrypted envelope and device fanout. The browser never builds or inspects
 the encrypted payload.
 
+`WebImageSession` applies the same boundary to images. `WebImageProcessor`
+honors the 1600px edge limit, strips orientation metadata by drawing normalized
+pixels, emits AVIF or WebP at about 80% quality, and gives RGB pixels to the
+shared core for the private BlurHash. `WebImageUploader` receives only the
+encrypted blob; `WebEncryptedImageCache` stores ciphertext in Cache Storage;
+and `WebImageRenderer` sees bytes only after shared-core decryption and digest
+verification. The upload receipt must exactly match the private metadata before
+`WebTextMessaging.sendImage()` sends the MLS media message.
+
 The seed never crosses the WASM/TypeScript boundary. Do not put it in
 `localStorage`, URLs, analytics, or logs. The current facade keeps it in memory;
 refresh or process loss requires a fresh explicit pairing until a durable,
