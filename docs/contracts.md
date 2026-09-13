@@ -134,6 +134,21 @@ and tombstones to the local inbox transaction, commits `SyncState`, and only
 then sends QueueAck. A push is only a wakeup hint; the cursor and encrypted
 mailbox remain authoritative.
 
+Android `LinksFirebaseMessagingService` accepts only the exact data-only FCM
+fields `recipient_device_id` and `cursor`, verifies the device binding, and
+enqueues one constrained WorkManager recovery job. It never decrypts or renders
+inside the FCM callback. `onDeletedMessages` enqueues an explicit full-sync
+request because FCM may drop pending wakeups. `AndroidMissingMessageRecovery`
+uses the existing reconnecting TLS WebSocket and an injected frame bridge to
+call the shared receive coordinator; the bridge reads the durable cursor and
+must send `QueueAck` only after the local commit. The FCM cursor is never used
+as a checkpoint.
+
+The current account service has no refresh-token or returning-device session
+endpoint, and bearer tokens remain memory-only. Therefore a process restarted
+by FCM reports `AUTHENTICATION_REQUIRED` until the host restores an authenticated
+session; adding that authenticated session-resume contract is a release gate.
+
 `SyncState::prepare` validates the batch without advancing state. The host first
 persists received entries, MLS state, message-ID deduplication and the returned
 checkpoint in one local transaction. Only after success does it call `commit`

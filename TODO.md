@@ -223,7 +223,15 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   commits messages and MLS state before QueueAck, invokes the renderer, and
   returns private E2EE delivery-receipt requests grouped by conversation. The
   host sends those receipts through the normal MLS send coordinator.
-- [ ] Add FCM background fetch and missing-message recovery.
+- [x] Add FCM background fetch and missing-message recovery.
+  `LinksFirebaseMessagingService` accepts only the gateway's device-scoped
+  data-only wakeup, coalesces it into a constrained WorkManager job, and also
+  handles FCM deleted-message recovery with a full-sync signal. The worker
+  reconnects through `ConnectionManager`; `AndroidMissingMessageRecovery`
+  drives the shared receive core through an injected frame bridge and always
+  starts from the durable cursor. The host must configure the recovery and
+  token adapters; memory-only bearer sessions still require re-authentication
+  after process death.
 - [ ] Add zero-knowledge account recovery using seed phrase and passkey flows.
 - [ ] Release an internal Android text-messaging milestone before adding groups or calls.
 
