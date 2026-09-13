@@ -37,7 +37,8 @@ then construct `AccountAuth::new_with_passkey`. The HTTP routes are:
 All routes use the existing bearer session and `no-store` response policy. The
 backup upload is bound to the authenticated device and to a registered passkey
 credential. Reusing a device slot with different backup metadata or ciphertext
-is rejected. The database migration is `0005_passkey_backup.sql`.
+is rejected. Expired challenge rows are purged only after their replay-retention
+window. The database migration is `0005_passkey_backup.sql`.
 
 The current verifier intentionally accepts only ES256 (`-7`) P-256 credentials
 and `fmt=none` attestation. This is a clear interoperability/security boundary:
