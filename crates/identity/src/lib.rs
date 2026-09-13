@@ -1,6 +1,9 @@
 //! Ed25519 identities and RFC 9420 basic credentials. A basic credential is an
 //! assertion, not an OTP proof or a certificate; enrollment authenticates it.
+use bip39::{Language, Mnemonic};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use hkdf::Hkdf;
+use sha2::Sha512;
 use thiserror::Error;
 use tls_codec::{Serialize, TlsSerialize, TlsSize, VLBytes};
 use uuid::Uuid;
@@ -12,6 +15,8 @@ const PQXDH_IDENTITY_BINDING_DOMAIN: &[u8] = b"links/pqxdh/identity-binding/v1\0
 const PQXDH_SIGNED_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/signed-prekey/v1\0";
 const PQXDH_KEM_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/kem-prekey/v1\0";
 const DEVICE_IDENTITY_DOMAIN: &[u8] = b"links/device/v1\0";
+const RECOVERY_KDF_SALT: &[u8] = b"links/recovery/v1/salt\0";
+const RECOVERY_IDENTITY_KDF_INFO: &[u8] = b"links/recovery/v1/ed25519-identity\0";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
@@ -46,6 +51,91 @@ impl IdentitySeed {
     pub fn sign(&self, transcript: &[u8]) -> [u8; 64] {
         SigningKey::from_bytes(&self.0).sign(transcript).to_bytes()
     }
+
+    fn from_derived(bytes: Zeroizing<[u8; 32]>) -> Self {
+        Self(bytes)
+    }
+}
+
+/// A validated BIP-39 mnemonic held in zeroizing memory.
+///
+/// Only English 12- and 24-word phrases are accepted for this recovery profile.
+/// The phrase must stay local; never send it to a server or analytics service.
+pub struct RecoveryMnemonic(Zeroizing<String>);
+
+impl RecoveryMnemonic {
+    pub fn generate(word_count: usize) -> Result<Self, IdentityError> {
+        let entropy_bytes = match word_count {
+            12 => 16,
+            24 => 32,
+            _ => return Err(IdentityError::Invalid),
+        };
+        let mut entropy = Zeroizing::new(vec![0u8; entropy_bytes]);
+        getrandom::fill(&mut entropy).map_err(|_| IdentityError::RandomUnavailable)?;
+        let mnemonic = Mnemonic::from_entropy_in(Language::English, &entropy)
+            .map_err(|_| IdentityError::Invalid)?;
+        Ok(Self(Zeroizing::new(mnemonic.to_string())))
+    }
+
+    pub fn from_phrase(phrase: &str) -> Result<Self, IdentityError> {
+        let mnemonic = Mnemonic::parse_in(Language::English, phrase)
+            .map_err(|_| IdentityError::Authentication)?;
+        if !matches!(mnemonic.word_count(), 12 | 24) {
+            return Err(IdentityError::Invalid);
+        }
+        Ok(Self(Zeroizing::new(mnemonic.to_string())))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn word_count(&self) -> usize {
+        self.0.split_whitespace().count()
+    }
+
+    pub fn to_seed(&self, passphrase: &str) -> Result<RecoverySeed, IdentityError> {
+        derive_recovery_seed(self.as_str(), passphrase)
+    }
+
+    pub fn derive_identity_seed(&self, passphrase: &str) -> Result<IdentitySeed, IdentityError> {
+        self.to_seed(passphrase)
+            .map(|seed| seed.derive_identity_seed())
+    }
+}
+
+/// The 512-bit BIP-39 PBKDF2-HMAC-SHA512 output. It remains in zeroizing
+/// memory and is never persisted by this crate.
+pub struct RecoverySeed(Zeroizing<[u8; 64]>);
+
+impl RecoverySeed {
+    pub fn as_bytes(&self) -> &[u8; 64] {
+        &self.0
+    }
+
+    /// Derive the stable Links Ed25519 identity seed from the BIP-39 root.
+    /// The extra domain-separated step prevents accidental cross-purpose key
+    /// reuse with other keys derived from the same recovery phrase.
+    pub fn derive_identity_seed(&self) -> IdentitySeed {
+        let hkdf = Hkdf::<Sha512>::new(Some(RECOVERY_KDF_SALT), self.0.as_ref());
+        let mut identity = Zeroizing::new([0u8; 32]);
+        hkdf.expand(RECOVERY_IDENTITY_KDF_INFO, identity.as_mut())
+            .expect("fixed recovery output length is valid");
+        IdentitySeed::from_derived(identity)
+    }
+}
+
+pub fn generate_recovery_mnemonic(word_count: usize) -> Result<RecoveryMnemonic, IdentityError> {
+    RecoveryMnemonic::generate(word_count)
+}
+
+pub fn derive_recovery_seed(phrase: &str, passphrase: &str) -> Result<RecoverySeed, IdentityError> {
+    let mnemonic =
+        Mnemonic::parse_in(Language::English, phrase).map_err(|_| IdentityError::Authentication)?;
+    if !matches!(mnemonic.word_count(), 12 | 24) {
+        return Err(IdentityError::Invalid);
+    }
+    Ok(RecoverySeed(Zeroizing::new(mnemonic.to_seed(passphrase))))
 }
 
 pub fn validate_public_key(key: &[u8; 32]) -> Result<(), IdentityError> {
@@ -261,5 +351,26 @@ mod tests {
         .is_err());
         assert!(verify(&binding.public_key, &transcript, &[0; 63]).is_err());
         assert!(validate_public_key(&[0; 32]).is_err());
+    }
+
+    #[test]
+    fn bip39_recovery_matches_standard_vector_and_derives_stably() {
+        let phrase =
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let mnemonic = RecoveryMnemonic::from_phrase(phrase).unwrap();
+        assert_eq!(mnemonic.word_count(), 12);
+        let seed = mnemonic.to_seed("TREZOR").unwrap();
+        assert_eq!(
+            seed.as_bytes(),
+            &decode_hex::<64>("c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e53495531f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04")
+        );
+        let first = seed.derive_identity_seed().public_key();
+        let second = RecoveryMnemonic::from_phrase(phrase)
+            .unwrap()
+            .derive_identity_seed("TREZOR")
+            .unwrap()
+            .public_key();
+        assert_eq!(first, second);
+        assert!(RecoveryMnemonic::generate(15).is_err());
     }
 }

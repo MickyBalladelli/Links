@@ -24,6 +24,15 @@ and `HardwareSeedVault`; Swift and Java supply native wrap/load/delete operation
 APIs. Mobile onboarding UI and persistence of the public reference/account binding
 remain in the Android/iOS client phases.
 
+`RecoveryMnemonic` accepts only English BIP-39 12- or 24-word phrases. It uses
+BIP-39 PBKDF2-HMAC-SHA512 with an optional passphrase, keeps the 512-bit root in
+zeroizing memory, and derives the Links Ed25519 identity seed through a separate
+HKDF domain. The phrase and derived keys stay on the device; this does not send
+recovery material to the server. Account recovery enrollment, device metadata,
+and regenerated PQXDH pre-key inventory still need their own authenticated flow.
+`HardwareIdentityStore::restore_from_recovery` can seal the derived identity
+directly into the native vault; it must not run during ordinary login or retry.
+
 ## Security correction to the roadmap
 
 Phone numbers and OTPs are not key seeds. The seed comes from the OS CSPRNG; phone

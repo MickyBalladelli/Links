@@ -72,8 +72,9 @@ Deletion removes the wrapping key and sealed record; repeated deletion is safe.
 Only call it for explicit device removal/reset. Keep the reference if deletion
 reports failure so cleanup can be retried. Process death between native key
 creation and metadata persistence can leave orphan keys; automatic orphan
-reconciliation and account recovery are not implemented here. Uninstall, restored
-backups or hardware loss must not silently create a replacement identity.
+reconciliation and account recovery enrollment are not implemented here.
+Local BIP-39 identity-seed derivation exists in `links-identity`, but uninstall,
+restored backups or hardware loss must not silently create a replacement identity.
 
 ## Builds
 

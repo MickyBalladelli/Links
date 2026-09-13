@@ -37,7 +37,10 @@ impl LocalIdentity {
 
 /// Platform adapters generate keys from a CSPRNG, not a phone number/OTP.
 /// Public keys and MLS credentials are cryptographically bound during enrollment.
-pub use links_identity::{DeviceBinding, IdentitySeed};
+pub use links_identity::{
+    derive_recovery_seed, generate_recovery_mnemonic, DeviceBinding, IdentitySeed,
+    RecoveryMnemonic, RecoverySeed,
+};
 
 /// Native adapters must reject software-only wrapping keys. Ed25519 signing runs
 /// in process memory after hardware unwrap; do not claim the seed never leaves TEE.
@@ -55,6 +58,19 @@ pub struct HardwareIdentityStore<V> {
 impl<V: HardwareSeedVault> HardwareIdentityStore<V> {
     pub fn new(vault: V) -> Self {
         Self { vault }
+    }
+
+    /// Derive a recovery identity locally and immediately store it in the
+    /// platform vault. Use only from an explicit authenticated recovery flow.
+    pub fn restore_from_recovery(
+        &mut self,
+        mnemonic: &RecoveryMnemonic,
+        passphrase: &str,
+    ) -> Result<KeyHandle, CoreError> {
+        let seed = mnemonic
+            .derive_identity_seed(passphrase)
+            .map_err(|_| CoreError::Authentication)?;
+        self.vault.store_seed(seed.expose_for_wrapping())
     }
 
     /// Check the persisted enrollment key against the same seed used for signing.

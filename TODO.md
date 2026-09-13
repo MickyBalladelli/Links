@@ -93,7 +93,13 @@ limits](docs/pqxdh.md), [pre-key provisioning](docs/prekeys.md), and [MLS/TreeKE
 
 ### Account recovery
 
-- [ ] Implement BIP-39 12/24-word seed phrase key derivation for zero-knowledge device restoration.
+- BIP-39 recovery is local-only: `links-identity` accepts English 12/24-word
+  mnemonics, applies standard PBKDF2-HMAC-SHA512 with an optional passphrase,
+  and domain-separates the root into an Ed25519 identity seed. Mnemonics and
+  derived seeds stay in zeroizing memory; server-side account recovery and
+  restored pre-key inventory remain separate work.
+
+- [x] Implement BIP-39 12/24-word seed phrase key derivation for zero-knowledge device restoration.
 - [ ] Build WebAuthn / Passkey cloud backup for hardware-bound private keys without unencrypted server state.
 
 ---

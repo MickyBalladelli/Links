@@ -86,9 +86,11 @@ defines MLS authentication and epoch-based group security; its specified suites
 are not a blanket post-quantum guarantee. A reviewed protocol composition, concrete
 cipher suites, interop vectors, and external cryptographic review are required
 before advertising post-quantum resilience. Also verify native hardware algorithm
-support and key migration constraints before implementing the roadmap's recovery
-and hardware-keystore proposals. A passkey is not automatically a backup of an
-arbitrary private key. These are Phase 1 decisions, not Phase 0 implementations.
+support and key migration constraints before shipping account recovery or
+hardware-keystore changes. Local BIP-39 derivation does not by itself restore
+server enrollment, device metadata, or pre-key state. A passkey is not
+automatically a backup of an arbitrary private key. These remain Phase 1 release
+decisions.
 
 ## Platform plan
 
