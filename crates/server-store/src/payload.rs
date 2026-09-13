@@ -87,9 +87,11 @@ pub trait EncryptedPayloadStore: Send + Sync {
     /// Hide expired ciphertext immediately even when backend TTL GC is delayed.
     async fn read(&self, request: ReadRequest) -> Result<v1::SyncBatch, StoreError>;
 
-    /// Idempotent cumulative purge; reject acknowledgement beyond the high watermark.
-    /// Only call for the authenticated device and after its durable local commit.
-    /// Delete ciphertext, retain cursor tombstones/fingerprints for the replay window.
+    /// Idempotent cumulative delivery confirmation and purge; reject
+    /// acknowledgement beyond the high watermark. Only call for the
+    /// authenticated device and after its durable local decrypt/inbox commit.
+    /// Delete ciphertext, retain cursor tombstones/fingerprints for the replay
+    /// window. E2EE delivery/read receipts are not visible to this store.
     async fn acknowledge(
         &self,
         device_id: &str,

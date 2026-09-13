@@ -177,7 +177,12 @@ Make encrypted messages reliably move between devices before adding richer clien
   `ClientCore`, commits the inbox before sending `QueueAck`, and retries safely
   after a failed local commit. Android/iOS schedulers only need to invoke it
   from their push callbacks.
-- [ ] Purge encrypted blobs after receipt confirmation (`delivery_receipt`).
+- [x] Purge encrypted blobs after receipt confirmation (`delivery_receipt`).
+  The receiving worker sends authenticated `QueueAck` only after decrypting and
+  durably committing the batch. `RelationalStore::acknowledge` then clears the
+  encrypted envelope bytes transactionally while retaining cursor tombstones
+  and idempotency fingerprints. E2EE `delivery_receipt` messages remain private
+  and are not parsed by the server.
 - [ ] Add TTL deletion for uncollected offline messages, with a 30-day maximum retention target.
 
 ---

@@ -60,7 +60,9 @@ New retries must not extend the original expiry. Do not reuse IDs beyond the
 30-day idempotency window.
 
 Read returns contiguous live records or expiry/ack tombstones. Limit both count
-and encoded byte size. Acknowledgements reject a cursor ahead of the mailbox high
+and encoded byte size. The authenticated recipient's QueueAck is the server-side
+delivery confirmation: the client sends it only after decrypting and durably
+committing the batch. Acknowledgements reject a cursor ahead of the mailbox high
 watermark and purge payload bytes cumulatively. Delayed native TTL deletion must
 never expose expired ciphertext through reads. Compact tombstones/fingerprints
 after the replay window and report CursorExpired when a requested cursor is gone.

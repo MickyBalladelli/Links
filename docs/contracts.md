@@ -16,9 +16,11 @@ or decimal strings, not floating-point Number, for uint64 values.
 `Message` contains private sender/conversation metadata, a sender-local
 `sequence_id`, and one text, media, or receipt body. `MediaMetadata` carries secret media keys and belongs **inside**
 E2EE, never in a public upload request. `Receipts` communicates delivered/read
-status to peers. `QueueAck` only means ciphertext/state was durably committed on
-the receiving device; it is neither a read receipt nor proof of successful peer
-decryption. `User` and `Device` are directory records, not authentication proofs.
+status to peers. `QueueAck` means ciphertext/state was decrypted and durably
+committed on the receiving device; it is a server-side delivery confirmation
+that permits mailbox payload purge, but it is neither a read receipt nor proof
+of successful peer decryption. E2EE `Receipts` remain private to the
+conversation. `User` and `Device` are directory records, not authentication proofs.
 
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
