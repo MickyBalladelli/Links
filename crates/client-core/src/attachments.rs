@@ -192,7 +192,7 @@ pub fn decrypt_large_file<R: Read, W: Write>(
     mut source: R,
     mut destination: W,
 ) -> Result<(), CoreError> {
-    validate_chunked_media_metadata(media)?;
+    validate_large_file_metadata(media)?;
     let original_size = media.original_size_bytes.unwrap();
     let chunk_count = original_size
         .checked_add(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64 - 1)
@@ -268,7 +268,7 @@ pub fn decrypt_large_file_chunk(
     chunk_index: u64,
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CoreError> {
-    validate_chunked_media_metadata(media)?;
+    validate_large_file_metadata(media)?;
     let original_size = media.original_size_bytes.unwrap();
     let chunk_count = original_size
         .checked_add(LARGE_FILE_PLAINTEXT_CHUNK_BYTES as u64 - 1)
@@ -397,11 +397,11 @@ fn chunked_media_metadata(
         original_size_bytes: Some(plaintext_size),
         encryption_chunk_bytes: Some(LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32),
     };
-    validate_chunked_media_metadata(&media)?;
+    validate_large_file_metadata(&media)?;
     Ok(media)
 }
 
-fn validate_chunked_media_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
+pub fn validate_large_file_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
     protocol::validate_media_metadata(media)?;
     if !matches!(
         media.mime_type.as_str(),
