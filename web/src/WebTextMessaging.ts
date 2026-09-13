@@ -9,6 +9,7 @@ import type {
   WebImageUploadReceipt,
   WebEncryptedImage
 } from './WebImages'
+import type { WebLargeFileMetadata, WebLargeFileUploadReceipt } from './WebLargeFiles'
 import { validateWebImageMetadata, validateWebImageUploadReceipt } from './WebImages'
 
 export interface WebCoreTransport {
@@ -64,6 +65,13 @@ export interface WebMessagingCore extends WebCoreTransport {
     recipientUserID: string,
     metadata: WebImageMetadata,
     receipt: WebImageUploadReceipt,
+    transport: WebCoreTransport
+  ): void
+  sendLargeFile?(
+    conversationID: string,
+    recipientUserID: string,
+    metadata: WebLargeFileMetadata,
+    receipt: WebLargeFileUploadReceipt,
     transport: WebCoreTransport
   ): void
 }
