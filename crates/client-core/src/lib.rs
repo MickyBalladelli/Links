@@ -1,6 +1,6 @@
 //! Platform-neutral client contracts and validated send/receive orchestration.
-//! Ed25519 identity and PQXDH key agreement are available. MLS and envelope
-//! encryption providers still fail closed until integrated.
+//! Ed25519 identity, PQXDH key agreement, and an OpenMLS TreeKEM provider are
+//! available. The outer envelope provider still fails closed until integrated.
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;

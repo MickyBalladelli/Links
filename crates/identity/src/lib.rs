@@ -11,6 +11,7 @@ const PQXDH_KEM_ENCODING_TAG: u8 = 2;
 const PQXDH_IDENTITY_BINDING_DOMAIN: &[u8] = b"links/pqxdh/identity-binding/v1\0";
 const PQXDH_SIGNED_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/signed-prekey/v1\0";
 const PQXDH_KEM_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/kem-prekey/v1\0";
+const DEVICE_IDENTITY_DOMAIN: &[u8] = b"links/device/v1\0";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
@@ -138,6 +139,31 @@ pub struct DeviceBinding {
     pub mls_node_id: Uuid,
     pub public_key: [u8; 32],
 }
+
+/// Parse the application identity carried inside an MLS BasicCredential.
+/// Trust still comes from the caller's authenticated device directory.
+pub fn parse_mls_basic_identity(identity: &[u8]) -> Result<DeviceBinding, IdentityError> {
+    let bytes = identity
+        .strip_prefix(DEVICE_IDENTITY_DOMAIN)
+        .ok_or(IdentityError::Invalid)?;
+    if bytes.len() != 16 + 16 + 16 + 32 {
+        return Err(IdentityError::Invalid);
+    }
+    let user_id = Uuid::from_slice(&bytes[..16]).map_err(|_| IdentityError::Invalid)?;
+    let device_id = Uuid::from_slice(&bytes[16..32]).map_err(|_| IdentityError::Invalid)?;
+    let mls_node_id = Uuid::from_slice(&bytes[32..48]).map_err(|_| IdentityError::Invalid)?;
+    let public_key: [u8; 32] = bytes[48..].try_into().map_err(|_| IdentityError::Invalid)?;
+    if user_id.is_nil() || device_id.is_nil() || mls_node_id.is_nil() {
+        return Err(IdentityError::Invalid);
+    }
+    validate_public_key(&public_key)?;
+    Ok(DeviceBinding {
+        user_id,
+        device_id,
+        mls_node_id,
+        public_key,
+    })
+}
 #[derive(TlsSerialize, TlsSize)]
 struct BasicCredential {
     credential_type: u16,
@@ -151,7 +177,7 @@ impl DeviceBinding {
             return Err(IdentityError::Invalid);
         }
         validate_public_key(&self.public_key)?;
-        let mut identity = b"links/device/v1\0".to_vec();
+        let mut identity = DEVICE_IDENTITY_DOMAIN.to_vec();
         identity.extend(self.user_id.as_bytes());
         identity.extend(self.device_id.as_bytes());
         identity.extend(self.mls_node_id.as_bytes());

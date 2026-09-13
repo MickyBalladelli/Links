@@ -36,10 +36,10 @@ clients must verify the corresponding signed membership/epoch changes.
 
 | Threat | Required control | Boundary / current state |
 | --- | --- | --- |
-| Network or stored-payload disclosure | TLS plus client-side authenticated encryption | TLS gateway and real crypto are later phases; only opaque payload contracts exist now. |
-| Forgery, replay, or stale membership | Verified MLS credentials, transcript/epoch validation, durable replay state | Provider contract exists; real engine and adversarial vectors required in Phase 1. |
+| Network or stored-payload disclosure | TLS plus client-side authenticated encryption | MLS message protection is integrated; the outer envelope and delivery gateway remain later phases. |
+| Forgery, replay, or stale membership | Verified MLS credentials, transcript/epoch validation, durable replay state | OpenMLS engine is integrated; durable host storage and adversarial vectors remain required in Phase 1. |
 | Compromised directory | Authenticated enrollment, peer verification and device-change handling | Not solved by OTP or protobuf public keys alone. |
-| Stolen device | OS-keystore custody, revoke device, rotate affected MLS groups | SQL revocation exists; hardware custody and MLS removal are not implemented. |
+| Stolen device | OS-keystore custody, revoke device, rotate affected MLS groups | SQL revocation and MLS removal primitives exist; revocation-driven group rotation is not yet wired. |
 | Queue loss or duplicates | Per-device monotonic cursors, idempotency, transactional checkpointing | Sync validator exists; durable distributed mailbox is Phase 2. |
 | Abuse or routing hijack | Atomic rate buckets, bounded leases, authenticated session ownership | Reference state adapter exists; gateway authentication and distributed Redis are Phase 2. |
 | Harvest-now/decrypt-later | Reviewed post-quantum session and group design | A design goal, not a security property of Phase 0. |

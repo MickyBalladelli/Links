@@ -1,12 +1,13 @@
 # Links
 
 Centralized-first encrypted messaging. The foundation includes phone OTP account
-authentication, Ed25519 device enrollment, hardware-backed identity custody and
-the Links X25519 + ML-KEM-768 PQXDH profile, and authenticated offline pre-key
-provisioning. **This is not yet a working messenger
-or a production post-quantum security claim.** MLS/envelope encryption, delivery
-gateways, and client applications remain in later phases. Native hardware vault
-acceptance and the cryptographic audit remain open.
+authentication, Ed25519 device enrollment, hardware-backed identity custody, the
+Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
+provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
+messenger or a production post-quantum security claim.** One-to-one group
+wiring, Sealed Sender envelopes, delivery gateways, and client applications
+remain in later phases. Native hardware acceptance and the cryptographic audit
+remain open.
 
 ## Workspace
 
@@ -25,6 +26,7 @@ acceptance and the cryptographic audit remain open.
 | `docs/storage.md` | PostgreSQL, payload-store and ephemeral-state guarantees and limits. |
 | `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
+| `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
 
 ## Build and test
 
@@ -68,5 +70,6 @@ CI is configured for formatting, warning-free lint, unit/doc tests, PostgreSQL
 integration tests, WASM compilation and native-source builds. Hardware custody
 tests require signed physical-device harnesses; compile checks do not prove TEE
 protection. Mobile FFI bindings, Redis and ScyllaDB/DynamoDB network adapters remain
-future work. Message-encryption providers still fail closed rather than sending
-plaintext. See [account setup](docs/consumer-account.md) and [the roadmap](TODO.md).
+future work. The outer envelope provider still fails closed rather than sending
+plaintext until its implementation is installed. See [account setup](docs/consumer-account.md),
+[MLS](docs/mls.md), and [the roadmap](TODO.md).

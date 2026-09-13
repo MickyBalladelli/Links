@@ -64,7 +64,7 @@ Verification: 25 Rust unit tests and 14 PostgreSQL integration tests passed; for
 
 - [x] Implement PQXDH pairing X25519 with ML-KEM-768 (standardized Kyber-768 successor).
 - [x] Build Pre-Key Bundle generation and automatic upload for offline message initiation.
-- [ ] Integrate the core MLS ratcheting engine with TreeKEM (`O(log N)` member update complexity).
+- [x] Integrate the core MLS ratcheting engine with TreeKEM (`O(log N)` member update complexity).
 - [ ] Standardize 1-to-1 chats as 2-member MLS groups.
 - [ ] Wrap encrypted payloads in Sealed Sender envelopes to hide origin metadata from routing nodes.
 
@@ -75,9 +75,14 @@ zeroized secret buffers. Account authentication uses a separate hardware-backed
 Ed25519 key. `links-client-core::prekeys` adds hardware-vault persistence contracts,
 durable automatic refill, claimed-bundle verification, and protobuf upload/status
 contracts. The account API verifies signatures and PostgreSQL atomically consumes
-one-time keys, with last-resort ML-KEM fallback. Authenticated first-payload
-processing remains in the following roadmap items. See [PQXDH profile and security
-limits](docs/pqxdh.md) and [pre-key provisioning](docs/prekeys.md).
+one-time keys, with last-resort ML-KEM fallback. OpenMLS now provides the RFC 9420
+TreeKEM ratchet, encrypted MLS application messages, verified device credentials,
+ratchet-tree extension transport, and durable-provider/pending-commit contracts
+through `links-client-core::mls`. The selected ML-KEM-768 + X25519 ciphersuite is
+an OpenMLS draft suite, so interoperability testing and independent review remain
+release gates. One-to-one group lifecycle wiring and authenticated first-payload
+composition remain in the following roadmap items. See [PQXDH profile and security
+limits](docs/pqxdh.md), [pre-key provisioning](docs/prekeys.md), and [MLS/TreeKEM](docs/mls.md).
 
 ### Account recovery
 

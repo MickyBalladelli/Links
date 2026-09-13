@@ -14,11 +14,17 @@ thiserror = "2"
 uuid = "1"
 zeroize = "1"
 getrandom = { version = "0.4", features = ["wasm_js"] }
+# OpenMLS RustCrypto still reaches getrandom 0.2 through elliptic-curve crates;
+# expose its WASM JavaScript entropy feature for the shared client build.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 hkdf = "0.12"
 sha2 = "0.10"
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 ml-kem = { version = "0.3", features = ["hazmat", "zeroize"] }
+openmls = { version = "=0.9.0", default-features = false, features = ["js"] }
+openmls_rust_crypto = { version = "=0.6.0", features = ["draft-ietf-mls-pq-ciphersuites"] }
+openmls_traits = "=0.6.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "migrate", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "migrate", "macros"] }
 links-protocol = { path = "crates/protocol" }
 links-client-core = { path = "crates/client-core" }
