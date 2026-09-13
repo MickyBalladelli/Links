@@ -203,7 +203,12 @@ The first usable client. Keep the first slice small: phone account, 1-to-1 text,
   binding, and keeps the bearer token in memory. Android Keystore requires TEE
   or StrongBox-backed wrapping; provider delivery and physical-device acceptance
   remain release gates.
-- [ ] Implement Android connection manager with exponential backoff, reconnect, and heartbeating.
+- [x] Implement Android connection manager with exponential backoff, reconnect, and heartbeating.
+  `ConnectionManager` uses a binary-only TLS `links.v1` WebSocket, queues the
+  Hello frame before exposing the socket, sends OkHttp ping/pong heartbeats every
+  30 seconds, rejects text/oversized frames, and reconnects with full-jitter
+  backoff with a 1-second initial window and 30-second ceiling. It never places
+  bearer tokens in URLs or logs.
 - [ ] Implement the 1-to-1 send flow: query recipient pre-key bundle, establish/resume MLS group, encrypt payload, and send envelope.
 - [ ] Implement the 1-to-1 receive flow: fetch envelope, decrypt Sealed Sender wrapper, process MLS epoch update, render message, and return delivery receipt.
 - [ ] Add FCM background fetch and missing-message recovery.

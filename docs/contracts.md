@@ -119,6 +119,14 @@ The initial connection replay uses the same `last_seen_cursor` from Hello and
 the same batch contract. Clients persist/decrypt/process the returned batch,
 then emit cumulative QueueAck only after their local durable transaction.
 
+The Android client connection manager uses OkHttp's TLS WebSocket adapter with
+the `links.v1` subprotocol, binary messages only, disabled redirects, restricted
+TLS, and a 30-second ping interval. It accepts a caller-provided encoded Hello
+frame so protobuf framing remains owned by the shared protocol/client core. Socket
+failures use full-jitter reconnect delays with a 1-second initial window and a
+30-second ceiling;
+the manager never puts the bearer token in the URL or diagnostic output.
+
 `BackgroundWorker` is the platform-neutral wakeup path. Its transport adapter
 reconnects over TLS, receives the initial batch, and serves bounded Replay pages.
 The worker opens each envelope through `ClientCore`, hands decrypted messages
