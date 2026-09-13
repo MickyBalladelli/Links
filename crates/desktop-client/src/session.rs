@@ -87,15 +87,22 @@ pub struct DesktopEncryptedImage {
 
 impl DesktopEncryptedImage {
     pub fn new(metadata: DesktopImageMetadata, ciphertext: Vec<u8>) -> Result<Self, CoreError> {
-        metadata.validate()?;
-        if ciphertext.len() < 17
-            || ciphertext.len() > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES
-            || metadata.ciphertext_size_bytes != ciphertext.len() as u64
-            || Sha256::digest(&ciphertext).as_slice() != metadata.ciphertext_sha256.as_slice()
+        let image = Self { metadata, ciphertext };
+        image.validate()?;
+        Ok(image)
+    }
+
+    pub fn validate(&self) -> Result<(), CoreError> {
+        self.metadata.validate()?;
+        if self.ciphertext.len() < 17
+            || self.ciphertext.len() > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES
+            || self.metadata.ciphertext_size_bytes != self.ciphertext.len() as u64
+            || Sha256::digest(&self.ciphertext).as_slice()
+                != self.metadata.ciphertext_sha256.as_slice()
         {
             return Err(CoreError::Authentication);
         }
-        Ok(Self { metadata, ciphertext })
+        Ok(())
     }
 }
 
@@ -164,6 +171,14 @@ impl DesktopImageCache for DesktopImageFileCache {
         if !path.is_file() {
             return Ok(None);
         }
+        let size = fs::metadata(&path)
+            .map_err(|_| CoreError::Provider)?
+            .len();
+        if size != metadata.ciphertext_size_bytes
+            || size > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES as u64
+        {
+            return Ok(None);
+        }
         let ciphertext = fs::read(path).map_err(|_| CoreError::Provider)?;
         if ciphertext.len() < 17
             || ciphertext.len() > DESKTOP_IMAGE_MAX_CIPHERTEXT_BYTES
@@ -176,7 +191,7 @@ impl DesktopImageCache for DesktopImageFileCache {
     }
 
     fn write(&mut self, image: &DesktopEncryptedImage) -> Result<(), CoreError> {
-        image.metadata.validate()?;
+        image.validate()?;
         let path = self.path_for(&image.metadata.attachment_id)?;
         let temporary = path.with_extension("blob.tmp");
         fs::write(&temporary, &image.ciphertext).map_err(|_| CoreError::Provider)?;
@@ -651,6 +666,7 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
         uploader: &mut dyn DesktopImageUploader,
         image: &DesktopEncryptedImage,
     ) -> Result<DesktopImageUploadReceipt, CoreError> {
+        image.validate()?;
         let token = self.require_access_token()?;
         let receipt = uploader.upload(&token, image)?;
         if !receipt.matches(&image.metadata) {

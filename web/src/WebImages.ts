@@ -144,7 +144,7 @@ export class WebEncryptedImageCache {
     const cache = await this.storage.open(WEB_IMAGE_CACHE_NAME)
     await cache.put(
       cacheKey(image.metadata.attachmentID),
-      new Response(image.ciphertext, {
+      new Response(copyArrayBuffer(image.ciphertext), {
         headers: { 'content-type': 'application/octet-stream' }
       })
     )
@@ -268,7 +268,10 @@ export class WebImageSession {
           plaintext.length > WEB_IMAGE_MAX_PLAINTEXT_BYTES) {
         throw new Error('Invalid decrypted Web image')
       }
-      await renderer.render(new Blob([plaintext], { type: metadata.mimeType }), metadata.blurHash)
+      await renderer.render(
+        new Blob([copyArrayBuffer(plaintext)], { type: metadata.mimeType }),
+        metadata.blurHash
+      )
     } finally {
       ciphertext.fill(0)
       plaintext?.fill(0)
@@ -302,7 +305,7 @@ export class WebImageElementRenderer implements WebImageRenderer {
 function toBlob(source: Blob | ArrayBuffer | Uint8Array): Blob {
   if (source instanceof Blob) return source
   if (source instanceof ArrayBuffer) return new Blob([source])
-  return new Blob([source.slice().buffer])
+  return new Blob([copyArrayBuffer(source)])
 }
 
 function resizedDimensions(width: number, height: number): { width: number, height: number } {
@@ -360,7 +363,16 @@ function matchesReceipt(metadata: WebImageMetadata, receipt: WebImageUploadRecei
 }
 
 async function hasDigest(bytes: Uint8Array, expected: Uint8Array): Promise<boolean> {
-  return sameBytes(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), expected)
+  return sameBytes(
+    new Uint8Array(await crypto.subtle.digest('SHA-256', copyArrayBuffer(bytes))),
+    expected
+  )
+}
+
+function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(copy).set(bytes)
+  return copy
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
