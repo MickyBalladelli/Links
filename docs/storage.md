@@ -75,6 +75,21 @@ atomicity or generic eventual consistency meets this contract. The PostgreSQL
 deployment still needs encrypted-at-rest storage, private networking, backups,
 replica recovery, and load/chaos validation.
 
+## S3-compatible encrypted blobs: adapter and CDN contract implemented
+
+`links-server-store::blob::S3CompatibleBlobStore` stores only
+client-encrypted attachment bytes under immutable UUID keys. Conditional writes
+make retries idempotent; a conflicting body is rejected. Upload receipts carry
+the exact size and SHA-256 digest, and downloads verify both before returning
+bytes to the client. Cloudflare R2 or private Amazon S3 may implement the
+`S3CompatibleObjectClient` boundary.
+
+Put the bucket behind authenticated short-lived signed URLs and Cloudflare or
+CloudFront edge caching. The CDN may cache ciphertext for the 30-day retention
+window, but must not transform, sniff, list, or receive bearer tokens. See
+[blob-storage.md](blob-storage.md) for bucket policies, cache rules, lifecycle
+expiration, and deployment steps.
+
 Required adapter conformance cases are concurrent appends, identical/conflicting
 retries, retry after ack, TTL boundary reads, byte-limited paging, cursor overflow,
 ack beyond high watermark, expiry GC, stale-cursor recovery, and crash between

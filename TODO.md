@@ -401,7 +401,10 @@ Add media after text delivery and multi-device sync are stable.
 - [x] Embed low-resolution BlurHash placeholders in text payloads.
   Shared Rust core encodes fixed 4x3, 28-character BlurHash values from
   resized RGB pixels; the hash is carried privately in MediaMetadata.
-- [ ] Deploy S3-compatible encrypted blob storage with Cloudflare / CloudFront CDN edge caching.
+- [x] Deploy S3-compatible encrypted blob storage with Cloudflare / CloudFront CDN edge caching.
+  `S3CompatibleBlobStore` accepts only client ciphertext, uses immutable UUID
+  object keys and conditional writes, verifies download receipts, and supports
+  private R2/S3 origins behind signed CDN URLs.
 - [ ] Add encrypted image send, receive, caching, and rendering to Android and iOS, then Web and desktop.
 
 ### Videos and large files
