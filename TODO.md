@@ -445,7 +445,10 @@ Add discovery options after the basic phone-based account works.
 
 ### Pseudonymous account
 
-- [ ] Implement `@username` self-registration without requiring a phone number.
+- [x] Implement `@username` self-registration without requiring a phone number.
+  Username registration and login use signed Ed25519 device-key transcripts,
+  atomic pseudonymous account/handle/device/session writes, and per-handle/IP
+  rate limits. Phone-derived subjects remain NULL for these accounts.
 - [ ] Support self-sovereign key generation with passkeys / BIP-39 mnemonic seed phrases.
 - [ ] Deploy global key directory lookup for `@usernames`.
 

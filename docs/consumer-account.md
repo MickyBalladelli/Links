@@ -16,9 +16,17 @@ OTP, console-code output, in-memory auth database, or bypass provider. Mock
 providers are confined to tests. Live sends incur provider charges and were not
 performed during implementation.
 
+Username-only accounts use the same Ed25519 device identity but do not require a
+phone or store a phone-derived subject. The canonical handle is lowercase ASCII
+`[a-z][a-z0-9_]{2,31}`; the `@` is display-only. Registration and returning login
+both sign a domain-separated transcript with a fresh 32-byte client nonce. The
+server creates the account, unique handle, device, MLS credential, and first
+session in one transaction. Handle and IP rate limits run before that write.
+
 `links-identity` generates 32-byte random Ed25519 seeds, derives public keys, signs
-request transcripts, verifies signatures strictly, and produces an RFC 9420 basic
-credential using TLS codec serialization. The core exposes `HardwareIdentityStore`
+phone, username, and device-enrollment transcripts, verifies signatures strictly,
+and produces an RFC 9420 basic credential using TLS codec serialization. The core
+exposes `HardwareIdentityStore`
 and `HardwareSeedVault`; Swift and Java supply native wrap/load/delete operations.
 `links-identity-ffi` connects those operations to the native `HardwareIdentityStore`
 APIs. The Android client now provides the first-run hardware identity and phone OTP
@@ -71,6 +79,8 @@ application, proxy, provider SDK, or analytics layer.
 | --- | --- | --- |
 | `POST /start` | `phone`, `channel`, `device_id`, `mls_node_id`, `public_key`, `signature` | Provisional account/device binding, `challenge_id`, nonce, expiry and MLS credential. |
 | `POST /finish` | `challenge_id`, `code`, `signature` | A device-scoped bearer access token, expiry, user ID and device ID. |
+| `POST /v1/auth/username/register` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Creates a pseudonymous account and returns its session, handle, and MLS credential. |
+| `POST /v1/auth/username/login` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Returns a session after the registered device key proves possession. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
 | `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
 
@@ -99,6 +109,13 @@ identity key. **OTP alone cannot replace existing identity keys**.
 the signature in a strict `links://connect?...` URI. The approving device must
 parse and verify it, confirm the displayed account identity, then submit the
 decoded fields to `POST /v1/devices`.
+
+For username-only registration, the client signs
+`links_identity::username_registration_transcript` and sends the public key,
+device/node IDs, canonical handle, nonce, and signature. Returning clients sign
+`links_identity::username_login_transcript`. A username is not a password and
+does not authenticate a copied device ID; the registered Ed25519 key is required.
+Passkey or seed-phrase recovery remains the path for a lost device.
 Ineligible requests receive provisional challenges without disclosing the real
 account UUID. They never receive a session even with a correct OTP. This is not
 a formal guarantee of enumeration resistance or of constant-time behavior.

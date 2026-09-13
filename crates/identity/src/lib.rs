@@ -245,6 +245,66 @@ pub fn device_pairing_transcript(
     Ok(bytes)
 }
 
+/// Proof transcript for creating a pseudonymous account or logging in with its
+/// first-party device key. The handle is the canonical form without `@`.
+pub fn username_registration_transcript(
+    handle: &str,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: &[u8; 32],
+    nonce: &[u8; 32],
+) -> Result<Vec<u8>, IdentityError> {
+    username_transcript(
+        b"links/username-register/v1\0",
+        handle,
+        device_id,
+        mls_node_id,
+        public_key,
+        nonce,
+    )
+}
+
+/// Proof transcript for returning to a pseudonymous account without a phone.
+pub fn username_login_transcript(
+    handle: &str,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: &[u8; 32],
+    nonce: &[u8; 32],
+) -> Result<Vec<u8>, IdentityError> {
+    username_transcript(
+        b"links/username-login/v1\0",
+        handle,
+        device_id,
+        mls_node_id,
+        public_key,
+        nonce,
+    )
+}
+
+fn username_transcript(
+    domain: &[u8],
+    handle: &str,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: &[u8; 32],
+    nonce: &[u8; 32],
+) -> Result<Vec<u8>, IdentityError> {
+    links_protocol::validate_handle(handle).map_err(|_| IdentityError::Invalid)?;
+    if device_id.is_nil() || mls_node_id.is_nil() {
+        return Err(IdentityError::Invalid);
+    }
+    validate_public_key(public_key)?;
+    let mut bytes = domain.to_vec();
+    bytes.push(handle.len() as u8);
+    bytes.extend(handle.as_bytes());
+    bytes.extend(device_id.as_bytes());
+    bytes.extend(mls_node_id.as_bytes());
+    bytes.extend(public_key);
+    bytes.extend(nonce);
+    Ok(bytes)
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct DeviceBinding {
     pub user_id: Uuid,

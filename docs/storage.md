@@ -8,8 +8,10 @@ and member removal. SQLx uses bound parameters. Migrations are embedded and run
 explicitly; application startup must not implicitly migrate an arbitrary database.
 
 `accounts` stores a unique keyed 32-byte authentication-subject lookup digest, not
-a raw phone number, OTP, or unkeyed phone hash. The future auth service owns the
-secret digest key and any separately encrypted contact record. `handles` enforces
+a raw phone number, OTP, or unkeyed phone hash. Pseudonymous username accounts
+leave that subject NULL and set `account_kind='pseudonymous'`; their first-party
+device key proves registration and later login. The auth service owns the secret
+digest key and any separately encrypted contact record. `handles` enforces
 lowercase ASCII `[a-z][a-z0-9_]{2,31}` and one active handle per user. Concurrent
 claims are arbitrated by unique constraints; changing/recycling a handle is not
 part of this API. Disabled accounts cannot claim, enroll, or change membership.

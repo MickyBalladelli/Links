@@ -22,6 +22,8 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
     let auth_routes = Router::new()
         .route("/v1/auth/start", post(start))
         .route("/v1/auth/finish", post(finish))
+        .route("/v1/auth/username/register", post(username_register))
+        .route("/v1/auth/username/login", post(username_login))
         .route("/v1/auth/me", get(me))
         .route("/v1/devices", post(register_device))
         .layer(DefaultBodyLimit::max(4096));
@@ -71,6 +73,26 @@ async fn finish(
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
         auth.finish(request.map_err(|_| AuthError::Invalid)?.0)
+            .await?,
+    ))
+}
+async fn username_register(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Result<Json<crate::service::UsernameRegistrationRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.register_username(request.map_err(|_| AuthError::Invalid)?.0, peer.ip())
+            .await?,
+    ))
+}
+async fn username_login(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Result<Json<crate::service::UsernameLoginRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.login_username(request.map_err(|_| AuthError::Invalid)?.0, peer.ip())
             .await?,
     ))
 }

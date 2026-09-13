@@ -6,11 +6,11 @@ use crate::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
-use links_protocol::v1;
+use links_protocol::{v1, validate_handle};
 use links_server_store::postgres::RelationalStore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::{
     net::IpAddr,
     sync::Arc,
@@ -49,6 +49,37 @@ impl Drop for StartRequest {
     fn drop(&mut self) {
         self.phone.zeroize();
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsernameRegistrationRequest {
+    /// Canonical handle without the display-only `@` prefix.
+    pub handle: String,
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub public_key: String,
+    pub nonce: String,
+    pub signature: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsernameLoginRequest {
+    /// Canonical handle without the display-only `@` prefix.
+    pub handle: String,
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub public_key: String,
+    pub nonce: String,
+    pub signature: String,
+}
+
+#[derive(Serialize)]
+pub struct UsernameAuthResponse {
+    pub session: Session,
+    pub handle: String,
+    pub mls_credential: String,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Challenge {
@@ -254,6 +285,67 @@ impl AccountAuth {
         }
         Ok(now as i64)
     }
+
+    async fn enforce_username_rate_limits(
+        &self,
+        handle: &str,
+        peer_ip: IpAddr,
+        now: i64,
+    ) -> Result<(), AuthError> {
+        let handle_minute_key =
+            self.digest(b"links/username-handle-minute/v1\0", handle.as_bytes());
+        let handle_hour_key = self.digest(b"links/username-handle-hour/v1\0", handle.as_bytes());
+        let ip_key = self.digest(b"links/username-ip/v1\0", peer_ip.to_string().as_bytes());
+        let mut tx = self.pool.begin().await?;
+        let mut limited = false;
+        for (key, window, limit) in [
+            (handle_minute_key, 60_000_i64, 3_i32),
+            (handle_hour_key, 3_600_000_i64, 10_i32),
+            (ip_key, 3_600_000_i64, 50_i32),
+        ] {
+            let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
+                .bind(key.as_slice())
+                .bind(now)
+                .bind(window)
+                .bind(limit)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if count.is_none() {
+                limited = true;
+                break;
+            }
+        }
+        tx.commit().await?;
+        if limited {
+            return Err(AuthError::RateLimited);
+        }
+        Ok(())
+    }
+
+    async fn issue_session(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        user_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<Session, AuthError> {
+        let token_bytes = Zeroizing::new(random()?);
+        let token_hash = Sha256::digest(token_bytes.as_slice());
+        let expires_at_ms = self.now()? + SESSION_TTL_MS as i64;
+        sqlx::query("INSERT INTO auth_sessions (token_hash,user_id,device_id,expires_at_ms) VALUES ($1,$2,$3,$4)")
+            .bind(token_hash.as_slice())
+            .bind(user_id)
+            .bind(device_id)
+            .bind(expires_at_ms)
+            .execute(&mut **tx)
+            .await?;
+        Ok(Session {
+            access_token: encode(token_bytes.as_slice()),
+            expires_at_ms: expires_at_ms as u64,
+            user_id,
+            device_id,
+        })
+    }
+
     fn digest(&self, domain: &[u8], value: &[u8]) -> [u8; 32] {
         let mut mac = Hmac::<Sha256>::new_from_slice(self.phone_lookup_key.as_ref())
             .expect("fixed length HMAC key");
@@ -261,6 +353,134 @@ impl AccountAuth {
         mac.update(value);
         mac.finalize().into_bytes().into()
     }
+
+    /// Create a pseudonymous account from a canonical handle and a device key.
+    /// The handle, account, device, MLS credential, and first session commit
+    /// atomically. No phone number or phone-derived subject is stored.
+    pub async fn register_username(
+        &self,
+        request: UsernameRegistrationRequest,
+        peer_ip: IpAddr,
+    ) -> Result<UsernameAuthResponse, AuthError> {
+        validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
+        if request.device_id.is_nil() || request.mls_node_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let public_key = decode::<32>(&request.public_key)?;
+        let nonce = decode::<32>(&request.nonce)?;
+        let signature = decode::<64>(&request.signature)?;
+        let transcript = links_identity::username_registration_transcript(
+            &request.handle,
+            request.device_id,
+            request.mls_node_id,
+            &public_key,
+            &nonce,
+        )?;
+        verify(&public_key, &transcript, &signature)?;
+        let now = self.now()?;
+        self.enforce_username_rate_limits(&request.handle, peer_ip, now)
+            .await?;
+
+        let user_id = Uuid::new_v4();
+        let binding = DeviceBinding {
+            user_id,
+            device_id: request.device_id,
+            mls_node_id: request.mls_node_id,
+            public_key,
+        };
+        let credential = binding.mls_credential()?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("INSERT INTO accounts (user_id,auth_subject_hash,account_kind) VALUES ($1,$2,'pseudonymous')")
+            .bind(user_id)
+            .bind(Option::<Vec<u8>>::None)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO handles (handle,user_id) VALUES ($1,$2)")
+            .bind(&request.handle)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO devices (device_id,user_id,mls_node_id,identity_public_key,mls_credential) VALUES ($1,$2,$3,$4,$5)")
+            .bind(request.device_id)
+            .bind(user_id)
+            .bind(request.mls_node_id)
+            .bind(binding.public_key.as_slice())
+            .bind(&credential)
+            .execute(&mut *tx)
+            .await?;
+        let session = self
+            .issue_session(&mut tx, user_id, request.device_id)
+            .await?;
+        tx.commit().await?;
+        Ok(UsernameAuthResponse {
+            session,
+            handle: request.handle,
+            mls_credential: encode(&credential),
+        })
+    }
+
+    /// Log in to a username account by proving possession of the registered
+    /// device key. This keeps phone OTP out of the pseudonymous path.
+    pub async fn login_username(
+        &self,
+        request: UsernameLoginRequest,
+        peer_ip: IpAddr,
+    ) -> Result<UsernameAuthResponse, AuthError> {
+        validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
+        if request.device_id.is_nil() || request.mls_node_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let public_key = decode::<32>(&request.public_key)?;
+        let nonce = decode::<32>(&request.nonce)?;
+        let signature = decode::<64>(&request.signature)?;
+        let now = self.now()?;
+        self.enforce_username_rate_limits(&request.handle, peer_ip, now)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT a.user_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND d.device_id=$2 AND a.account_kind='pseudonymous' AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR SHARE OF a,d")
+            .bind(&request.handle)
+            .bind(request.device_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(AuthError::Denied)?;
+        let user_id: Uuid = row.get("user_id");
+        let stored_node: Uuid = row.get("mls_node_id");
+        let stored_public: [u8; 32] = row
+            .get::<Vec<u8>, _>("identity_public_key")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        if stored_node != request.mls_node_id || stored_public != public_key {
+            return Err(AuthError::Denied);
+        }
+        let binding = DeviceBinding {
+            user_id,
+            device_id: request.device_id,
+            mls_node_id: request.mls_node_id,
+            public_key,
+        };
+        let credential = binding.mls_credential()?;
+        if row.get::<Vec<u8>, _>("mls_credential") != credential {
+            return Err(AuthError::Unavailable);
+        }
+        let transcript = links_identity::username_login_transcript(
+            &request.handle,
+            request.device_id,
+            request.mls_node_id,
+            &public_key,
+            &nonce,
+        )?;
+        verify(&public_key, &transcript, &signature)?;
+        let session = self
+            .issue_session(&mut tx, user_id, request.device_id)
+            .await?;
+        tx.commit().await?;
+        Ok(UsernameAuthResponse {
+            session,
+            handle: request.handle,
+            mls_credential: encode(&credential),
+        })
+    }
+
     pub async fn start(
         &self,
         request: StartRequest,
