@@ -161,6 +161,58 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             transport: manager)
     }
 
+    /// Generate a private placeholder from normalized RGB pixels.
+    public func encodeImageBlurHash(rgbPixels: Data, width: Int, height: Int) throws -> String {
+        lock.lock()
+        let sharedCore = core
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, ready else { throw IOSMessagingError.notConnected }
+        return try sharedCore.encodeImageBlurHash(
+            rgbPixels: rgbPixels, width: width, height: height)
+    }
+
+    /// Encrypt normalized image bytes through the shared Rust core.
+    public func encryptImage(_ image: Data, attachmentID: String, mimeType: String,
+                             width: Int, height: Int, blurHash: String)
+        throws -> IOSEncryptedImage {
+        lock.lock()
+        let sharedCore = core
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, ready else { throw IOSMessagingError.notConnected }
+        return try sharedCore.encryptImage(
+            image, attachmentID: attachmentID, mimeType: mimeType,
+            width: width, height: height, blurHash: blurHash)
+    }
+
+    /// Decrypt image ciphertext through the shared core before rendering.
+    public func decryptImage(_ metadata: IOSImageMetadata, ciphertext: Data) throws -> Data {
+        lock.lock()
+        let sharedCore = core
+        lock.unlock()
+        guard let sharedCore else { throw IOSMessagingError.notConnected }
+        return try sharedCore.decryptImage(metadata, ciphertext: ciphertext)
+    }
+
+    /// Send private image metadata only after the exact ciphertext upload receipt.
+    public func sendImage(conversationID: String, recipientUserID: String,
+                          metadata: IOSImageMetadata,
+                          receipt: IOSImageUploadReceipt) throws {
+        guard receipt.matches(metadata) else { throw IOSImageError.invalidUploadReceipt }
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        try sharedCore.sendImage(
+            conversationID: conversationID, recipientUserID: recipientUserID,
+            metadata: metadata, receipt: receipt, transport: manager)
+    }
+
     /// Encode PCM with links-client-core's Opus profile. The shared core
     /// remains the only component that decides framing and codec settings.
     public func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data {
