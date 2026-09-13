@@ -18,8 +18,16 @@ pub struct SyncAdvance {
     next: u64,
 }
 impl SyncAdvance {
+    pub fn previous_cursor(&self) -> u64 {
+        self.previous
+    }
+
     pub fn next_cursor(&self) -> u64 {
         self.next
+    }
+
+    pub fn device_id(&self) -> &str {
+        &self.device_id
     }
 }
 impl SyncState {
@@ -35,6 +43,9 @@ impl SyncState {
     }
     pub fn cursor(&self) -> u64 {
         self.cursor
+    }
+    pub fn device_id(&self) -> &str {
+        &self.device_id
     }
     pub fn prepare(&self, batch: &v1::SyncBatch) -> Result<SyncAdvance, CoreError> {
         if batch.recipient_device_id != self.device_id

@@ -54,6 +54,10 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
         }
     }
 
+    pub fn device_id(&self) -> &str {
+        self.identity.device_id()
+    }
+
     /// Assign the next sender-local conversation sequence before MLS sealing.
     /// Persist the returned message, envelope, MLS state and sequence counter
     /// in one host transaction before retrying or reporting durable send.

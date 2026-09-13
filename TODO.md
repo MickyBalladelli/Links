@@ -171,7 +171,12 @@ Make encrypted messages reliably move between devices before adding richer clien
   only the recipient device ID and mailbox cursor. `conversation_id` and
   `sequence_id` remain inside E2EE because the gateway cannot know them; the
   client wakes, replays from the cursor, and decrypts them locally.
-- [ ] Implement client background workers that fetch and decrypt missing payloads over TLS/E2EE channels.
+- [x] Implement client background workers that fetch and decrypt missing payloads over TLS/E2EE channels.
+  `links-client-core::background::BackgroundWorker` reconnects with the durable
+  cursor, drains contiguous replay pages, decrypts each envelope through
+  `ClientCore`, commits the inbox before sending `QueueAck`, and retries safely
+  after a failed local commit. Android/iOS schedulers only need to invoke it
+  from their push callbacks.
 - [ ] Purge encrypted blobs after receipt confirmation (`delivery_receipt`).
 - [ ] Add TTL deletion for uncollected offline messages, with a 30-day maximum retention target.
 

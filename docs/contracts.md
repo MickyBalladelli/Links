@@ -117,6 +117,13 @@ The initial connection replay uses the same `last_seen_cursor` from Hello and
 the same batch contract. Clients persist/decrypt/process the returned batch,
 then emit cumulative QueueAck only after their local durable transaction.
 
+`BackgroundWorker` is the platform-neutral wakeup path. Its transport adapter
+reconnects over TLS, receives the initial batch, and serves bounded Replay pages.
+The worker opens each envelope through `ClientCore`, hands decrypted messages
+and tombstones to the local inbox transaction, commits `SyncState`, and only
+then sends QueueAck. A push is only a wakeup hint; the cursor and encrypted
+mailbox remain authoritative.
+
 `SyncState::prepare` validates the batch without advancing state. The host first
 persists received entries, MLS state, message-ID deduplication and the returned
 checkpoint in one local transaction. Only after success does it call `commit`
