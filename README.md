@@ -45,7 +45,9 @@ remain open.
 | `docs/web-client.md` | Web/WASM client bootstrap, key custody boundary and current release limits. |
 | `web/src/WebConnectionManager.ts` | Browser `wss://` connection lifecycle for binary `links.v1`. |
 | `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
+| `web/src/WebImages.ts` | Web image normalization, encrypted transfer, ciphertext cache, and render boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
+| `crates/desktop-client/src/session.rs` | Desktop image encryption, transfer, ciphertext cache, and render boundary. |
 | `docs/voice-notes.md` | Opus profile, Ogg container, encryption boundary and platform codec contract. |
 
 ## Build and test
