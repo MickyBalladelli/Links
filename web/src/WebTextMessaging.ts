@@ -100,8 +100,6 @@ export class WebTextMessaging implements WebCoreTransport {
       helloProvider: () => this.createHello(),
       onFrame: frame => this.handleFrame(manager, frame),
       onState: state => this.handleManagerState(manager, state),
-      onConnected: () => this.handleConnected(manager),
-      onDisconnected: () => this.handleDisconnected(manager),
       onFailure: () => this.handleFailure(manager)
     })
     this.manager = manager
@@ -180,16 +178,6 @@ export class WebTextMessaging implements WebCoreTransport {
   private handleManagerState(manager: WebConnectionManager, state: WebConnectionState): void {
     if (this.manager !== manager) return
     this.setState(this.coreFailed && state === 'stopped' ? 'failed' : state)
-  }
-
-  private handleConnected(manager: WebConnectionManager): void {
-    if (this.manager !== manager || this.coreFailed) return
-    this.setState('ready')
-  }
-
-  private handleDisconnected(manager: WebConnectionManager): void {
-    if (this.manager !== manager || this.coreFailed) return
-    this.setState('connecting')
   }
 
   private handleFailure(manager: WebConnectionManager): void {
