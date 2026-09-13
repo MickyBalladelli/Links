@@ -141,3 +141,11 @@ SecretBytes and KeyHandle zeroize their owned buffers and omit Debug. Generated
 protobuf structs omit Debug, but remain cloneable and are not zeroizing storage;
 the caller owns plaintext lifetime and must avoid unnecessary copies or logs.
 Zeroization is not a promise that OS snapshots or every caller copy is erased.
+
+Passkey backup uses the WebAuthn PRF extension as a local key-encryption input.
+The server may store passkey credential public keys, challenges and opaque
+authenticated backup envelopes, but must never receive PRF output, passkey
+private material, identity seeds or mnemonics. A backup envelope is bound to its
+backup ID, source device ID and credential ID. Restore is an explicit local
+vault operation followed by authenticated device enrollment; it is not an
+automatic login or key-regeneration fallback.

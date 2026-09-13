@@ -100,7 +100,16 @@ limits](docs/pqxdh.md), [pre-key provisioning](docs/prekeys.md), and [MLS/TreeKE
   restored pre-key inventory remain separate work.
 
 - [x] Implement BIP-39 12/24-word seed phrase key derivation for zero-knowledge device restoration.
-- [ ] Build WebAuthn / Passkey cloud backup for hardware-bound private keys without unencrypted server state.
+- [x] Build WebAuthn / Passkey cloud backup for hardware-bound private keys without unencrypted server state.
+
+Passkey backup is client-side encrypted with the WebAuthn PRF output and a
+random per-backup salt. `links-client-core::passkey_backup` binds the ciphertext
+to the backup ID, device ID and credential ID before sealing the hardware-loaded
+Ed25519 seed. `crates/account-auth` validates WebAuthn create/get ceremonies and
+monotonic authenticator counters, while PostgreSQL stores only passkey public
+keys, challenges and opaque encrypted envelopes. The PRF output and plaintext
+seed never enter the server API. Use `AccountAuth::new_with_passkey` with an
+explicit RP ID and exact origin; ordinary `new` leaves passkey routes disabled.
 
 ---
 

@@ -33,6 +33,16 @@ and regenerated PQXDH pre-key inventory still need their own authenticated flow.
 `HardwareIdentityStore::restore_from_recovery` can seal the derived identity
 directly into the native vault; it must not run during ordinary login or retry.
 
+Passkey backup uses the WebAuthn PRF (`hmac-secret`) extension, not a passkey
+private-key export. `HardwareIdentityStore::backup_with_passkey` loads the
+hardware-wrapped Ed25519 seed briefly, encrypts it in `links-client-core` with a
+fresh-salt PRF-derived ChaCha20-Poly1305 key, and uploads only the authenticated
+opaque envelope. `crates/account-auth` provides explicit registration/assertion
+ceremonies for ES256 `fmt=none` passkeys and monotonic counter checks. The server
+stores credential public keys, challenges and ciphertext only; it never sees
+the PRF result or identity seed. Configure `PasskeyConfig` and use
+`AccountAuth::new_with_passkey` before enabling these routes.
+
 ## Security correction to the roadmap
 
 Phone numbers and OTPs are not key seeds. The seed comes from the OS CSPRNG; phone
