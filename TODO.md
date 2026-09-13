@@ -424,7 +424,12 @@ Add media after text delivery and multi-device sync are stable.
   iOS enables AVAssetWriter network optimization; Android rewrites the MP4
   after MediaMuxer finishes, moving `moov` before `mdat` and adjusting `stco`
   or `co64` chunk offsets.
-- [ ] Implement WebRTC DataChannel P2P direct file streaming for uncapped large transfers.
+- [x] Implement WebRTC DataChannel P2P direct file streaming for uncapped large transfers.
+  `p2p_transfer` defines ciphertext-only `LDT1` frames with 256 KiB chunks,
+  per-chunk and whole-file SHA-256 checks, durable resume offsets, and ordered
+  delivery enforcement. `WebRtcFileTransfer` adds browser DataChannel
+  backpressure and bounded Blob source/sink callbacks; SDP signaling remains
+  a separate host concern.
 - [ ] Add encrypted video and large-file transfer to clients after images and voice notes work.
 
 ---

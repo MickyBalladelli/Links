@@ -11,6 +11,7 @@ pub mod images;
 pub mod mls;
 pub mod pairing;
 pub mod passkey_backup;
+pub mod p2p_transfer;
 pub mod pqxdh;
 pub mod prekeys;
 pub mod receive;
@@ -32,6 +33,8 @@ pub enum CoreError {
     Image(#[from] images::ImageError),
     #[error(transparent)]
     Video(#[from] video::VideoError),
+    #[error(transparent)]
+    P2pTransfer(#[from] p2p_transfer::P2pTransferError),
     #[error("cryptographic provider unavailable")]
     CryptoUnavailable,
     #[error("authentication failed")]

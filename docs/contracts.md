@@ -67,6 +67,15 @@ implementations and uses decoder/encoder surfaces with EGL scaling. Compatible
 AAC audio may be copied into the MP4. The server never receives the staging
 file, codec settings, or plaintext media.
 
+Large encrypted attachments may bypass blob storage through an authenticated,
+ordered and reliable WebRTC DataChannel. `links-client-core::p2p_transfer` and
+the Web `WebRtcFileTransfer` adapter use byte-compatible `LDT1` frames with
+256 KiB ciphertext chunks, per-chunk digests, durable resume offsets, and a
+final whole-ciphertext SHA-256 check. The MLS control path supplies the private
+attachment metadata and content key; the DataChannel carries ciphertext only.
+The channel must be established and authenticated by the host's signaling
+layer before a transfer begins.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer

@@ -1,3 +1,4 @@
 export * from './LinksWebClient'
 export * from './WebTextMessaging'
 export * from './WebImages'
+export * from './WebRtcFileTransfer'
