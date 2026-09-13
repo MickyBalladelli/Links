@@ -532,13 +532,10 @@ fn validate_request(frame: &v1::ClientFrame) -> Result<(), GatewayError> {
                 || hello.device_access_token.is_empty()
                 || hello.device_access_token.len() > MAX_ACCESS_TOKEN_BYTES
                 || hello.last_seen_cursor > protocol::MAX_CURSOR
-                || hello
-                    .supported_sync_compression
-                    .iter()
-                    .any(|compression| {
-                        *compression != 0
-                            && *compression != protocol::SYNC_COMPRESSION_ZSTD_DICTIONARY_V1
-                    })
+                || hello.supported_sync_compression.iter().any(|compression| {
+                    *compression != 0
+                        && *compression != protocol::SYNC_COMPRESSION_ZSTD_DICTIONARY_V1
+                })
             {
                 return Err(if hello.protocol_version != protocol::VERSION {
                     GatewayError::UnsupportedVersion

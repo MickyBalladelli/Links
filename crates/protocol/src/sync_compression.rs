@@ -62,11 +62,9 @@ pub fn compress_sync_batch(
 ) -> Result<v1::CompressedSyncBatch, ProtocolError> {
     validate_sync_batch(batch)?;
     let bytes = batch.encode_to_vec();
-    let mut compressor = zstd::bulk::Compressor::with_dictionary(
-        SYNC_COMPRESSION_LEVEL,
-        SYNC_ZSTD_DICTIONARY_V1,
-    )
-    .map_err(|_| ProtocolError::Malformed)?;
+    let mut compressor =
+        zstd::bulk::Compressor::with_dictionary(SYNC_COMPRESSION_LEVEL, SYNC_ZSTD_DICTIONARY_V1)
+            .map_err(|_| ProtocolError::Malformed)?;
     let compressed_payload = compressor
         .compress(&bytes)
         .map_err(|_| ProtocolError::Malformed)?;
@@ -97,13 +95,15 @@ pub fn decompress_sync_batch(
         || compressed.uncompressed_size as usize > crate::MAX_FRAME_BYTES - 128
         || compressed.encoded_len() > crate::MAX_FRAME_BYTES - 128
     {
-        return Err(if compressed.uncompressed_size as usize > crate::MAX_FRAME_BYTES - 128
-            || compressed.encoded_len() > crate::MAX_FRAME_BYTES - 128
-        {
-            ProtocolError::TooLarge
-        } else {
-            ProtocolError::Malformed
-        });
+        return Err(
+            if compressed.uncompressed_size as usize > crate::MAX_FRAME_BYTES - 128
+                || compressed.encoded_len() > crate::MAX_FRAME_BYTES - 128
+            {
+                ProtocolError::TooLarge
+            } else {
+                ProtocolError::Malformed
+            },
+        );
     }
     let mut decompressor = zstd::bulk::Decompressor::with_dictionary(SYNC_ZSTD_DICTIONARY_V1)
         .map_err(|_| ProtocolError::Malformed)?;
