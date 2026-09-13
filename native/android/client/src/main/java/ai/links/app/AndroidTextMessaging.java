@@ -23,6 +23,23 @@ public final class AndroidTextMessaging {
         /** Call links-client-core::send::send_text and persist its exact outbox result. */
         void sendText(String conversationId, String recipientUserId, String text,
                 ConnectionManager connection) throws Exception;
+        /** Encode and encrypt voice bytes through the shared Rust client core. */
+        default AndroidVoiceNotes.EncryptedVoiceNote encryptVoiceNote(byte[] opusContainer,
+                String attachmentId, long durationMs, AndroidVoiceNotes.Profile profile)
+                throws Exception {
+            throw new IOException("Voice core unavailable");
+        }
+        /** Verify metadata, digest, AEAD and Opus framing before playback. */
+        default byte[] decryptVoiceNote(AndroidVoiceNotes.Metadata metadata, byte[] ciphertext)
+                throws Exception {
+            throw new IOException("Voice core unavailable");
+        }
+        /** Upload has already been accepted; now send private MediaMetadata in MLS. */
+        default void sendVoiceNote(String conversationId, String recipientUserId,
+                AndroidVoiceNotes.Metadata metadata, AndroidVoiceNotes.UploadReceipt receipt,
+                ConnectionManager connection) throws Exception {
+            throw new IOException("Voice core unavailable");
+        }
     }
 
     public interface Listener {
@@ -129,6 +146,42 @@ public final class AndroidTextMessaging {
         bridge.sendText(conversationId, recipientUserId, text, active);
     }
 
+    /** Prepare one voice note through the same authenticated shared core instance. */
+    public AndroidVoiceNotes.EncryptedVoiceNote encryptVoiceNote(byte[] opusContainer,
+            String attachmentId, long durationMs, AndroidVoiceNotes.Profile profile)
+            throws Exception {
+        CoreBridge activeBridge;
+        synchronized (lock) {
+            activeBridge = bridge;
+            if (state != State.READY || coreFailed())
+                throw new IOException("Voice session is not ready");
+        }
+        return activeBridge.encryptVoiceNote(opusContainer, attachmentId, durationMs, profile);
+    }
+
+    /** Decrypt one downloaded attachment through the shared core before playback. */
+    public byte[] decryptVoiceNote(AndroidVoiceNotes.Metadata metadata, byte[] ciphertext)
+            throws Exception {
+        return bridge.decryptVoiceNote(metadata, ciphertext);
+    }
+
+    /** Send private media metadata after the opaque attachment upload succeeds. */
+    public void sendVoiceNote(String conversationId, String recipientUserId,
+            AndroidVoiceNotes.Metadata metadata, AndroidVoiceNotes.UploadReceipt receipt)
+            throws Exception {
+        requireUuid(conversationId, "conversation ID");
+        requireUuid(recipientUserId, "recipient user ID");
+        if (metadata == null || receipt == null || !receipt.matches(metadata))
+            throw new IOException("Invalid voice upload receipt");
+        ConnectionManager active;
+        synchronized (lock) {
+            active = connection;
+            if (state != State.READY || active == null || !active.isConnected())
+                throw new IOException("Voice session is not connected");
+        }
+        bridge.sendVoiceNote(conversationId, recipientUserId, metadata, receipt, active);
+    }
+
     public void stop() {
         ConnectionManager active;
         synchronized (lock) {
@@ -146,6 +199,10 @@ public final class AndroidTextMessaging {
             state = next;
         }
         listener.onState(next);
+    }
+
+    private boolean coreFailed() {
+        return state == State.FAILED;
     }
 
     private static void requireUuid(String value, String name) throws IOException {

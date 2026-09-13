@@ -7,6 +7,7 @@ pub const MAX_OPUS_PACKET_BYTES: usize = 1_275;
 pub const OPUS_PRESKIP_SAMPLES: u16 = 312;
 pub const OPUS_VBR_ENABLED: bool = true;
 pub const OPUS_DTX_ENABLED: bool = true;
+pub const MAX_OPUS_DECODE_SAMPLES_PER_CHANNEL: usize = 5_760;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum VoiceError {
@@ -614,6 +615,97 @@ impl NativeOpusEncoder {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+/// Decode a validated Ogg Opus voice note into interleaved signed PCM.
+/// Playback hosts use this after attachment decryption; the server never sees
+/// or invokes this decoder.
+pub fn decode_ogg_opus(data: &[u8], profile: OpusVoiceProfile) -> Result<Vec<i16>, VoiceError> {
+    profile.validate()?;
+    let stream = validate_ogg_opus(data)?;
+    if stream.channels != profile.channels || stream.input_sample_rate_hz != profile.sample_rate_hz {
+        return Err(VoiceError::InvalidConfiguration);
+    }
+    let packets = audio_packets(data)?;
+    let channels = match profile.channels {
+        1 => opus::Channels::Mono,
+        2 => opus::Channels::Stereo,
+        _ => return Err(VoiceError::InvalidConfiguration),
+    };
+    let mut decoder = opus::Decoder::new(profile.sample_rate_hz, channels)
+        .map_err(|_| VoiceError::Codec)?;
+    let mut pcm = Vec::new();
+    for packet in packets {
+        let samples = decoder
+            .get_nb_samples(&packet)
+            .map_err(|_| VoiceError::Codec)?;
+        if samples == 0 || samples > MAX_OPUS_DECODE_SAMPLES_PER_CHANNEL {
+            return Err(VoiceError::InvalidContainer);
+        }
+        let mut frame = vec![0i16; MAX_OPUS_DECODE_SAMPLES_PER_CHANNEL * profile.channels as usize];
+        let decoded = decoder
+            .decode(&packet, &mut frame, false)
+            .map_err(|_| VoiceError::Codec)?;
+        if decoded == 0 || decoded > MAX_OPUS_DECODE_SAMPLES_PER_CHANNEL {
+            return Err(VoiceError::InvalidContainer);
+        }
+        let decoded_samples = decoded
+            .checked_mul(profile.channels as usize)
+            .ok_or(VoiceError::TooLarge)?;
+        pcm.extend_from_slice(&frame[..decoded_samples]);
+        if pcm.len() > MAX_VOICE_NOTE_BYTES * profile.channels as usize {
+            return Err(VoiceError::TooLarge);
+        }
+    }
+
+    // The decoder returns the audio packets' PCM. The OpusHead pre-skip is
+    // already represented in the container granule positions and must not be
+    // removed a second time by a host playback engine.
+    Ok(pcm)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn audio_packets(data: &[u8]) -> Result<Vec<Vec<u8>>, VoiceError> {
+    let mut packets = Vec::new();
+    let mut offset = 0usize;
+    let mut packet_index = 0u64;
+    let mut partial_packet = Vec::new();
+    while offset < data.len() {
+        let segment_count = *data
+            .get(offset + 26)
+            .ok_or(VoiceError::InvalidContainer)? as usize;
+        let table_start = offset.checked_add(27).ok_or(VoiceError::TooLarge)?;
+        let body_start = table_start
+            .checked_add(segment_count)
+            .ok_or(VoiceError::TooLarge)?;
+        let body_len = data[table_start..body_start]
+            .iter()
+            .try_fold(0usize, |length, segment| length.checked_add(*segment as usize))
+            .ok_or(VoiceError::TooLarge)?;
+        let body_end = body_start
+            .checked_add(body_len)
+            .ok_or(VoiceError::TooLarge)?;
+        let mut body_offset = body_start;
+        for segment in &data[table_start..body_start] {
+            let segment_len = *segment as usize;
+            partial_packet.extend_from_slice(&data[body_offset..body_offset + segment_len]);
+            body_offset += segment_len;
+            if *segment < 255 {
+                if packet_index >= 2 {
+                    packets.push(std::mem::take(&mut partial_packet));
+                } else {
+                    partial_packet.clear();
+                }
+                packet_index = packet_index.checked_add(1).ok_or(VoiceError::TooLarge)?;
+            }
+        }
+        offset = body_end;
+    }
+    if !partial_packet.is_empty() || packets.is_empty() {
+        return Err(VoiceError::InvalidContainer);
+    }
+    Ok(packets)
+}
+
 #[cfg(target_arch = "wasm32")]
 pub struct NativeOpusEncoder;
 
@@ -622,4 +714,9 @@ impl NativeOpusEncoder {
     pub fn new(_profile: OpusVoiceProfile, _serial: u32) -> Result<Self, VoiceError> {
         Err(VoiceError::CodecUnavailable)
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn decode_ogg_opus(_data: &[u8], _profile: OpusVoiceProfile) -> Result<Vec<i16>, VoiceError> {
+    Err(VoiceError::CodecUnavailable)
 }

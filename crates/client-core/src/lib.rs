@@ -3,6 +3,7 @@
 //! available. The default outer envelope provider still fails closed; install
 //! `crypto::SealedSenderCrypto` with a platform-backed key resolver for sends.
 pub mod background;
+pub mod attachments;
 pub mod crypto;
 pub mod envelopes;
 pub mod identity;
@@ -23,6 +24,8 @@ use thiserror::Error;
 pub enum CoreError {
     #[error(transparent)]
     Protocol(#[from] protocol::ProtocolError),
+    #[error(transparent)]
+    Voice(#[from] voice::VoiceError),
     #[error("cryptographic provider unavailable")]
     CryptoUnavailable,
     #[error("authentication failed")]
