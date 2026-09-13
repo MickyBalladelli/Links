@@ -24,6 +24,19 @@ message SyncBatch {
   uint64 high_watermark = 4; // Highest assigned cursor, not a checkpoint.
   repeated QueueItem items = 5;
 }
+
+message CompressedSyncBatch {
+  uint32 compression = 1; // SyncCompression value.
+  uint32 dictionary_id = 2;
+  uint32 uncompressed_size = 3;
+  bytes compressed_payload = 4; // Zstd frame containing one SyncBatch.
+}
+
+enum SyncCompression {
+  SYNC_COMPRESSION_UNSPECIFIED = 0;
+  SYNC_COMPRESSION_ZSTD_DICTIONARY_V1 = 1;
+}
+
 message QueueAck {
   uint64 through_cursor = 1; // Cumulative, only after local durable storage.
 }

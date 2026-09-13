@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 prost.workspace = true
+zstd.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 

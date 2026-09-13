@@ -18,6 +18,7 @@ message Hello {
   string device_id = 2;
   bytes device_access_token = 3; // Short-lived bearer secret. Never log frames.
   uint64 last_seen_cursor = 4;
+  repeated SyncCompression supported_sync_compression = 5;
 }
 message Replay { uint64 after_cursor = 1; uint32 limit = 2; }
 message ServerFrame {
@@ -27,6 +28,7 @@ message ServerFrame {
     Accepted accepted = 3;
     SyncBatch batch = 4;
     ProtocolError error = 5;
+    CompressedSyncBatch compressed_batch = 6;
   }
 }
 message Welcome { uint32 protocol_version = 1; uint32 heartbeat_seconds = 2; }
