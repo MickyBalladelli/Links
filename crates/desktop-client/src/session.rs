@@ -146,11 +146,10 @@ impl<F: DesktopSocketFactory> DesktopConnectionManager<F> {
             return;
         }
 
-        if self
-            .connected_at
-            .is_some_and(|connected| now.saturating_duration_since(connected)
-                >= Duration::from_millis(DESKTOP_STABLE_CONNECTION_MS))
-        {
+        if self.connected_at.is_some_and(|connected| {
+            now.saturating_duration_since(connected)
+                >= Duration::from_millis(DESKTOP_STABLE_CONNECTION_MS)
+        }) {
             self.backoff_ms = DESKTOP_INITIAL_BACKOFF_MS;
         }
 
@@ -159,9 +158,10 @@ impl<F: DesktopSocketFactory> DesktopConnectionManager<F> {
                 >= Duration::from_millis(DESKTOP_HEARTBEAT_INTERVAL_MS)
         });
         if heartbeat_due {
-            let result = self.socket.as_mut().map_or(Err(CoreError::Provider), |socket| {
-                socket.ping()
-            });
+            let result = self
+                .socket
+                .as_mut()
+                .map_or(Err(CoreError::Provider), |socket| socket.ping());
             match result {
                 Ok(()) => self.last_heartbeat_at = Some(now),
                 Err(_) => self.connection_failed(now),
@@ -270,8 +270,11 @@ pub trait DesktopMessagingCore: Send {
     fn user_id(&self) -> &str;
     fn device_id(&self) -> &str;
     fn durable_cursor(&self) -> Result<u64, CoreError>;
-    fn create_hello(&mut self, access_token: &str, last_seen_cursor: u64)
-        -> Result<Vec<u8>, CoreError>;
+    fn create_hello(
+        &mut self,
+        access_token: &str,
+        last_seen_cursor: u64,
+    ) -> Result<Vec<u8>, CoreError>;
     /// Invoke the callback only for messages after local inbox/cursor commit.
     fn handle_server_frame(
         &mut self,
@@ -392,12 +395,7 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
             manager: &mut self.manager,
             now,
         };
-        core.send_text(
-            conversation_id,
-            recipient_user_id,
-            text,
-            &mut transport,
-        )
+        core.send_text(conversation_id, recipient_user_id, text, &mut transport)
     }
 
     fn drain_frames(
