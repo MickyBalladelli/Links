@@ -46,6 +46,10 @@ impl PasskeyPrfKey {
 pub struct PasskeyBackupSalt([u8; PRF_SALT_BYTES]);
 
 impl PasskeyBackupSalt {
+    pub fn from_bytes(bytes: [u8; PRF_SALT_BYTES]) -> Self {
+        Self(bytes)
+    }
+
     pub fn generate() -> Result<Self, CoreError> {
         let mut salt = [0u8; PRF_SALT_BYTES];
         getrandom::fill(&mut salt).map_err(|_| CoreError::Provider)?;
@@ -74,7 +78,7 @@ impl PasskeyBackupEnvelope {
         validate_ids(backup_id, device_id)?;
         validate_credential_id(credential_id)?;
         let header = header(backup_id, device_id, credential_id, salt);
-        let key = encryption_key(prf_key)?;
+        let key = encryption_key(prf_key, salt)?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
         let mut nonce = [0u8; NONCE_BYTES];
         getrandom::fill(&mut nonce).map_err(|_| CoreError::Provider)?;
@@ -107,7 +111,7 @@ impl PasskeyBackupEnvelope {
         {
             return Err(CoreError::Authentication);
         }
-        let key = encryption_key(prf_key)?;
+        let key = encryption_key(prf_key, PasskeyBackupSalt::from_bytes(parsed.salt))?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
         let plaintext = cipher
             .decrypt(
@@ -223,10 +227,16 @@ fn header(
     header
 }
 
-fn encryption_key(prf_key: &PasskeyPrfKey) -> Result<Zeroizing<[u8; 32]>, CoreError> {
+fn encryption_key(
+    prf_key: &PasskeyPrfKey,
+    salt: PasskeyBackupSalt,
+) -> Result<Zeroizing<[u8; 32]>, CoreError> {
     let hkdf = Hkdf::<Sha256>::new(Some(KDF_SALT), prf_key.0.as_ref());
+    let mut info = Vec::with_capacity(KDF_INFO.len() + PRF_SALT_BYTES);
+    info.extend_from_slice(KDF_INFO);
+    info.extend_from_slice(salt.as_bytes());
     let mut key = Zeroizing::new([0u8; 32]);
-    hkdf.expand(KDF_INFO, key.as_mut())
+    hkdf.expand(&info, key.as_mut())
         .map_err(|_| CoreError::Provider)?;
     Ok(key)
 }
