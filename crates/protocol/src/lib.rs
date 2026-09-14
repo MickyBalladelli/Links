@@ -33,6 +33,7 @@ pub const OPUS_FRAME_DURATION_MS: u32 = 20;
 pub const BLUR_HASH_LENGTH: usize = 28;
 pub const ML_KEM_768_PUBLIC_KEY_BYTES: usize = 1184;
 pub const MAX_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+pub const MAX_SUBCERTIFICATE_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 pub const MAX_CURSOR: u64 = i64::MAX as u64;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -94,12 +95,27 @@ pub fn validate_user(user: &v1::User) -> Result<(), ProtocolError> {
             || !devices.insert(&device.device_id)
             || device.identity_public_key.is_empty()
             || device.mls_credential.is_empty()
+            || !matches!(device.delegation_role, 0..=2)
             || device.registered_at_ms == 0
             || device
                 .revoked_at_ms
                 .is_some_and(|time| time < device.registered_at_ms)
         {
             return Err(ProtocolError::Invalid("device"));
+        }
+        if let Some(bytes) = device.delegation_certificate.as_ref() {
+            let certificate = v1::DeviceSubCertificate::decode(bytes.as_slice())
+                .map_err(|_| ProtocolError::Malformed)?;
+            validate_device_subcertificate(&certificate)?;
+            if certificate.user_id != user.user_id
+                || certificate.subject_device_id != device.device_id
+                || certificate.subject_public_key != device.identity_public_key
+                || certificate.delegation_role != device.delegation_role
+            {
+                return Err(ProtocolError::Invalid("device delegation"));
+            }
+        } else if device.delegation_role != 0 {
+            return Err(ProtocolError::Invalid("device delegation"));
         }
     }
     Ok(())
@@ -158,6 +174,38 @@ pub fn validate_broadcast_post(post: &v1::BroadcastPost) -> Result<(), ProtocolE
         || post.signature.len() != 64
     {
         return Err(ProtocolError::Invalid("broadcast post"));
+    }
+    Ok(())
+}
+
+pub fn validate_device_subcertificate(
+    certificate: &v1::DeviceSubCertificate,
+) -> Result<(), ProtocolError> {
+    if certificate.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&certificate.user_id)?;
+    validate_id(&certificate.issuer_device_id)?;
+    validate_id(&certificate.issuer_mls_node_id)?;
+    validate_id(&certificate.subject_device_id)?;
+    validate_id(&certificate.subject_mls_node_id)?;
+    if certificate.issuer_device_id == certificate.subject_device_id
+        || certificate.issuer_mls_node_id == certificate.subject_mls_node_id
+        || certificate.issuer_public_key.len() != 32
+        || certificate.subject_public_key.len() != 32
+        || certificate.issuer_public_key.iter().all(|byte| *byte == 0)
+        || certificate.subject_public_key.iter().all(|byte| *byte == 0)
+        || !matches!(certificate.delegation_role, 1 | 2)
+        || certificate.issued_at_ms == 0
+        || certificate.expires_at_ms <= certificate.issued_at_ms
+        || certificate
+            .expires_at_ms
+            .saturating_sub(certificate.issued_at_ms)
+            > MAX_SUBCERTIFICATE_TTL_MS
+        || certificate.signature.len() != 64
+        || certificate.encoded_len() > MAX_MESSAGE_BYTES
+    {
+        return Err(ProtocolError::Invalid("device subcertificate"));
     }
     Ok(())
 }

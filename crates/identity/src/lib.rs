@@ -15,11 +15,15 @@ const PQXDH_IDENTITY_BINDING_DOMAIN: &[u8] = b"links/pqxdh/identity-binding/v1\0
 const PQXDH_SIGNED_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/signed-prekey/v1\0";
 const PQXDH_KEM_PREKEY_DOMAIN: &[u8] = b"links/pqxdh/kem-prekey/v1\0";
 const DEVICE_IDENTITY_DOMAIN: &[u8] = b"links/device/v1\0";
+const DEVICE_SUBCERTIFICATE_DOMAIN: &[u8] = b"links/device-subcertificate/v1\0";
 const RECOVERY_KDF_SALT: &[u8] = b"links/recovery/v1/salt\0";
 const RECOVERY_IDENTITY_KDF_INFO: &[u8] = b"links/recovery/v1/ed25519-identity\0";
 const PASSKEY_IDENTITY_KDF_SALT: &[u8] = b"links/passkey-identity/v1/salt\0";
 const PASSKEY_IDENTITY_KDF_INFO: &[u8] = b"links/passkey-identity/v1/ed25519-identity\0";
 const PASSKEY_IDENTITY_PRF_SALT: &[u8; 32] = b"links/passkey-identity/v1\0\0\0\0\0\0\0";
+
+pub const DEVICE_SUBCERTIFICATE_ROLE_DEVICE: u32 = 1;
+pub const DEVICE_SUBCERTIFICATE_ROLE_ADMIN: u32 = 2;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum IdentityError {
@@ -266,6 +270,112 @@ pub fn device_pairing_transcript(
     bytes.extend(public_key);
     bytes.extend(nonce);
     Ok(bytes)
+}
+
+/// Canonical bytes signed by the issuer device for a delegated device key.
+/// The signature field is excluded, so the same transcript verifies on every
+/// client and server implementation.
+pub fn device_subcertificate_transcript(
+    certificate: &links_protocol::v1::DeviceSubCertificate,
+) -> Result<Vec<u8>, IdentityError> {
+    let mut unsigned = certificate.clone();
+    unsigned.signature = vec![0; 64];
+    links_protocol::validate_device_subcertificate(&unsigned)
+        .map_err(|_| IdentityError::Invalid)?;
+    let user_id = Uuid::parse_str(&certificate.user_id).map_err(|_| IdentityError::Invalid)?;
+    let issuer_device_id =
+        Uuid::parse_str(&certificate.issuer_device_id).map_err(|_| IdentityError::Invalid)?;
+    let issuer_mls_node_id =
+        Uuid::parse_str(&certificate.issuer_mls_node_id).map_err(|_| IdentityError::Invalid)?;
+    let subject_device_id =
+        Uuid::parse_str(&certificate.subject_device_id).map_err(|_| IdentityError::Invalid)?;
+    let subject_mls_node_id =
+        Uuid::parse_str(&certificate.subject_mls_node_id).map_err(|_| IdentityError::Invalid)?;
+    let issuer_public_key: [u8; 32] = certificate
+        .issuer_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| IdentityError::Invalid)?;
+    let subject_public_key: [u8; 32] = certificate
+        .subject_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| IdentityError::Invalid)?;
+    validate_public_key(&issuer_public_key)?;
+    validate_public_key(&subject_public_key)?;
+    let mut bytes = DEVICE_SUBCERTIFICATE_DOMAIN.to_vec();
+    bytes.extend(user_id.as_bytes());
+    bytes.extend(issuer_device_id.as_bytes());
+    bytes.extend(issuer_mls_node_id.as_bytes());
+    bytes.extend(&issuer_public_key);
+    bytes.extend(subject_device_id.as_bytes());
+    bytes.extend(subject_mls_node_id.as_bytes());
+    bytes.extend(&subject_public_key);
+    bytes.extend(certificate.delegation_role.to_be_bytes());
+    bytes.extend(certificate.issued_at_ms.to_be_bytes());
+    bytes.extend(certificate.expires_at_ms.to_be_bytes());
+    Ok(bytes)
+}
+
+/// Issue a device/admin sub-certificate with an Ed25519 identity seed. Native
+/// callers with non-exportable keys should use the shared client-core signer
+/// helper, which signs this same transcript through the platform keystore.
+pub fn issue_device_subcertificate(
+    user_id: Uuid,
+    issuer_device_id: Uuid,
+    issuer_mls_node_id: Uuid,
+    subject_device_id: Uuid,
+    subject_mls_node_id: Uuid,
+    subject_public_key: [u8; 32],
+    delegation_role: u32,
+    issued_at_ms: u64,
+    expires_at_ms: u64,
+    signer: &IdentitySeed,
+) -> Result<links_protocol::v1::DeviceSubCertificate, IdentityError> {
+    let certificate = links_protocol::v1::DeviceSubCertificate {
+        protocol_version: links_protocol::VERSION,
+        user_id: user_id.to_string(),
+        issuer_device_id: issuer_device_id.to_string(),
+        issuer_mls_node_id: issuer_mls_node_id.to_string(),
+        issuer_public_key: signer.public_key().to_vec(),
+        subject_device_id: subject_device_id.to_string(),
+        subject_mls_node_id: subject_mls_node_id.to_string(),
+        subject_public_key: subject_public_key.to_vec(),
+        delegation_role,
+        issued_at_ms,
+        expires_at_ms,
+        signature: vec![0; 64],
+    };
+    let transcript = device_subcertificate_transcript(&certificate)?;
+    let mut signed = certificate;
+    signed.signature = signer.sign(&transcript).to_vec();
+    links_protocol::validate_device_subcertificate(&signed)
+        .map_err(|_| IdentityError::Invalid)?;
+    Ok(signed)
+}
+
+/// Verify issuer signature and validity window. Account membership and issuer
+/// authorization remain server policy checks, not cryptographic assumptions.
+pub fn verify_device_subcertificate(
+    certificate: &links_protocol::v1::DeviceSubCertificate,
+    now_ms: u64,
+) -> Result<(), IdentityError> {
+    links_protocol::validate_device_subcertificate(certificate)
+        .map_err(|_| IdentityError::Authentication)?;
+    if now_ms < certificate.issued_at_ms || now_ms >= certificate.expires_at_ms {
+        return Err(IdentityError::Authentication);
+    }
+    let issuer_public_key: [u8; 32] = certificate
+        .issuer_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| IdentityError::Authentication)?;
+    verify(
+        &issuer_public_key,
+        &device_subcertificate_transcript(certificate)?,
+        &certificate.signature,
+    )
+    .map_err(|_| IdentityError::Authentication)
 }
 
 /// Proof transcript for creating a pseudonymous account or logging in with its
