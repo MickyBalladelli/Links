@@ -145,7 +145,21 @@ pub fn validate_message(message: &v1::Message) -> Result<(), ProtocolError> {
             }
             Ok(())
         }
+        v1::message::Content::BroadcastPost(post) => validate_broadcast_post(post),
     }
+}
+
+pub fn validate_broadcast_post(post: &v1::BroadcastPost) -> Result<(), ProtocolError> {
+    validate_id(&post.post_id)?;
+    validate_id(&post.admin_device_id)?;
+    if post.admin_public_key.len() != 32
+        || post.payload.is_empty()
+        || post.payload.len() > MAX_MESSAGE_BYTES
+        || post.signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("broadcast post"));
+    }
+    Ok(())
 }
 
 pub fn validate_opus_audio_metadata(audio: &v1::OpusAudioMetadata) -> Result<(), ProtocolError> {

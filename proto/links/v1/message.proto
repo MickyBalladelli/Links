@@ -14,5 +14,17 @@ message Message {
     string text = 5;
     MediaMetadata media = 6;
     Receipts receipts = 7;
+    BroadcastPost broadcast_post = 9;
   }
+}
+
+// PRIVATE: only inside an encrypted broadcast Message. The signature binds
+// the conversation, message, sender device, epoch, post ID, and payload.
+message BroadcastPost {
+  string post_id = 1;
+  uint64 epoch = 2;
+  string admin_device_id = 3;
+  bytes admin_public_key = 4;
+  bytes payload = 5;
+  bytes signature = 6;
 }
