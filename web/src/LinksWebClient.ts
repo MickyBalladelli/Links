@@ -74,10 +74,9 @@ export interface WebClientSnapshot {
 export { WebConnectionManager } from './WebConnectionManager'
 export type {
   WebConnectionManagerOptions,
-  WebConnectionState
+  WebConnectionState,
+  WebConnectionTransport
 } from './WebConnectionManager'
-export { WebTransportConnectionManager } from './WebTransportConnectionManager'
-export type { WebConnectionTransport } from './WebConnectionManager'
 
 const MAX_CREDENTIAL_BYTES = 1024
 
