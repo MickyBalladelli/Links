@@ -15,6 +15,46 @@ const MAX_ENDPOINT_BYTES: usize = 512;
 const MIN_OPAQUE_ROOM_NAME_BYTES: usize = 16;
 const MAX_OPAQUE_ROOM_NAME_BYTES: usize = 128;
 
+/// SFU media policy for Links calls. SFrame encrypts the encoded media
+/// payload; the SFU only needs ordinary RTP headers for forwarding and
+/// congestion control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SfuMediaPolicy {
+    route_using_rtp_headers: bool,
+    allow_media_decryption: bool,
+    require_sframe: bool,
+}
+
+impl SfuMediaPolicy {
+    pub const fn encrypted_sframe() -> Self {
+        Self {
+            route_using_rtp_headers: true,
+            allow_media_decryption: false,
+            require_sframe: true,
+        }
+    }
+
+    pub fn validate(self) -> Result<(), SfuError> {
+        if self.route_using_rtp_headers && !self.allow_media_decryption && self.require_sframe {
+            Ok(())
+        } else {
+            Err(SfuError::Invalid)
+        }
+    }
+
+    pub fn routes_using_rtp_headers(self) -> bool {
+        self.route_using_rtp_headers
+    }
+
+    pub fn allows_media_decryption(self) -> bool {
+        self.allow_media_decryption
+    }
+
+    pub fn requires_sframe(self) -> bool {
+        self.require_sframe
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SfuError {
     #[error("invalid SFU configuration")]
@@ -84,6 +124,7 @@ pub struct LiveKitCloudDeployment {
     project: String,
     default_region: String,
     regions: Vec<LiveKitRegionEndpoint>,
+    media_policy: SfuMediaPolicy,
 }
 
 impl LiveKitCloudDeployment {
@@ -98,6 +139,8 @@ impl LiveKitCloudDeployment {
         {
             return Err(SfuError::Invalid);
         }
+        let media_policy = SfuMediaPolicy::encrypted_sframe();
+        media_policy.validate()?;
 
         for (index, endpoint) in regions.iter().enumerate() {
             if regions[..index]
@@ -125,6 +168,7 @@ impl LiveKitCloudDeployment {
             project,
             default_region,
             regions,
+            media_policy,
         })
     }
 
@@ -142,6 +186,10 @@ impl LiveKitCloudDeployment {
 
     pub fn regions(&self) -> &[LiveKitRegionEndpoint] {
         &self.regions
+    }
+
+    pub fn media_policy(&self) -> SfuMediaPolicy {
+        self.media_policy
     }
 
     pub fn healthy_region_count(&self) -> usize {
@@ -224,7 +272,7 @@ impl LiveKitCloudDeployment {
             region: endpoint.region.clone(),
             websocket_url: endpoint.websocket_url.clone(),
             turn_url: endpoint.turn_url.clone(),
-            sframe_required: true,
+            media_policy: self.media_policy,
         })
     }
 }
@@ -238,7 +286,7 @@ pub struct LiveKitRoomPlacement {
     region: String,
     websocket_url: String,
     turn_url: Option<String>,
-    sframe_required: bool,
+    media_policy: SfuMediaPolicy,
 }
 
 impl LiveKitRoomPlacement {
@@ -259,7 +307,11 @@ impl LiveKitRoomPlacement {
     }
 
     pub fn sframe_required(&self) -> bool {
-        self.sframe_required
+        self.media_policy.requires_sframe()
+    }
+
+    pub fn media_policy(&self) -> SfuMediaPolicy {
+        self.media_policy
     }
 }
 

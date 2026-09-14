@@ -568,7 +568,12 @@ Add real-time media after messaging and file media are stable.
   deployment manifest and operator runbook are in `deploy/livekit/` and
   `docs/sfu.md`. External project provisioning, quotas, DNS, and credentials
   remain an operator release gate.
-- [ ] Configure SFUs to route encrypted media frames using unencrypted RTP headers without decrypting media.
+- [x] Configure SFUs to route encrypted media frames using unencrypted RTP headers without decrypting media.
+  `SfuMediaPolicy::encrypted_sframe()` makes header-only forwarding, mandatory
+  SFrame, and disabled media decryption an invariant of every LiveKit
+  deployment and room placement. The provider manifest disables recording;
+  provider-side settings and encrypted-media acceptance checks remain release
+  gates in `deploy/livekit/`.
 - [ ] Add WebTransport (QUIC) as a fallback channel for low-latency media signaling in high-packet-loss environments.
 - [ ] Implement the complete call flow: SDP exchange, MLS key exchange, client-side frame encryption, and SFU streaming.
 - [ ] Add voice/video calls and live streams to mobile first, then Web and desktop.

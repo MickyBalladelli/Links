@@ -4,6 +4,11 @@
 provider: livekit-cloud
 project_id_env: LINKS_LIVEKIT_PROJECT_ID
 require_sframe: true
+media_policy:
+  mode: sframe
+  route_using_rtp_headers: true
+  decrypt_media: false
+  recording: disabled
 default_region: eu
 regions:
   - id: eu

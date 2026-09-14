@@ -23,6 +23,10 @@ requires at least two configured regions, tracks externally supplied health,
 and selects the preferred healthy region with default/healthy fallback. A
 pinned selector fails closed when the requested region is unavailable.
 
+`SfuMediaPolicy::encrypted_sframe()` is attached to every deployment and room
+placement. Its invariant is: route with RTP headers, require SFrame, and never
+allow media decryption. An insecure policy cannot pass validation.
+
 Room names must be opaque random values. Conversation IDs, handles, phone
 numbers, and account IDs must stay out of room names and SFU logs.
 
@@ -32,7 +36,8 @@ SFrame is mandatory in the placement contract. Clients exchange SFrame epoch
 keys through authenticated MLS application control content, then encrypt media
 frames at the WebRTC encoded-frame boundary. The SFU is allowed to route using
 unencrypted RTP headers, but has no plaintext media, MLS state, or SFrame key
-material. The next Phase 9 task configures and verifies that SFU behavior.
+material. Provider recording/egress must remain disabled for these rooms unless
+a separately reviewed encrypted workflow exists.
 
 The call service gives each client a short-lived room token. API keys and
 signing secrets remain server-side in a secret manager. LiveKit is not trusted

@@ -25,6 +25,10 @@ provider secrets or provision an external account.
 - Set `require_sframe: true` and refuse to start a call when the client cannot
   install SFrame transforms. The SFU may route RTP headers, but it must not
   receive plaintext media or MLS/SFrame epoch keys.
+- Apply the `media_policy` values from the example manifest: forward with RTP
+  headers, keep encoded payloads SFrame-encrypted, and disable SFU recording.
+  Treat any provider option that enables media decryption as a deployment
+  failure.
 - Disable recording, egress, and ingress for E2EE rooms unless a separately
   reviewed end-to-end encrypted workflow exists.
 - Keep the MLS control channel on the authenticated Links gateway. LiveKit is
