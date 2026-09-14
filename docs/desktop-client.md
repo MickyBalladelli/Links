@@ -14,8 +14,17 @@ After pairing, the desktop host binds the shared core with:
 
 1. `DesktopClient::core_identity()` for `LocalIdentity` and the MLS credential.
 2. `DesktopClient::signer()` for OpenMLS signing and PQXDH pre-key signatures.
-3. The host's own `ClientCore` crypto, MLS provider, durable store, and network
-   adapters.
+3. A shared `ClientCore` with the host's crypto and MLS providers.
+4. `bind_desktop_text_session()`, which wraps that core in the concrete
+   `RustDesktopMessagingCore` and attaches the native `DesktopSocketFactory`.
+
+`DesktopCoreHost` is the only remaining host-owned seam at this layer. It
+connects the shared core's receive/send coordinators to durable inbox,
+outbox, cursor, directory, and async runtime providers. It receives the real
+`ClientCore`; it must not replace it with UI crypto or a second MLS engine.
+The adapter validates every binary protobuf server frame, creates a fresh
+protocol-v1 Hello, and keeps the bearer token memory-only through the supplied
+token closure.
 
 `DesktopTextSession` adds the desktop lifecycle around that binding. Its
 `DesktopSocketFactory` must return a TLS binary `links.v1` socket; the session

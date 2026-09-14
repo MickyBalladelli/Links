@@ -441,7 +441,7 @@ exchanging encrypted one-to-one text through the same local development stack.
   `/v1/connect` WSS endpoint, requires TLS 1.3 and the negotiated `links.v1`
   subprotocol, rejects redirects and text frames, bounds every binary frame at
   1 MiB, and keeps ping/reconnect/Hello-deadline handling on the socket queue.
-- [ ] Bind the adapter to `DesktopTextSession` and a concrete `DesktopMessagingCore` implementation backed by the shared Rust core.
+- [x] Bind the adapter to `DesktopTextSession` and a concrete `DesktopMessagingCore` implementation backed by the shared Rust core. `bind_desktop_text_session()` now wraps `ClientCore` in `RustDesktopMessagingCore`, validates server protobuf frames, builds fresh Hello frames, and exposes the durable host boundary through `DesktopCoreHost`.
 - [ ] Implement durable macOS providers for MLS state, inbox, outbox, message IDs, conversation sequences, and replay cursor under the profile's Application Support directory.
 - [ ] Implement directory lookup, pre-key claim, message fan-out, Sealed Sender envelope creation, decrypt, durable commit, and QueueAck in the host integration.
 - [ ] Render a message only after the shared core has committed the decrypted message and cursor transaction.

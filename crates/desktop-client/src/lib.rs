@@ -7,6 +7,11 @@
 mod session;
 mod surfaces;
 mod call;
+mod core;
+
+pub use core::{
+    bind_desktop_text_session, DesktopCoreHost, RustDesktopMessagingCore,
+};
 
 pub use call::{
     DesktopCallEpochKey, DesktopCallMediaEngine, DesktopCallMode, DesktopCallMlsKeyProvider,
