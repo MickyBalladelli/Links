@@ -1,6 +1,6 @@
 # Links MLS and TreeKEM core
 
-`crates/client-core/src/mls.rs` now wraps OpenMLS 0.9 for the RFC 9420 group
+`crates/client-core/src/mls.rs` wraps OpenMLS 0.9 for the RFC 9420 group
 ratchet. OpenMLS owns the ratchet tree, epoch secrets, message protection,
 commit validation, and TreeKEM update path. Every physical device is one MLS
 leaf, so a user with several devices has several leaves.
@@ -52,6 +52,14 @@ accepts the commit, call `process_commit()` with the accepted/fanned-back bytes.
 OpenMLS recognizes an own pending commit and merges it once; remote commits are
 verified, checked for newly introduced credentials, and then merged.
 
+`add_group_members()` stages the same TreeKEM operation for many-to-many
+groups. The core permits at most 100 distinct user identities and 100 physical
+device leaves per group. Every new leaf must have a verified Links credential;
+the core rejects duplicate devices, self-adds, untrusted credentials, and
+over-limit commits. Group welcomes and commits use the `GroupWelcome` and
+`GroupCommit` receive variants, so direct-chat updates retain their stricter
+two-user validation.
+
 ## Direct-chat invariant
 
 The client core treats one-to-one conversations as direct MLS groups. A direct
@@ -59,11 +67,19 @@ group is ready for application messages only when it has exactly two distinct
 `user_id` values. A user may have several device leaves, so multi-device
 pairing can produce more than two leaves without becoming a group chat.
 
-The core rejects a third user in add and commit processing, rejects leaf updates
-that transfer a leaf to another user, and fails closed for encryption or
-decryption while the group has fewer than two users. A direct group may be
-temporarily inactive after a member leaves; it cannot send or receive messages
-until it again has the two-user shape.
+The direct control path rejects a third user in add and commit processing,
+rejects leaf updates that transfer a leaf to another user, and fails closed for
+encryption or decryption while the group has fewer than two users. A direct
+group may be temporarily inactive after a member leaves; it cannot send or
+receive messages until it again has the two-user shape.
+
+Many-to-many groups use the generic MLS control path and are ready when at
+least two verified users remain, the local user is present, and the group stays
+within the 100-user/100-device bounds. `send_group_message()` adds missing
+verified device leaves, stages and delivers any pending TreeKEM commit, then
+encrypts the application message once and fans out independently sealed
+envelopes to every active group device. `receive_available()` applies group
+welcomes/commits before decrypting those envelopes.
 
 The host storage implementation must make OpenMLS state writes durable and
 transaction-compatible with the application outbox. A process crash must not

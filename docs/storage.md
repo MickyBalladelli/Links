@@ -38,10 +38,11 @@ removal also needs MLS rekeying and queue/session invalidation before release.
 leaves. Owner may grant/remove any role. Admin may add/remove members but cannot
 change admins or owners. Members may leave themselves but cannot grant roles.
 The final owner cannot leave or be demoted. Direct groups allow at most two account
-members; each account may still have multiple MLS device leaves. Repository
-mutations serialize on the group row; deferred database constraints also reject
-ownerless or over-sized direct groups. Direct SQL writers must use the same
-group-lock discipline for concurrent membership changes.
+members; many-to-many MLS groups are bounded in the client core at 100 account
+users and 100 physical device leaves. Repository mutations serialize on the group
+row; deferred database constraints also reject ownerless or over-sized direct
+groups. Direct SQL writers must use the same group-lock discipline for concurrent
+membership changes.
 Database credentials are privileged: this is not row-level tenant security. Only
 the trusted account service may connect; API clients never receive DB credentials.
 Actor IDs must come from authenticated service context, never user-supplied bodies.

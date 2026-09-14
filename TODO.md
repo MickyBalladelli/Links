@@ -489,7 +489,9 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
 
 ### Many-to-many groups
 
-- [ ] Enable MLS group messaging for many-to-many conversations.
+- [x] Enable MLS group messaging for many-to-many conversations.
+  Shared client core now supports bounded many-to-many TreeKEM groups, group
+  welcomes/commits, and encrypted group send/receive fan-out.
 - [ ] Implement group membership updates, device changes, epoch processing, and RBAC.
 - [ ] Extend the send and receive flows to many-to-many groups.
 

@@ -856,6 +856,10 @@ fn validate_staged_commit<V: MlsCredentialVerifier>(
 ) -> Result<(), CoreError> {
     let mut users = verified_group_user_counts(verifier, group)?;
     ensure_group_user_limit(&users, max_users)?;
+    let mut leaf_count = group.members().count();
+    if leaf_count > MAX_GROUP_DEVICES {
+        return Err(CoreError::Authentication);
+    }
     let mut allowed_users = users.keys().copied().collect::<Vec<_>>();
 
     for proposal in staged.queued_proposals() {
@@ -870,6 +874,7 @@ fn validate_staged_commit<V: MlsCredentialVerifier>(
                 let binding =
                     verify_credential(verifier, &member.credential, &member.signature_key)?;
                 decrement_user(&mut users, binding.user_id)?;
+                leaf_count = leaf_count.checked_sub(1).ok_or(CoreError::Authentication)?;
             }
             _ => return Err(CoreError::Authentication),
         }
@@ -880,6 +885,7 @@ fn validate_staged_commit<V: MlsCredentialVerifier>(
         let member = group.member_at(index).ok_or(CoreError::Authentication)?;
         let binding = verify_credential(verifier, &member.credential, &member.signature_key)?;
         decrement_user(&mut users, binding.user_id)?;
+        leaf_count = leaf_count.checked_sub(1).ok_or(CoreError::Authentication)?;
     }
 
     for proposal in staged.add_proposals() {
@@ -891,6 +897,7 @@ fn validate_staged_commit<V: MlsCredentialVerifier>(
             allowed_users.push(binding.user_id);
         }
         increment_user(&mut users, binding.user_id);
+        leaf_count = leaf_count.checked_add(1).ok_or(CoreError::Authentication)?;
     }
 
     for proposal in staged.update_proposals() {
@@ -916,7 +923,11 @@ fn validate_staged_commit<V: MlsCredentialVerifier>(
             return Err(CoreError::Authentication);
         }
     }
-    ensure_group_user_limit(&users, max_users)
+    ensure_group_user_limit(&users, max_users)?;
+    if leaf_count > MAX_GROUP_DEVICES {
+        return Err(CoreError::Authentication);
+    }
+    Ok(())
 }
 
 fn verified_group_user_counts<V: MlsCredentialVerifier>(
