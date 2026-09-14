@@ -23,6 +23,11 @@ public final class AndroidTextMessaging {
         /** Call links-client-core::send::send_text and persist its exact outbox result. */
         void sendText(String conversationId, String recipientUserId, String text,
                 ConnectionManager connection) throws Exception;
+        /** Surface-aware route; channel publishers may override this for broadcast MLS. */
+        default void sendSurfaceText(String surfaceId, String conversationId, String text,
+                ConnectionManager connection) throws Exception {
+            sendText(conversationId, surfaceId, text, connection);
+        }
         /** Encode and encrypt voice bytes through the shared Rust client core. */
         default AndroidVoiceNotes.EncryptedVoiceNote encryptVoiceNote(byte[] opusContainer,
                 String attachmentId, long durationMs, AndroidVoiceNotes.Profile profile)

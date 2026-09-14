@@ -1,6 +1,8 @@
 use links_client_core::{
     attachments::{decrypt_large_file, validate_large_file_metadata, LargeFileEncryptor},
-    protocol, CoreError,
+    protocol,
+    surfaces::SurfaceProfile,
+    CoreError,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -553,6 +555,18 @@ pub trait DesktopMessagingCore: Send {
         text: &str,
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError>;
+    /// Surface-aware text hook. A core adapter can route channel publishing,
+    /// business inboxes, and bot conversations to their specialized MLS
+    /// coordinators; the default keeps compatibility with direct text cores.
+    fn send_surface_text(
+        &mut self,
+        surface_id: &str,
+        conversation_id: &str,
+        text: &str,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        self.send_text(conversation_id, surface_id, text, transport)
+    }
     /// Encode the private fixed-size BlurHash from normalized RGB pixels.
     fn encode_image_blur_hash(
         &mut self,
@@ -712,6 +726,28 @@ impl<C: DesktopMessagingCore + 'static, F: DesktopSocketFactory> DesktopTextSess
             now,
         };
         core.send_text(conversation_id, recipient_user_id, text, &mut transport)
+    }
+
+    /// Send through a validated channel, business, or bot surface.
+    pub fn send_surface_text(
+        &mut self,
+        now: Instant,
+        surface: &SurfaceProfile,
+        conversation_id: &str,
+        text: &str,
+    ) -> Result<(), CoreError> {
+        surface.validate()?;
+        if !surface.can_send() {
+            return Err(CoreError::Authentication);
+        }
+        protocol::validate_id(conversation_id)?;
+        SurfaceProfile::validate_text(text)?;
+        let mut core = self.core.lock().map_err(|_| CoreError::Provider)?;
+        let mut transport = ManagerTransport {
+            manager: &mut self.manager,
+            now,
+        };
+        core.send_surface_text(surface.surface_id(), conversation_id, text, &mut transport)
     }
 
     /// Encrypt normalized image bytes. The host supplies decoded RGB pixels so

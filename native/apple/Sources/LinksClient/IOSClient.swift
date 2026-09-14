@@ -39,6 +39,10 @@ public protocol SharedClientCore: AnyObject {
         throws -> IOSCoreFrameResult
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
+    /// Surface-aware route. Channel publishers can implement this with the
+    /// broadcast MLS publisher while the default keeps direct-core support.
+    func sendSurfaceText(surfaceID: String, conversationID: String, text: String,
+                         transport: any IOSCoreTransport) throws
     /// Encode normalized RGB pixels with the shared fixed BlurHash contract.
     func encodeImageBlurHash(rgbPixels: Data, width: Int, height: Int) throws -> String
     /// Encrypt normalized image bytes; metadata stays inside MLS.

@@ -46,6 +46,13 @@ export interface WebMessagingCore extends WebCoreTransport {
     text: string,
     transport: WebCoreTransport
   ): void
+  /** Surface-aware route, channel publishers can use broadcast MLS here. */
+  sendSurfaceText?(
+    surfaceID: string,
+    conversationID: string,
+    text: string,
+    transport: WebCoreTransport
+  ): void
   encodeImageBlurHash?(
     rgbPixels: Uint8Array,
     width: number,

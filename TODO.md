@@ -538,7 +538,10 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
   key, and bounded validity window under a domain-separated Ed25519 signature.
   Clients verify against a pinned authority key; the account service stores
   only the public badge and supports trusted issue/revoke hooks.
-- [ ] Build channel, business, and bot client surfaces for Android, iOS, Web, and desktop.
+- [x] Build channel, business, and bot client surfaces for Android, iOS, Web, and desktop.
+  Shared surface profiles define channel/business/bot roles and capabilities;
+  platform hosts expose one connection/send/receive facade over the existing
+  Android, iOS, Web, and desktop shared-core transports.
 
 ---
 

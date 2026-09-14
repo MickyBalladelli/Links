@@ -5,6 +5,7 @@
 //! the MLS credential, and a signing handle to `links-client-core`.
 
 mod session;
+mod surfaces;
 
 pub use session::{
     DesktopAccessTokenProvider, DesktopConnectionManager, DesktopConnectionState,
@@ -18,6 +19,8 @@ pub use session::{
     DESKTOP_LARGE_FILE_CIPHERTEXT_CHUNK_BYTES, DESKTOP_MAX_BACKOFF_MS, DESKTOP_MAX_FRAME_BYTES,
     DESKTOP_MAX_TEXT_BYTES, DESKTOP_STABLE_CONNECTION_MS,
 };
+pub use surfaces::DesktopSurfaceClient;
+pub use links_client_core::surfaces::{SurfaceKind, SurfaceProfile, SurfaceRole};
 
 use links_client_core::{
     identity::{IdentitySeed, LocalIdentity},
