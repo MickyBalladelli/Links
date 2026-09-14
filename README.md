@@ -16,7 +16,7 @@ remain open.
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, WebRTC SDP/ICE signal validation, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, validated channel/business/bot surface roles, and WebRTC SDP/ICE frame helpers. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, bounded SFrame epoch-key schedules, validated channel/business/bot surface roles, and WebRTC SDP/ICE frame helpers. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, and shared-core surface contracts. |
 | `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, and channel/business/bot surface adapter. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
@@ -61,6 +61,7 @@ remain open.
 | `web/src/WebImages.ts` | Web image normalization, encrypted transfer, ciphertext cache, and render boundary. |
 | `web/src/WebRtcFileTransfer.ts` | Browser WebRTC DataChannel ciphertext streaming, resume, backpressure, and integrity boundary. |
 | `web/src/WebRtcSession.ts` | Browser WebRTC offer/answer and ICE exchange over authenticated `links.v1` signaling. |
+| `web/src/WebRtcSFrame.ts` | Native WebRTC Encoded Transform SFrame binding with non-extractable AES-128-GCM key rotation. |
 | `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
 | `crates/desktop-client/src/session.rs` | Desktop image encryption, transfer, ciphertext cache, and render boundary. |
@@ -68,6 +69,7 @@ remain open.
 | `docs/video-transcoding.md` | Native VideoToolbox/MediaCodec profiles and hardware-only transcode boundary. |
 | `docs/p2p-file-transfer.md` | WebRTC DataChannel ciphertext-only transfer, resume, backpressure, and integrity contract. |
 | `docs/webrtc-signaling.md` | Authenticated live-device SDP/ICE exchange, gateway routing, and browser session contract. |
+| `docs/sframe.md` | Native WebRTC SFrame transform contract, key custody, rotation, and browser capability gate. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |
 | `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |

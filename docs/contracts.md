@@ -95,6 +95,14 @@ descriptions, queues early ICE candidates until a remote description exists,
 and exposes only the established peer connection/DataChannel to the media
 host.
 
+SFrame media uses the native WebRTC Encoded Transform API. The browser host
+must install an MLS epoch key as a non-extractable AES-GCM `CryptoKey`, attach
+the native SFrame encryptor to every sending media transceiver and the native
+SFrame decryptor to every receiving media transceiver before negotiation. The
+controller retains at most the current and immediately previous epoch for
+rotation overlap. Unsupported native SFrame APIs or missing keys fail closed;
+there is no plaintext JavaScript frame-transform fallback.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer

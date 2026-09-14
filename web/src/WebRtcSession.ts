@@ -10,6 +10,14 @@ import type {
   WebMessagingCore,
   WebReceivedTextMessage
 } from './WebTextMessaging'
+import {
+  WebRtcSFrameController
+} from './WebRtcSFrame'
+import type {
+  WebRtcSFrameControllerOptions,
+  WebRtcSFrameEpochKey,
+  WebRtcSFrameTransformError
+} from './WebRtcSFrame'
 
 export type WebRtcSignalKind = 'offer' | 'answer' | 'ice-candidate'
 export type WebRtcSessionState = 'stopped' | 'connecting' | 'connected' | 'failed'
@@ -39,6 +47,7 @@ export interface WebRtcSessionOptions {
   onState?: (state: WebRtcSessionState) => void
   onDataChannel?: (channel: RTCDataChannel) => void
   onTextMessage?: (message: WebReceivedTextMessage) => void
+  onSFrameError?: (error: WebRtcSFrameTransformError) => void
   onFailure?: () => void
 }
 
@@ -62,6 +71,8 @@ export class WebRtcSession implements WebCoreTransport {
   private pendingCandidates: RTCIceCandidateInit[] = []
   private currentState: WebRtcSessionState = 'stopped'
   private coreFailed = false
+  private readonly onSFrameErrorCallback: (error: WebRtcSFrameTransformError) => void
+  private sframeController: WebRtcSFrameController | null = null
 
   constructor(options: WebRtcSessionOptions) {
     if (typeof options.endpoint !== 'string' || options.core === null ||
@@ -82,6 +93,7 @@ export class WebRtcSession implements WebCoreTransport {
     this.onStateCallback = options.onState ?? (() => {})
     this.onDataChannelCallback = options.onDataChannel ?? (() => {})
     this.onTextMessageCallback = options.onTextMessage ?? (() => {})
+    this.onSFrameErrorCallback = options.onSFrameError ?? (() => {})
     this.onFailureCallback = options.onFailure ?? (() => {})
   }
 
@@ -99,6 +111,36 @@ export class WebRtcSession implements WebCoreTransport {
 
   get peerConnection(): RTCPeerConnection | null {
     return this.peer
+  }
+
+  get sframe(): WebRtcSFrameController | null {
+    return this.sframeController
+  }
+
+  /** Enable native SFrame before offer/answer negotiation. */
+  enableSFrame(options: WebRtcSFrameControllerOptions = {}): WebRtcSFrameController {
+    const peer = this.peer ?? this.createPeer(false)
+    if (this.sframeController === null) {
+      this.sframeController = new WebRtcSFrameController(peer, {
+        ...options,
+        onError: error => this.notify(() => {
+          options.onError?.(error)
+          this.onSFrameErrorCallback(error)
+        })
+      })
+    }
+    return this.sframeController
+  }
+
+  /** Install the current MLS epoch media key into all attached transforms. */
+  async installSFrameKey(epochKey: WebRtcSFrameEpochKey): Promise<void> {
+    await this.enableSFrame().installKey(epochKey)
+  }
+
+  /** Attach SFrame to all media transceivers created so far. */
+  async attachSFrameTransforms(): Promise<void> {
+    if (this.sframeController === null) throw new Error('SFrame is not enabled')
+    await this.sframeController.attachTransceivers()
   }
 
   start(): void {
@@ -147,6 +189,9 @@ export class WebRtcSession implements WebCoreTransport {
     const channel = dataChannelLabel === undefined
       ? null
       : peer.createDataChannel(dataChannelLabel, { ordered: true })
+    if (this.sframeController !== null) {
+      await this.sframeController.attachTransceivers()
+    }
     const offer = await peer.createOffer()
     await peer.setLocalDescription(offer)
     const description = peer.localDescription
@@ -188,6 +233,9 @@ export class WebRtcSession implements WebCoreTransport {
   private async acceptOffer(sdp: string): Promise<void> {
     const peer = this.createPeer(false)
     await peer.setRemoteDescription({ type: 'offer', sdp })
+    if (this.sframeController !== null) {
+      await this.sframeController.attachTransceivers()
+    }
     await this.flushCandidates(peer)
     const answer = await peer.createAnswer()
     await peer.setLocalDescription(answer)
@@ -204,6 +252,9 @@ export class WebRtcSession implements WebCoreTransport {
       throw new Error('Unexpected WebRTC answer')
     }
     await peer.setRemoteDescription({ type: 'answer', sdp })
+    if (this.sframeController !== null) {
+      await this.sframeController.attachTransceivers()
+    }
     await this.flushCandidates(peer)
   }
 
@@ -338,6 +389,8 @@ export class WebRtcSession implements WebCoreTransport {
     const peer = this.peer
     this.peer = null
     this.pendingCandidates = []
+    this.sframeController?.close()
+    this.sframeController = null
     peer?.close()
   }
 

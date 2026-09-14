@@ -23,6 +23,7 @@ pub mod proof_of_work;
 pub mod receive;
 pub mod send;
 pub mod sequences;
+pub mod sframe;
 pub mod sync;
 pub mod surfaces;
 pub mod video;
@@ -55,6 +56,8 @@ pub enum CoreError {
     InvalidSync,
     #[error("invalid conversation sequence")]
     InvalidSequence,
+    #[error(transparent)]
+    SFrame(#[from] sframe::SFrameError),
     #[error("provider failed")]
     Provider,
 }

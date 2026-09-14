@@ -553,7 +553,10 @@ Add real-time media after messaging and file media are stable.
   `links.v1` carries bounded offer, answer, and ICE signals between live
   authenticated device sockets; the browser `WebRtcSession` owns the
   RTCPeerConnection offer/answer flow and candidate exchange.
-- [ ] Implement SFrame frame-level encryption hooks through the WebRTC Encoded Transform API.
+- [x] Implement SFrame frame-level encryption hooks through the WebRTC Encoded Transform API.
+  `WebRtcSFrameController` binds the browser's native per-frame SFrame
+  encryptor/decryptor to RTP senders and receivers, keeps only current and
+  previous non-extractable AES-128-GCM keys, and fails closed when unsupported.
 - [ ] Transmit SFrame epoch keys through the MLS control channel.
 - [ ] Deploy managed global SFU clusters using LiveKit or Mediasoup.
 - [ ] Configure SFUs to route encrypted media frames using unencrypted RTP headers without decrypting media.
