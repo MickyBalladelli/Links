@@ -414,7 +414,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   The macOS account screen uses `IOSOTPClient` for HTTPS-only `start` and
   `finish` calls, keeps phone/code input memory-only, and stores the returned
   public MLS credential with the account metadata.
-- [ ] Persist only public account/device metadata, MLS credentials, and encrypted local state; keep the bearer token memory-only.
+- [x] Persist only public account/device metadata, MLS credentials, and encrypted local state; keep the bearer token memory-only.
+  `IOSClient` encodes only public identity/account metadata and the MLS
+  credential in its profile-scoped metadata record. `MacOSEncryptedStateStore`
+  encrypts macOS shell state with AES-GCM under profile-scoped Application
+  Support storage and a Keychain-held key. Bearer sessions remain an
+  in-memory-only `AuthenticatedSession`.
 - [ ] Generate a fresh non-nil `user_id`, `device_id`, and `mls_node_id` for every new local profile; reject accidental identity reuse.
 - [ ] Generate and upload the initial pre-key inventory, claim and verify recipient pre-keys, and initialize the first two-user MLS conversation through the shared client core.
 

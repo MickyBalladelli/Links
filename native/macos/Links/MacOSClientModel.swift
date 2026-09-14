@@ -5,7 +5,7 @@ import AppKit
 import LinksClient
 import LinksKeyStore
 
-struct LinksMacOSMessage: Identifiable, Equatable {
+struct LinksMacOSMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let text: String
     let isOutgoing: Bool
@@ -13,7 +13,7 @@ struct LinksMacOSMessage: Identifiable, Equatable {
     let senderDeviceID: String?
 }
 
-struct LinksMacOSConversation: Identifiable, Equatable {
+struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     let id: String
     var title: String
     let recipientUserID: String
@@ -34,6 +34,11 @@ private final class IOSClientBox: @unchecked Sendable {
     init(_ client: IOSClient) {
         self.client = client
     }
+}
+
+private struct LinksMacOSPersistedState: Codable {
+    let conversations: [LinksMacOSConversation]
+    let selectedConversationID: String?
 }
 
 @MainActor
@@ -68,6 +73,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private let client: IOSClient?
     private let authClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
+    private var encryptedStateStore: MacOSEncryptedStateStore?
     private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
     private let identityQueue = DispatchQueue(
@@ -78,6 +84,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     init() {
         do {
             let profile = try Self.profileFromArguments()
+            encryptedStateStore = try? MacOSEncryptedStateStore(profile: profile)
             let provider = MacOSKeychainSeedProvider(profile: profile)
             let identityStore = HardwareIdentityStore(seedProvider: provider)
             let loadedClient = try IOSClient(
@@ -96,11 +103,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 otpClient = nil
                 authEndpointText = "Invalid local auth endpoint"
             }
+            restoreLocalState()
             refreshClientState()
         } catch {
             client = nil
             authClient = nil
             otpClient = nil
+            encryptedStateStore = nil
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
@@ -397,6 +406,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         conversations.append(conversation)
         selectedConversationID = conversation.id
         actionError = nil
+        persistLocalState()
         return true
     }
 
@@ -427,6 +437,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 senderDeviceID: nil))
             composerText = ""
             actionError = nil
+            persistLocalState()
         } catch {
             actionError = "Message was not sent. Check the connection."
         }
@@ -477,6 +488,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 messages: [received]))
         }
         selectedConversationID = message.conversationID
+        persistLocalState()
     }
 
     nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging) {
@@ -498,6 +510,58 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deviceStatus = "Device \(shortID(deviceID)) · Node \(shortID(mlsNodeID))"
         } else {
             deviceStatus = "No device enrolled"
+        }
+    }
+
+    private func restoreLocalState() {
+        guard let encryptedStateStore else { return }
+        do {
+            guard let encoded = try encryptedStateStore.read() else { return }
+            let state = try PropertyListDecoder().decode(
+                LinksMacOSPersistedState.self, from: encoded)
+            guard state.conversations.count <= 5_000,
+                  state.conversations.allSatisfy(isValidConversation) else {
+                throw MacOSEncryptedStateStore.StateError.invalidState
+            }
+            conversations = state.conversations
+            selectedConversationID = state.selectedConversationID.flatMap { selectedID in
+                state.conversations.contains(where: { $0.id == selectedID }) ? selectedID : nil
+            }
+        } catch {
+            conversations = []
+            selectedConversationID = nil
+            actionError = "Encrypted local state could not be restored."
+        }
+    }
+
+    private func persistLocalState() {
+        guard let encryptedStateStore else { return }
+        let state = LinksMacOSPersistedState(
+            conversations: conversations,
+            selectedConversationID: selectedConversationID)
+        do {
+            let encoded = try PropertyListEncoder().encode(state)
+            try encryptedStateStore.write(encoded)
+        } catch {
+            actionError = "Encrypted local state could not be saved."
+        }
+    }
+
+    private func isValidConversation(_ conversation: LinksMacOSConversation) -> Bool {
+        guard IOSClient.isCanonicalUUID(conversation.id),
+              !conversation.title.isEmpty,
+              conversation.title.utf8.count <= 256,
+              conversation.recipientUserID.isEmpty
+                  || IOSClient.isCanonicalUUID(conversation.recipientUserID),
+              conversation.messages.count <= 10_000 else {
+            return false
+        }
+        return conversation.messages.allSatisfy { message in
+            !message.text.isEmpty
+                && message.text.utf8.count <= IOSDirectMessaging.maximumTextBytes
+                && message.sentAt.timeIntervalSince1970.isFinite
+                && (message.senderDeviceID == nil
+                    || IOSClient.isCanonicalUUID(message.senderDeviceID!))
         }
     }
 

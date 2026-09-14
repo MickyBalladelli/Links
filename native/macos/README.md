@@ -95,6 +95,17 @@ The package's `LINKS_IDENTITY_LIB_DIR` environment variable can point at a
 matching Rust target/profile directory when the default `target/debug` path is
 not appropriate.
 
+## Local persistence
+
+`IOSClient` stores only the hardware handle, public key, account/device IDs,
+account handle, and MLS credential in the profile-scoped UserDefaults record.
+The bearer session is held only in memory and is never encoded in that record.
+macOS shell state is serialized as ciphertext under the profile's Application
+Support directory. `MacOSEncryptedStateStore` uses AES-GCM and keeps its
+profile-scoped 256-bit key in Keychain; invalid or tampered state is ignored.
+The shared core remains responsible for its own encrypted MLS, inbox, outbox,
+and cursor state when a concrete durable provider is installed.
+
 ## Identity seed custody
 
 The macOS client passes `MacOSKeychainSeedProvider` into
