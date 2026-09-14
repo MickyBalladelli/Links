@@ -600,7 +600,14 @@ Add real-time media after messaging and file media are stable.
 
 Add programmable features only after the account, permission, and messaging boundaries are stable.
 
-- [ ] Embed a client-side WebAssembly (WASM) sandbox runtime in mobile and desktop clients.
+- [x] Embed a client-side WebAssembly (WASM) sandbox runtime in mobile and desktop clients.
+  `links-client-core::sandbox` uses the native `wasmi` interpreter with strict
+  import allowlisting, fresh guest memory per invocation, 16 MiB memory,
+  256 KiB output, 64 KiB input, 2 MiB module, recursion, and fuel limits.
+  iOS and Android expose the runtime through the native FFI handles; desktop
+  re-exports it as `DesktopMiniAppSandbox`. No WASI, network, filesystem,
+  clock, randomness, identity, MLS, or key capability is available. See
+  `docs/mini-app-sandbox.md`.
 - [ ] Implement a fine-grained Mini-App permission SDK that restricts direct network calls and isolates cryptographic keys.
 - [ ] Expose Mini-Apps and bots through organization account controls.
 

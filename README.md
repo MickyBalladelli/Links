@@ -16,9 +16,9 @@ remain open.
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, WebRTC SDP/ICE signal validation, MLS-encrypted SFrame control validation, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, bounded SFrame epoch-key schedules, MLS-encrypted SFrame key send/receive control, validated channel/business/bot surface roles, and WebRTC SDP/ICE frame helpers. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, bounded SFrame epoch-key schedules, MLS-encrypted SFrame key send/receive control, validated channel/business/bot surface roles, WebRTC SDP/ICE frame helpers, and native wasmi mini-app sandbox execution. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, and shared-core surface contracts. |
-| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, call/live-stream session, and channel/business/bot surface adapter. |
+| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, call/live-stream session, native mini-app sandbox facade, and channel/business/bot surface adapter. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
@@ -26,7 +26,7 @@ remain open.
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud SFU region/health/room placement, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
 | `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, transient cross-region WebRTC signaling, and durable publish adapters for cross-region gateway and channel routing. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, encrypted voice/video/live-stream sessions, internal text shells, and channel/business/bot surface hosts. |
+| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, encrypted voice/video/live-stream sessions, native WASM mini-app sandbox hosts, internal text shells, and channel/business/bot surface hosts. |
 | `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `crates/server-store/migrations/0007_pseudonymous_accounts.sql` | Allows username-only accounts to omit phone-derived authentication subjects. |
@@ -78,6 +78,7 @@ remain open.
 | `docs/sframe.md` | Native WebRTC SFrame transform contract, key custody, rotation, and browser capability gate. |
 | `docs/call-flow.md` | End-to-end SFU call sequence, MLS key exchange, SDP/ICE, SFrame, and teardown contract. |
 | `docs/platform-calls.md` | Mobile-first call/live-stream adapters and Web/desktop rollout contract. |
+| `docs/mini-app-sandbox.md` | Native wasmi runtime, fixed guest ABI, resource limits, and capability boundary for mini-apps. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |
@@ -89,6 +90,7 @@ remain open.
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileTransfer.java` | Android bounded ChaCha20-Poly1305 staging for video/files. |
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileSession.java` | Android upload receipt, private MLS send, and decrypt orchestration. |
 | `native/android/client/src/main/java/ai/links/app/AndroidCallSession.java` | Android voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
+| `native/android/client/src/main/java/ai/links/app/AndroidMiniAppSandbox.java` | Android facade for the opaque native WASM sandbox runtime. |
 
 ## Build and test
 
