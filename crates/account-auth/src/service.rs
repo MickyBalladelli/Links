@@ -7,7 +7,9 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
 use links_protocol::{self, v1, validate_handle};
-use links_server_store::postgres::{GroupKind, RelationalStore, Role};
+use links_server_store::postgres::{
+    GroupKind, OrganizationControls, RelationalStore, Role,
+};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -294,6 +296,32 @@ pub struct GroupMemberResponse {
 pub struct GroupMembersResponse {
     pub group_id: Uuid,
     pub members: Vec<GroupMemberResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrganizationControlsRequest {
+    pub mini_apps_enabled: bool,
+    pub bots_enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct OrganizationControlsResponse {
+    pub organization_id: Uuid,
+    pub mini_apps_enabled: bool,
+    pub bots_enabled: bool,
+    pub revision: u64,
+}
+
+impl From<OrganizationControls> for OrganizationControlsResponse {
+    fn from(controls: OrganizationControls) -> Self {
+        Self {
+            organization_id: controls.organization_id,
+            mini_apps_enabled: controls.mini_apps_enabled,
+            bots_enabled: controls.bots_enabled,
+            revision: controls.revision,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1280,6 +1308,37 @@ impl AccountAuth {
             owner_id: account.user_id,
             kind: kind.as_str().to_owned(),
         })
+    }
+
+    /// Return feature exposure for the authenticated organization device.
+    pub async fn organization_controls(
+        &self,
+        token: &str,
+    ) -> Result<OrganizationControlsResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        Ok(RelationalStore::from_pool(self.pool.clone())
+            .organization_controls(account.user_id, account.device_id)
+            .await?
+            .into())
+    }
+
+    /// Owners and organization admins control whether Mini-Apps and bots are
+    /// exposed to the organization. The store checks the account kind and role.
+    pub async fn set_organization_controls(
+        &self,
+        token: &str,
+        request: OrganizationControlsRequest,
+    ) -> Result<OrganizationControlsResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        Ok(RelationalStore::from_pool(self.pool.clone())
+            .set_organization_controls(
+                account.user_id,
+                account.device_id,
+                request.mini_apps_enabled,
+                request.bots_enabled,
+            )
+            .await?
+            .into())
     }
 
     /// Return an authenticated membership snapshot. Role changes are applied

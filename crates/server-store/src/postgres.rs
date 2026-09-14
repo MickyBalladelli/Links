@@ -956,6 +956,105 @@ impl RelationalStore {
         tx.commit().await?;
         Ok(members)
     }
+
+    /// Read organization feature gates for an active organization device.
+    /// Missing rows are repaired to the safe disabled default.
+    pub async fn organization_controls(
+        &self,
+        organization_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<OrganizationControls, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let account = sqlx::query(
+            "SELECT a.account_kind FROM accounts a JOIN devices d ON d.user_id=a.user_id WHERE a.user_id=$1 AND d.device_id=$2 AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR SHARE",
+        )
+        .bind(organization_id)
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::Forbidden)?;
+        if account.get::<String, _>("account_kind") != AccountKind::Organization.as_str() {
+            return Err(StoreError::Forbidden);
+        }
+        sqlx::query(
+            "INSERT INTO organization_controls (organization_id) VALUES ($1) ON CONFLICT (organization_id) DO NOTHING",
+        )
+        .bind(organization_id)
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query(
+            "SELECT mini_apps_enabled,bots_enabled,revision FROM organization_controls WHERE organization_id=$1",
+        )
+        .bind(organization_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let revision = row.get::<i64, _>("revision");
+        if revision <= 0 {
+            return Err(StoreError::CorruptObject);
+        }
+        let controls = OrganizationControls {
+            organization_id,
+            mini_apps_enabled: row.get("mini_apps_enabled"),
+            bots_enabled: row.get("bots_enabled"),
+            revision: revision as u64,
+        };
+        tx.commit().await?;
+        Ok(controls)
+    }
+
+    /// Owners and delegated organization admins may change feature exposure.
+    /// A revision lets clients reject stale control responses.
+    pub async fn set_organization_controls(
+        &self,
+        organization_id: Uuid,
+        device_id: Uuid,
+        mini_apps_enabled: bool,
+        bots_enabled: bool,
+    ) -> Result<OrganizationControls, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let account = sqlx::query(
+            "SELECT a.account_kind,d.delegation_role FROM accounts a JOIN devices d ON d.user_id=a.user_id WHERE a.user_id=$1 AND d.device_id=$2 AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR UPDATE OF a",
+        )
+        .bind(organization_id)
+        .bind(device_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::Forbidden)?;
+        if account.get::<String, _>("account_kind") != AccountKind::Organization.as_str()
+            || !matches!(
+                account.get::<String, _>("delegation_role").as_str(),
+                "owner" | "admin"
+            )
+        {
+            return Err(StoreError::Forbidden);
+        }
+        sqlx::query(
+            "INSERT INTO organization_controls (organization_id) VALUES ($1) ON CONFLICT (organization_id) DO NOTHING",
+        )
+        .bind(organization_id)
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query(
+            "UPDATE organization_controls SET mini_apps_enabled=$2,bots_enabled=$3,revision=revision+1,updated_at=now() WHERE organization_id=$1 RETURNING mini_apps_enabled,bots_enabled,revision",
+        )
+        .bind(organization_id)
+        .bind(mini_apps_enabled)
+        .bind(bots_enabled)
+        .fetch_one(&mut *tx)
+        .await?;
+        let revision = row.get::<i64, _>("revision");
+        if revision <= 0 {
+            return Err(StoreError::CorruptObject);
+        }
+        let controls = OrganizationControls {
+            organization_id,
+            mini_apps_enabled: row.get("mini_apps_enabled"),
+            bots_enabled: row.get("bots_enabled"),
+            revision: revision as u64,
+        };
+        tx.commit().await?;
+        Ok(controls)
+    }
 }
 
 #[async_trait]
