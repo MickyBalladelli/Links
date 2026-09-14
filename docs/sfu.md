@@ -10,6 +10,11 @@ Decentralized SFU endpoint discovery uses the signed DHT contract in
 is documented in [DHT SFU discovery](sfu-discovery.md); managed LiveKit Cloud
 placement remains the default centralized path.
 
+Open and token-incentivized relay routing uses the same SFrame-only policy and
+is documented in [open media relays](media-relays.md). Relay records are
+discovered by region; token relay admission and usage receipts stay outside
+the DHT.
+
 ## Placement flow
 
 ```text

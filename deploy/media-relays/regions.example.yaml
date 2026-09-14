@@ -1,0 +1,51 @@
+# Open and token-incentivized WebRTC media relay deployment contract.
+# This file contains names only; keep keys and provider credentials in the
+# deployment secret manager. It does not provision relay nodes or a token
+# settlement system.
+dht:
+  implementation: libp2p-kademlia
+  key_namespace: links/media-relay/dht-key/v1
+  record_namespace: links/media-relay/record-signature/v1
+  max_records_per_lookup: 16
+  max_record_bytes: 8192
+  max_record_ttl_ms: 600000
+  require_authenticated_peers: true
+  require_tls_or_noise: true
+  regions:
+    - id: eu
+      bootstrap_peers_env: LINKS_MEDIA_RELAY_DHT_EU_BOOTSTRAP_PEERS
+    - id: us
+      bootstrap_peers_env: LINKS_MEDIA_RELAY_DHT_US_BOOTSTRAP_PEERS
+    - id: asia
+      bootstrap_peers_env: LINKS_MEDIA_RELAY_DHT_ASIA_BOOTSTRAP_PEERS
+relay_policy:
+  require_sframe: true
+  forward_rtp_headers_only: true
+  decrypt_media: false
+  max_lease_ms: 600000
+  usage_receipts: required_for_token_relays
+token_authority:
+  public_key_env: LINKS_MEDIA_RELAY_TOKEN_AUTHORITY_PUBLIC_KEY
+  private_key_env: LINKS_MEDIA_RELAY_TOKEN_AUTHORITY_PRIVATE_KEY
+relays:
+  - node_id: relay-eu-open-1
+    region: eu
+    mode: open
+    websocket_url_env: LINKS_MEDIA_RELAY_EU_OPEN_1_WSS_URL
+    turn_url_env: LINKS_MEDIA_RELAY_EU_OPEN_1_TURN_URL
+    discovery_public_key_env: LINKS_MEDIA_RELAY_EU_OPEN_1_DISCOVERY_PUBLIC_KEY
+    discovery_private_key_env: LINKS_MEDIA_RELAY_EU_OPEN_1_DISCOVERY_PRIVATE_KEY
+    max_bitrate_kbps: 2500
+  - node_id: relay-eu-token-1
+    region: eu
+    mode: token-incentivized
+    price_units_per_minute: 1
+    websocket_url_env: LINKS_MEDIA_RELAY_EU_TOKEN_1_WSS_URL
+    turn_url_env: LINKS_MEDIA_RELAY_EU_TOKEN_1_TURN_URL
+    discovery_public_key_env: LINKS_MEDIA_RELAY_EU_TOKEN_1_DISCOVERY_PUBLIC_KEY
+    discovery_private_key_env: LINKS_MEDIA_RELAY_EU_TOKEN_1_DISCOVERY_PRIVATE_KEY
+    max_bitrate_kbps: 2500
+health:
+  probe_interval_ms: 30000
+  max_staleness_ms: 120000
+  drain_before_unhealthy: true

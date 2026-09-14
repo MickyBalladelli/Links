@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 pub mod sfu;
 pub mod sfu_discovery;
+pub mod media_relay;
 pub mod webtransport;
 
 pub const HELLO_DEADLINE_MS: u64 = 5_000;

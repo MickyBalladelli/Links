@@ -669,7 +669,12 @@ This is a separate expansion track. Do not block the centralized release on it.
   recent-health filtering, and bounded lookup results. Production libp2p
   Kademlia wiring is the `SfuDhtClient` adapter boundary. See
   `docs/sfu-discovery.md` and `deploy/sfu-dht/`.
-- [ ] Implement open-node or token-incentivized media relay networks for WebRTC call routing.
+- [x] Implement open-node or token-incentivized media relay networks for WebRTC call routing.
+  `links-gateway::media_relay` adds signed open/token relay records, DHT
+  discovery with trust and health filtering, relay-bound short-lived credit
+  tokens, signed usage receipts, and route selection. Every route requires
+  SFrame and forwards only RTP headers plus encrypted media. See
+  `docs/media-relays.md` and `deploy/media-relays/`.
 - [ ] Add decentralized transport, storage, and media support to the existing Android, iOS, Web, and desktop clients.
 
 ---
