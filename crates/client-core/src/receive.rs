@@ -1,4 +1,4 @@
-//! Authenticated one-to-one receive orchestration.
+//! Authenticated MLS receive orchestration.
 //!
 //! The normal queue contains opaque envelopes. MLS Welcome/Commit messages
 //! arrive through an authenticated client transport adapter because the v1
@@ -26,6 +26,14 @@ pub enum MlsEpochUpdate {
         conversation_id: String,
         bytes: Vec<u8>,
     },
+    GroupWelcome {
+        conversation_id: String,
+        bytes: Vec<u8>,
+    },
+    GroupCommit {
+        conversation_id: String,
+        bytes: Vec<u8>,
+    },
 }
 
 impl MlsEpochUpdate {
@@ -43,12 +51,32 @@ impl MlsEpochUpdate {
         })
     }
 
+    pub fn group_welcome(conversation_id: String, bytes: Vec<u8>) -> Result<Self, CoreError> {
+        Self::new(conversation_id, bytes).map(|(conversation_id, bytes)| Self::GroupWelcome {
+            conversation_id,
+            bytes,
+        })
+    }
+
+    pub fn group_commit(conversation_id: String, bytes: Vec<u8>) -> Result<Self, CoreError> {
+        Self::new(conversation_id, bytes).map(|(conversation_id, bytes)| Self::GroupCommit {
+            conversation_id,
+            bytes,
+        })
+    }
+
     pub fn conversation_id(&self) -> &str {
         match self {
             Self::Welcome {
                 conversation_id, ..
             }
             | Self::Commit {
+                conversation_id, ..
+            }
+            | Self::GroupWelcome {
+                conversation_id, ..
+            }
+            | Self::GroupCommit {
                 conversation_id, ..
             } => conversation_id,
         }
@@ -70,8 +98,16 @@ impl MlsEpochUpdate {
             Self::Welcome {
                 conversation_id,
                 bytes,
+            } => mls.join_direct_group(conversation_id, bytes),
+            Self::GroupWelcome {
+                conversation_id,
+                bytes,
             } => mls.join_group(conversation_id, bytes),
             Self::Commit {
+                conversation_id,
+                bytes,
+            } => mls.process_direct_commit(conversation_id, bytes),
+            Self::GroupCommit {
                 conversation_id,
                 bytes,
             } => mls.process_commit(conversation_id, bytes),
