@@ -23,7 +23,7 @@ remain open.
 | `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, organization Mini-App/bot feature controls, append-only encrypted payload store, S3-compatible encrypted blob boundary, provider-neutral IPFS/Arweave/Filecoin CID block boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, W3C `did:key` derivation, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, organization Mini-App/bot controls, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
-| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud SFU region/health/room placement, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
+| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud and DHT SFU discovery/placement, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
 | `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, signed federated relay batches, independent store-and-forward relay pooling, broadcast dispatch, transient WebRTC signaling, and durable publish adapters. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, encrypted voice/video/live-stream sessions, native WASM mini-app sandbox hosts, internal text shells, and channel/business/bot surface hosts. |
@@ -53,8 +53,10 @@ remain open.
 | `docs/client-surfaces.md` | Channel, business, and bot surface roles, shared-core routing, and platform adapter contract. |
 | `docs/gateway.md` | Multi-region WebSocket gateway flow, routing, push fallback and deployment gates. |
 | `docs/sfu.md` | Managed LiveKit Cloud regional SFU placement, SFrame confidentiality, failover, and deployment gates. |
+| `docs/sfu-discovery.md` | Signed DHT SFU records, trust binding, expiry/health filtering, and discovery adapter boundary. |
 | `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
 | `deploy/livekit/regions.example.yaml` | Managed LiveKit Cloud regional endpoint and SFrame policy contract. |
+| `deploy/sfu-dht/regions.example.yaml` | Authenticated regional DHT, signed SFU node records, health probes, and key configuration boundary. |
 | `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |
 | `docs/ios-client.md` | iOS client foundation, shared-core boundary and release limits. |
 | `docs/ios-text-milestone.md` | Internal iOS one-to-one text build scope and two-device acceptance gate. |

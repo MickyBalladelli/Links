@@ -5,6 +5,11 @@ stream transport. The gateway-side registry is in
 `crates/gateway/src/sfu.rs`; the deployment contract is
 `deploy/livekit/regions.example.yaml`.
 
+Decentralized SFU endpoint discovery uses the signed DHT contract in
+`crates/gateway/src/sfu_discovery.rs`. Its libp2p Kademlia deployment boundary
+is documented in [DHT SFU discovery](sfu-discovery.md); managed LiveKit Cloud
+placement remains the default centralized path.
+
 ## Placement flow
 
 ```text

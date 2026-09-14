@@ -1,0 +1,43 @@
+# DHT SFU discovery deployment contract.
+# This config contains names only; keep keys and provider credentials in the
+# deployment secret manager.
+dht:
+  implementation: libp2p-kademlia
+  key_namespace: links/sfu-discovery/dht-key/v1
+  record_namespace: links/sfu-discovery/record-signature/v1
+  max_records_per_lookup: 16
+  max_record_bytes: 8192
+  max_record_ttl_ms: 600000
+  require_authenticated_peers: true
+  require_tls_or_noise: true
+  regions:
+    - id: eu
+      bootstrap_peers_env: LINKS_SFU_DHT_EU_BOOTSTRAP_PEERS
+    - id: us
+      bootstrap_peers_env: LINKS_SFU_DHT_US_BOOTSTRAP_PEERS
+    - id: asia
+      bootstrap_peers_env: LINKS_SFU_DHT_ASIA_BOOTSTRAP_PEERS
+sfus:
+  - node_id: sfu-eu-1
+    region: eu
+    websocket_url_env: LINKS_SFU_EU_1_WSS_URL
+    turn_url_env: LINKS_SFU_EU_1_TURN_URL
+    discovery_public_key_env: LINKS_SFU_EU_1_DISCOVERY_PUBLIC_KEY
+    discovery_private_key_env: LINKS_SFU_EU_1_DISCOVERY_PRIVATE_KEY
+  - node_id: sfu-us-1
+    region: us
+    websocket_url_env: LINKS_SFU_US_1_WSS_URL
+    turn_url_env: LINKS_SFU_US_1_TURN_URL
+    discovery_public_key_env: LINKS_SFU_US_1_DISCOVERY_PUBLIC_KEY
+    discovery_private_key_env: LINKS_SFU_US_1_DISCOVERY_PRIVATE_KEY
+  - node_id: sfu-asia-1
+    region: asia
+    websocket_url_env: LINKS_SFU_ASIA_1_WSS_URL
+    turn_url_env: LINKS_SFU_ASIA_1_TURN_URL
+    discovery_public_key_env: LINKS_SFU_ASIA_1_DISCOVERY_PUBLIC_KEY
+    discovery_private_key_env: LINKS_SFU_ASIA_1_DISCOVERY_PRIVATE_KEY
+health:
+  probe_interval_ms: 30000
+  max_staleness_ms: 120000
+  require_sframe: true
+  drain_before_unhealthy: true

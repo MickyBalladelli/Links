@@ -663,7 +663,12 @@ This is a separate expansion track. Do not block the centralized release on it.
 
 ### Decentralized real-time media
 
-- [ ] Build SFU node discovery through Distributed Hash Tables (DHT).
+- [x] Build SFU node discovery through Distributed Hash Tables (DHT).
+  `links-gateway::sfu_discovery` provides signed Ed25519 SFU records, trusted
+  key binding, region-scoped DHT keys, monotonic sequence handling, expiry and
+  recent-health filtering, and bounded lookup results. Production libp2p
+  Kademlia wiring is the `SfuDhtClient` adapter boundary. See
+  `docs/sfu-discovery.md` and `deploy/sfu-dht/`.
 - [ ] Implement open-node or token-incentivized media relay networks for WebRTC call routing.
 - [ ] Add decentralized transport, storage, and media support to the existing Android, iOS, Web, and desktop clients.
 
