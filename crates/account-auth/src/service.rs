@@ -7,9 +7,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
 use links_protocol::{self, v1, validate_handle};
-use links_server_store::{
-    postgres::{GroupKind, RelationalStore, Role},
-};
+use links_server_store::postgres::{GroupKind, RelationalStore, Role};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row, Transaction};

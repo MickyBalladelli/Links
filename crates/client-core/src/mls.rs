@@ -51,6 +51,39 @@ pub trait MlsEngine {
     ) -> Result<Vec<u8>, CoreError>;
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedApplication, CoreError>;
 
+    /// Read the committed epoch used for application messages. Hosts use this
+    /// to order control updates and to persist an epoch checkpoint with MLS
+    /// state, never to derive keys outside OpenMLS.
+    fn current_epoch(&self, _: &str) -> Result<u64, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
+    /// Process a control message only if the caller's durable epoch
+    /// checkpoint still matches the committed local epoch.
+    fn process_commit_at_epoch(
+        &mut self,
+        conversation_id: &str,
+        expected_epoch: u64,
+        commit: &[u8],
+    ) -> Result<(), CoreError> {
+        if self.current_epoch(conversation_id)? != expected_epoch {
+            return Err(CoreError::Authentication);
+        }
+        self.process_commit(conversation_id, commit)
+    }
+
+    fn process_direct_commit_at_epoch(
+        &mut self,
+        conversation_id: &str,
+        expected_epoch: u64,
+        commit: &[u8],
+    ) -> Result<(), CoreError> {
+        if self.current_epoch(conversation_id)? != expected_epoch {
+            return Err(CoreError::Authentication);
+        }
+        self.process_direct_commit(conversation_id, commit)
+    }
+
     /// Direct-chat control updates retain the exact two-user invariant.
     fn join_direct_group(
         &mut self,
@@ -108,6 +141,10 @@ impl MlsEngine for crate::crypto::UnavailableCrypto {
         Err(CoreError::CryptoUnavailable)
     }
     fn decrypt(&mut self, _: &[u8]) -> Result<AuthenticatedApplication, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
+    fn current_epoch(&self, _: &str) -> Result<u64, CoreError> {
         Err(CoreError::CryptoUnavailable)
     }
 }
@@ -310,6 +347,41 @@ where
         ))
     }
 
+    /// Return the committed MLS epoch for a conversation. OpenMLS remains the
+    /// source of truth; this accessor is for durable host checkpoints and
+    /// ordering authenticated Welcome/Commit updates.
+    pub fn current_epoch(&self, conversation_id: &str) -> Result<u64, CoreError> {
+        let group_id = group_id(conversation_id)?;
+        Ok(self.load_group(&group_id)?.epoch().as_u64())
+    }
+
+    /// Process one group commit against a caller-owned epoch checkpoint.
+    /// OpenMLS performs the cryptographic validation and advances the epoch;
+    /// the checkpoint prevents a replayed or concurrently applied update.
+    pub fn process_group_commit_at_epoch(
+        &mut self,
+        conversation_id: &str,
+        expected_epoch: u64,
+        commit: &[u8],
+    ) -> Result<(), CoreError> {
+        if self.current_epoch(conversation_id)? != expected_epoch {
+            return Err(CoreError::Authentication);
+        }
+        self.process_commit_for_group(group_id(conversation_id)?, commit, MAX_GROUP_USERS)
+    }
+
+    pub fn process_direct_commit_at_epoch(
+        &mut self,
+        conversation_id: &str,
+        expected_epoch: u64,
+        commit: &[u8],
+    ) -> Result<(), CoreError> {
+        if self.current_epoch(conversation_id)? != expected_epoch {
+            return Err(CoreError::Authentication);
+        }
+        self.process_commit_for_group(group_id(conversation_id)?, commit, DIRECT_MAX_USERS)
+    }
+
     /// Stage a TreeKEM member-add commit. Keep the returned bytes until the
     /// delivery service accepts the commit, then call `process_commit`.
     pub fn add_members(
@@ -400,6 +472,37 @@ where
             welcome: welcome.map(serialize_message).transpose()?,
             epoch: group.epoch().as_u64().saturating_add(1),
         })
+    }
+
+    /// Stage removal of revoked or departed physical devices. Device IDs are
+    /// resolved against verified MLS credentials, so a caller cannot remove a
+    /// leaf by presenting an unrelated plaintext user/device claim.
+    pub fn remove_devices(
+        &mut self,
+        conversation_id: &str,
+        device_ids: &[Uuid],
+    ) -> Result<PendingCommit, CoreError> {
+        if device_ids.is_empty() || device_ids.len() > MAX_GROUP_DEVICES {
+            return Err(CoreError::Authentication);
+        }
+        let requested = device_ids.iter().copied().collect::<HashSet<_>>();
+        if requested.len() != device_ids.len() || requested.iter().any(Uuid::is_nil) {
+            return Err(CoreError::Authentication);
+        }
+        let group_id = group_id(conversation_id)?;
+        let group = self.load_group(&group_id)?;
+        let mut leaves = Vec::with_capacity(requested.len());
+        for member in group.members() {
+            let binding =
+                verify_credential(&self.verifier, &member.credential, &member.signature_key)?;
+            if requested.contains(&binding.device_id) {
+                leaves.push(member.index.u32());
+            }
+        }
+        if leaves.len() != requested.len() {
+            return Err(CoreError::Authentication);
+        }
+        self.remove_members(conversation_id, &leaves)
     }
 
     /// Stage a fresh self-update. OpenMLS creates a new TreeKEM path, so every
@@ -691,6 +794,10 @@ where
 
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedApplication, CoreError> {
         self.decrypt_message(ciphertext)
+    }
+
+    fn current_epoch(&self, conversation_id: &str) -> Result<u64, CoreError> {
+        OpenMlsEngine::current_epoch(self, conversation_id)
     }
 
     fn ensure_direct_group(

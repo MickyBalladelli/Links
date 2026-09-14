@@ -492,7 +492,12 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
 - [x] Enable MLS group messaging for many-to-many conversations.
   Shared client core now supports bounded many-to-many TreeKEM groups, group
   welcomes/commits, and encrypted group send/receive fan-out.
-- [ ] Implement group membership updates, device changes, epoch processing, and RBAC.
+- [x] Implement group membership updates, device changes, epoch processing, and RBAC.
+  Authenticated group create/list/role/remove APIs enforce owner/admin/member
+  rules in PostgreSQL; device revocation is exposed through the account service;
+  OpenMLS can stage verified device-leaf removals, report committed epochs, and
+  reject control commits against stale epoch checkpoints. Hosts must deliver
+  each resulting MLS commit before merging it locally.
 - [ ] Extend the send and receive flows to many-to-many groups.
 
 ### Broadcast channels

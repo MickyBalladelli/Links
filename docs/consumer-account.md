@@ -92,6 +92,11 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /v1/chat-requests/proof-of-work/verify` | Bearer session plus challenge and nonce | Verifies and consumes one client proof before new-chat admission. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
 | `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
+| `DELETE /v1/devices/{device_id}` | Bearer session; device ID in the path | Revokes an owned physical device and removes it from active directory/session queries. Remaining MLS members must remove its leaf. |
+| `POST /v1/groups` | Bearer session plus `group_id` and optional `kind` | Creates an account-level group and assigns the authenticated account as owner. |
+| `GET /v1/groups/{group_id}/members` | Bearer session | Returns the current member user IDs and RBAC roles. |
+| `PUT /v1/groups/{group_id}/members/{user_id}/role` | Bearer session plus `role` | Applies owner/admin RBAC to add or change a member role. |
+| `DELETE /v1/groups/{group_id}/members/{user_id}` | Bearer session | Removes a permitted member, or lets the authenticated member leave. |
 
 The username directory is globally backed by the authoritative PostgreSQL
 control plane. It returns only active accounts and non-revoked device public

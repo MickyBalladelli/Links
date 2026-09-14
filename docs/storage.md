@@ -43,6 +43,12 @@ users and 100 physical device leaves. Repository mutations serialize on the grou
 row; deferred database constraints also reject ownerless or over-sized direct
 groups. Direct SQL writers must use the same group-lock discipline for concurrent
 membership changes.
+The account service exposes authenticated create, membership snapshot, role
+change, member removal, and device-revocation routes. Each successful membership
+mutation is followed by a client-side MLS TreeKEM add/remove commit; the service
+does not inspect or store that encrypted ratchet state. Revoked devices disappear
+from active directory/session queries, while remaining MLS members remove their
+verified leaves and advance the group epoch locally.
 Database credentials are privileged: this is not row-level tenant security. Only
 the trusted account service may connect; API clients never receive DB credentials.
 Actor IDs must come from authenticated service context, never user-supplied bodies.

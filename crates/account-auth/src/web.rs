@@ -1,7 +1,7 @@
 use crate::{
     service::{
-        AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest,
-        CreateGroupRequest, DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
+        AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest, CreateGroupRequest,
+        DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
         PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest,
     },
@@ -288,9 +288,7 @@ async fn group_members(
     Path(group_id): Path<uuid::Uuid>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
-    Ok(Json(
-        auth.group_members(bearer(&headers)?, group_id).await?,
-    ))
+    Ok(Json(auth.group_members(bearer(&headers)?, group_id).await?))
 }
 async fn set_group_role(
     State(auth): State<Arc<AccountAuth>>,

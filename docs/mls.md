@@ -60,6 +60,19 @@ over-limit commits. Group welcomes and commits use the `GroupWelcome` and
 `GroupCommit` receive variants, so direct-chat updates retain their stricter
 two-user validation.
 
+`remove_devices()` resolves account device IDs through the verified MLS
+credential on each leaf, then stages the matching TreeKEM remove commit. This is
+the client-side rekey hook for account member departures and server-side device
+revocation. The server cannot inspect the encrypted tree, so an authorized
+remaining device must run this operation for every local group containing the
+revoked device.
+
+`current_epoch()` exposes only the committed OpenMLS epoch. Hosts can persist a
+checkpoint and use the `*_commit_at_epoch` helpers to reject a stale or
+concurrent control update before OpenMLS processes it. OpenMLS remains the
+cryptographic source of truth and advances the epoch only after a valid commit
+is merged.
+
 ## Direct-chat invariant
 
 The client core treats one-to-one conversations as direct MLS groups. A direct
