@@ -43,8 +43,8 @@ On receive, `receive_available_with_sframe()` or
 `receive_group_available_with_sframe()` authenticates the MLS message first,
 then calls `SFrameKeyHandler` with the authenticated conversation and sender.
 The handler must authorize the sender, install the key in the local media
-controller, and make repeated delivery idempotent before the queue cursor is
-acknowledged.
+controller with `WebRtcSession.installSFrameControlKey()`, and make repeated
+delivery idempotent before the queue cursor is acknowledged.
 
 ## Key custody
 

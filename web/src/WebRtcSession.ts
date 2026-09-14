@@ -11,6 +11,7 @@ import type {
   WebReceivedTextMessage
 } from './WebTextMessaging'
 import {
+  fingerprintWebRtcSFrameKey,
   WebRtcSFrameController,
   importWebRtcSFrameKey
 } from './WebRtcSFrame'
@@ -75,6 +76,10 @@ export class WebRtcSession implements WebCoreTransport {
   private coreFailed = false
   private readonly onSFrameErrorCallback: (error: WebRtcSFrameTransformError) => void
   private sframeController: WebRtcSFrameController | null = null
+  private readonly sframeControlKeys = new Map<
+    string,
+    { key: CryptoKey; fingerprint: string }
+  >()
 
   constructor(options: WebRtcSessionOptions) {
     if (typeof options.endpoint !== 'string' || options.core === null ||
@@ -145,7 +150,14 @@ export class WebRtcSession implements WebCoreTransport {
     if (this.sessionIDValue === null || update.mediaSessionID !== this.sessionIDValue) {
       throw new Error('SFrame media session mismatch')
     }
-    const key = await importWebRtcSFrameKey(update.key)
+    const keyIdentity = `${update.mediaSessionID}:${String(update.keyID)}:${String(update.epoch)}`
+    const fingerprint = await fingerprintWebRtcSFrameKey(update.key)
+    const cached = this.sframeControlKeys.get(keyIdentity)
+    if (cached !== undefined && cached.fingerprint !== fingerprint) {
+      throw new Error('SFrame control key changed during replay')
+    }
+    const key = cached?.key ?? await importWebRtcSFrameKey(update.key)
+    if (cached === undefined) this.sframeControlKeys.set(keyIdentity, { key, fingerprint })
     await this.installSFrameKey({
       key,
       keyID: update.keyID,
@@ -407,6 +419,7 @@ export class WebRtcSession implements WebCoreTransport {
     this.pendingCandidates = []
     this.sframeController?.close()
     this.sframeController = null
+    this.sframeControlKeys.clear()
     peer?.close()
   }
 

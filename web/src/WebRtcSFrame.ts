@@ -80,11 +80,7 @@ export function supportsWebRtcSFrame(): boolean {
 
 /** Import a non-extractable AES-128 key for the native SFrame API. */
 export async function importWebRtcSFrameKey(rawKey: BufferSource): Promise<CryptoKey> {
-  const bytes = rawKey instanceof ArrayBuffer
-    ? new Uint8Array(rawKey)
-    : new Uint8Array(rawKey.buffer, rawKey.byteOffset, rawKey.byteLength)
-  if (bytes.byteLength !== 16) throw new WebRtcSFrameError('SFrame requires a 128-bit key')
-  if (bytes.every(byte => byte === 0)) throw new WebRtcSFrameError('Invalid SFrame key')
+  const bytes = copySFrameKeyBytes(rawKey)
   if (typeof crypto === 'undefined' || crypto.subtle === undefined) {
     throw new WebRtcSFrameError('Web Crypto unavailable')
   }
@@ -95,6 +91,16 @@ export async function importWebRtcSFrameKey(rawKey: BufferSource): Promise<Crypt
     false,
     ['encrypt', 'decrypt']
   )
+}
+
+/** Return a local-only fingerprint for exact control-message replay checks. */
+export async function fingerprintWebRtcSFrameKey(rawKey: BufferSource): Promise<string> {
+  const bytes = copySFrameKeyBytes(rawKey)
+  if (typeof crypto === 'undefined' || crypto.subtle === undefined) {
+    throw new WebRtcSFrameError('Web Crypto unavailable')
+  }
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 /**
@@ -133,11 +139,15 @@ export class WebRtcSFrameController {
     validateCryptoKey(epochKey.key)
     const keyID = normalizeCryptoKeyID(epochKey.keyID, 'SFrame key ID')
     const epoch = normalizeCryptoKeyID(epochKey.epoch, 'SFrame epoch')
+    const active = this.currentKey?.keyID === keyID
+      ? this.currentKey
+      : this.previousKey?.keyID === keyID ? this.previousKey : null
+    if (active !== null) {
+      if (active.epoch === epoch && active.key === epochKey.key) return
+      throw new WebRtcSFrameError('SFrame key ID is already active')
+    }
     if (this.currentKey !== null && epoch <= this.currentKey.epoch) {
       throw new WebRtcSFrameError('SFrame epoch moved backwards')
-    }
-    if (this.currentKey?.keyID === keyID || this.previousKey?.keyID === keyID) {
-      throw new WebRtcSFrameError('SFrame key ID is already active')
     }
     const next = { key: epochKey.key, keyID, epoch }
     const expired = this.previousKey
@@ -281,6 +291,15 @@ function validateCryptoKey(key: CryptoKey): void {
   if (algorithm.length !== undefined && algorithm.length !== 128) {
     throw new WebRtcSFrameError('SFrame requires a 128-bit AES-GCM key')
   }
+}
+
+function copySFrameKeyBytes(rawKey: BufferSource): Uint8Array {
+  const bytes = rawKey instanceof ArrayBuffer
+    ? new Uint8Array(rawKey)
+    : new Uint8Array(rawKey.buffer, rawKey.byteOffset, rawKey.byteLength)
+  if (bytes.byteLength !== 16) throw new WebRtcSFrameError('SFrame requires a 128-bit key')
+  if (bytes.every(byte => byte === 0)) throw new WebRtcSFrameError('Invalid SFrame key')
+  return bytes.slice()
 }
 
 function requireTransformSlot(
