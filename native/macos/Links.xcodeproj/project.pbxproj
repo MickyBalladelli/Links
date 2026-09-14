@@ -12,6 +12,7 @@
 		A10000010000000000000003 /* LinksKeyStore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000030000000000000002 /* LinksKeyStore */; };
 		A10000010000000000000004 /* MacOSClientModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000003 /* MacOSClientModel.swift */; };
 		A10000010000000000000005 /* MacOSClientShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000004 /* MacOSClientShell.swift */; };
+		A10000010000000000000006 /* LinksMacOSApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +21,7 @@
 		A10000020000000000000003 /* MacOSClientModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientModel.swift; sourceTree = "<group>"; };
 		A10000020000000000000004 /* MacOSClientShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientShell.swift; sourceTree = "<group>"; };
 		A10000020000000000000005 /* Links.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Links.entitlements; sourceTree = "<group>"; };
+		A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSApplicationDelegate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,6 +52,7 @@
 				A10000020000000000000003 /* MacOSClientModel.swift */,
 				A10000020000000000000004 /* MacOSClientShell.swift */,
 				A10000020000000000000005 /* Links.entitlements */,
+				A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */,
 			);
 			path = Links;
 			sourceTree = "<group>";
@@ -135,6 +138,7 @@
 				A10000010000000000000001 /* LinksMacOSApp.swift in Sources */,
 				A10000010000000000000004 /* MacOSClientModel.swift in Sources */,
 				A10000010000000000000005 /* MacOSClientShell.swift in Sources */,
+				A10000010000000000000006 /* LinksMacOSApplicationDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -44,6 +44,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var messaging: IOSDirectMessaging?
     private let identityQueue = DispatchQueue(
         label: "ai.links.macos.identity", qos: .userInitiated)
+    private var connectionRequested = false
+    private var reconnectAfterBackground = false
 
     init() {
         do {
@@ -74,10 +76,17 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         switch phase {
         case .active:
             lifecycleStatus = "Active"
+            if reconnectAfterBackground {
+                reconnectAfterBackground = false
+                connect()
+            }
         case .inactive:
             lifecycleStatus = "Inactive"
         case .background:
             lifecycleStatus = "Background"
+            reconnectAfterBackground = connectionRequested && messaging != nil
+            messaging?.shutdown()
+            connectionStatus = "Offline"
         @unknown default:
             lifecycleStatus = "Unknown"
         }
@@ -115,6 +124,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             factory: factory,
             endpoint: endpoint,
             delegate: self)
+        connectionRequested = false
+        reconnectAfterBackground = false
         connectionStatus = "Offline"
         actionError = nil
     }
@@ -125,18 +136,33 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             actionError = "Messaging host is not configured yet."
             return
         }
+        connectionRequested = true
         do {
             try messaging.start()
             connectionStatus = "Connecting"
             actionError = nil
         } catch {
+            connectionRequested = false
             connectionStatus = "Failed"
             actionError = "Connection could not start."
         }
     }
 
     func disconnect() {
+        connectionRequested = false
+        reconnectAfterBackground = false
         messaging?.stop()
+        connectionStatus = "Offline"
+    }
+
+    /// Stop transport before process termination. The shared core owns the
+    /// durable outbox and cursor, so shutdown releases transport state without
+    /// replacing or clearing pending encrypted work.
+    func shutdownForTermination() {
+        connectionRequested = false
+        reconnectAfterBackground = false
+        lifecycleStatus = "Stopping"
+        messaging?.shutdown()
         connectionStatus = "Offline"
     }
 

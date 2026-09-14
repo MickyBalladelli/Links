@@ -61,6 +61,14 @@ Keychain storage.
 The SwiftUI app observes `scenePhase` so future transport and durable store
 hosts have explicit active, inactive, and background lifecycle hooks.
 
+On background and application termination, the macOS delegate calls
+`IOSDirectMessaging.shutdown()`. This closes transport and releases the core;
+it does not clear the shared core's encrypted outbox or durable cursor. If the
+user had requested a connection, the shell creates a fresh transport/core on
+the next active phase and resumes from the persisted cursor. Abrupt process
+crashes still depend on the shared durable store committing each outbox and
+inbox operation before it returns.
+
 The package's `LINKS_IDENTITY_LIB_DIR` environment variable can point at a
 matching Rust target/profile directory when the default `target/debug` path is
 not appropriate.

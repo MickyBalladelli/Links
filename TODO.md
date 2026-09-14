@@ -387,7 +387,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   embeds `Links/Links.entitlements` for sandbox networking and Keychain access.
   `native/macos/README.md` documents the unsigned Debug command and explains
   that Secure Enclave storage requires a signed build.
-- [ ] Add crash-safe shutdown and restart behavior so pending outbox data and the durable cursor are not lost.
+- [x] Add crash-safe shutdown and restart behavior so pending outbox data and the durable cursor are not lost.
+  `LinksMacOSApplicationDelegate` shuts down transport before normal app
+  termination. Background transitions use the same `IOSDirectMessaging`
+  shutdown path, and active transitions recreate the transport/core when the
+  user had requested a connection. The shared durable core remains the source
+  of truth for encrypted outbox data and the durable cursor.
 
 ### Identity, account, and device enrollment
 
