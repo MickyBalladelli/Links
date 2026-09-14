@@ -28,6 +28,25 @@ pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
+
+/// Trusted verification provider boundary. Production providers should keep
+/// the authority private key in an HSM; the account service only asks it to
+/// sign the canonical public badge transcript.
+pub trait VerificationSigner: Send + Sync {
+    fn public_key(&self) -> Result<[u8; 32], AuthError>;
+    fn sign(&self, transcript: &[u8]) -> Result<[u8; 64], AuthError>;
+}
+
+impl VerificationSigner for links_identity::IdentitySeed {
+    fn public_key(&self) -> Result<[u8; 32], AuthError> {
+        Ok(links_identity::IdentitySeed::public_key(self))
+    }
+
+    fn sign(&self, transcript: &[u8]) -> Result<[u8; 64], AuthError> {
+        Ok(links_identity::IdentitySeed::sign(self, transcript))
+    }
+}
+
 pub struct SystemClock;
 impl Clock for SystemClock {
     fn now_ms(&self) -> u64 {
@@ -90,6 +109,7 @@ pub struct UsernameDirectoryResponse {
     pub handle: String,
     pub user_id: Uuid,
     pub devices: Vec<UsernameDirectoryDeviceResponse>,
+    pub verification_badge: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -921,7 +941,89 @@ impl AccountAuth {
             handle: handle.to_owned(),
             user_id: directory.user_id,
             devices,
+            verification_badge: directory.verification_badge.as_deref().map(encode),
         }))
+    }
+
+    /// Issue a public verification badge after an external verification
+    /// workflow has approved the account. No verification evidence enters the
+    /// database; only the authority-signed claim is retained.
+    pub async fn issue_verification_badge(
+        &self,
+        subject_user_id: Uuid,
+        badge_id: Uuid,
+        subject_handle: Option<String>,
+        badge_kind: u32,
+        issued_at_ms: u64,
+        expires_at_ms: u64,
+        authority: &dyn VerificationSigner,
+    ) -> Result<v1::VerificationBadge, AuthError> {
+        if subject_user_id.is_nil() || badge_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let now = self.now()? as u64;
+        if issued_at_ms > now || expires_at_ms <= now {
+            return Err(AuthError::Invalid);
+        }
+        let active: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM accounts WHERE user_id=$1 AND disabled_at IS NULL)",
+        )
+        .bind(subject_user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        if !active {
+            return Err(AuthError::Denied);
+        }
+        if let Some(handle) = subject_handle.as_deref() {
+            validate_handle(handle).map_err(|_| AuthError::Invalid)?;
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM handles WHERE handle=$1 AND user_id=$2)",
+            )
+            .bind(handle)
+            .bind(subject_user_id)
+            .fetch_one(&self.pool)
+            .await?;
+            if !owned {
+                return Err(AuthError::Invalid);
+            }
+        }
+        let badge = v1::VerificationBadge {
+            protocol_version: links_protocol::VERSION,
+            badge_id: badge_id.to_string(),
+            subject_user_id: subject_user_id.to_string(),
+            subject_handle,
+            issuer_public_key: authority.public_key()?.to_vec(),
+            badge_kind,
+            issued_at_ms,
+            expires_at_ms,
+            signature: vec![0; 64],
+        };
+        links_protocol::validate_verification_badge(&badge)
+            .map_err(|_| AuthError::Invalid)?;
+        let signature = authority.sign(
+            &links_identity::verification_badge_transcript(&badge)
+                .map_err(|_| AuthError::Invalid)?,
+        )?;
+        let mut signed = badge;
+        signed.signature = signature.to_vec();
+        links_protocol::validate_verification_badge(&signed)
+            .map_err(|_| AuthError::Invalid)?;
+        RelationalStore::from_pool(self.pool.clone())
+            .put_verification_badge(subject_user_id, &signed)
+            .await?;
+        Ok(signed)
+    }
+
+    /// Revoke the current badge. Directory clients treat missing badges as
+    /// unverified and must not cache a prior signed claim past its expiry.
+    pub async fn revoke_verification_badge(&self, subject_user_id: Uuid) -> Result<(), AuthError> {
+        if subject_user_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        RelationalStore::from_pool(self.pool.clone())
+            .clear_verification_badge(subject_user_id)
+            .await?;
+        Ok(())
     }
 
     pub async fn start(

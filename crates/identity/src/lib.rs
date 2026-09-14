@@ -378,6 +378,100 @@ pub fn verify_device_subcertificate(
     .map_err(|_| IdentityError::Authentication)
 }
 
+/// Canonical bytes signed by the verification authority for a public badge.
+/// The badge signature itself is excluded from this transcript.
+pub fn verification_badge_transcript(
+    badge: &links_protocol::v1::VerificationBadge,
+) -> Result<Vec<u8>, IdentityError> {
+    let mut unsigned = badge.clone();
+    unsigned.signature = vec![0; 64];
+    links_protocol::validate_verification_badge(&unsigned)
+        .map_err(|_| IdentityError::Invalid)?;
+    let badge_id = Uuid::parse_str(&badge.badge_id).map_err(|_| IdentityError::Invalid)?;
+    let subject_user_id =
+        Uuid::parse_str(&badge.subject_user_id).map_err(|_| IdentityError::Invalid)?;
+    let issuer_public_key: [u8; 32] = badge
+        .issuer_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| IdentityError::Invalid)?;
+    validate_public_key(&issuer_public_key)?;
+    let mut bytes = b"links/verification-badge/v1\0".to_vec();
+    bytes.extend(badge_id.as_bytes());
+    bytes.extend(subject_user_id.as_bytes());
+    match badge.subject_handle.as_deref() {
+        Some(handle) => {
+            bytes.push(1);
+            bytes.extend((handle.len() as u32).to_be_bytes());
+            bytes.extend(handle.as_bytes());
+        }
+        None => bytes.push(0),
+    }
+    bytes.extend(&issuer_public_key);
+    bytes.extend(badge.badge_kind.to_be_bytes());
+    bytes.extend(badge.issued_at_ms.to_be_bytes());
+    bytes.extend(badge.expires_at_ms.to_be_bytes());
+    Ok(bytes)
+}
+
+/// Issue a badge with a trusted verification-authority identity. Production
+/// deployments should implement the same transcript through an HSM signer.
+pub fn issue_verification_badge(
+    badge_id: Uuid,
+    subject_user_id: Uuid,
+    subject_handle: Option<String>,
+    badge_kind: u32,
+    issued_at_ms: u64,
+    expires_at_ms: u64,
+    authority: &IdentitySeed,
+) -> Result<links_protocol::v1::VerificationBadge, IdentityError> {
+    let badge = links_protocol::v1::VerificationBadge {
+        protocol_version: links_protocol::VERSION,
+        badge_id: badge_id.to_string(),
+        subject_user_id: subject_user_id.to_string(),
+        subject_handle,
+        issuer_public_key: authority.public_key().to_vec(),
+        badge_kind,
+        issued_at_ms,
+        expires_at_ms,
+        signature: vec![0; 64],
+    };
+    let transcript = verification_badge_transcript(&badge)?;
+    let mut signed = badge;
+    signed.signature = authority.sign(&transcript).to_vec();
+    links_protocol::validate_verification_badge(&signed)
+        .map_err(|_| IdentityError::Invalid)?;
+    Ok(signed)
+}
+
+/// Verify a badge against an issuer key pinned by the client or directory
+/// configuration and enforce its validity window.
+pub fn verify_verification_badge(
+    badge: &links_protocol::v1::VerificationBadge,
+    expected_issuer_public_key: &[u8; 32],
+    now_ms: u64,
+) -> Result<(), IdentityError> {
+    links_protocol::validate_verification_badge(badge)
+        .map_err(|_| IdentityError::Authentication)?;
+    if badge.issuer_public_key.as_slice() != expected_issuer_public_key
+        || now_ms < badge.issued_at_ms
+        || now_ms >= badge.expires_at_ms
+    {
+        return Err(IdentityError::Authentication);
+    }
+    let issuer_public_key: [u8; 32] = badge
+        .issuer_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| IdentityError::Authentication)?;
+    verify(
+        &issuer_public_key,
+        &verification_badge_transcript(badge)?,
+        &badge.signature,
+    )
+    .map_err(|_| IdentityError::Authentication)
+}
+
 /// Proof transcript for creating a pseudonymous account or logging in with its
 /// first-party device key. The handle is the canonical form without `@`.
 pub fn username_registration_transcript(

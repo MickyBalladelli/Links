@@ -15,14 +15,14 @@ remain open.
 | Path | Responsibility |
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
-| `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, and shared video profiles. |
+| `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, and MLS group limits. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, and shared video profiles. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
-| `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
+| `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
-| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, group membership/RBAC HTTP API, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
+| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, and durable publish adapters for cross-region gateway and channel routing. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, and the internal Android text-messaging shell. |
@@ -32,6 +32,7 @@ remain open.
 | `crates/server-store/migrations/0008_contact_psi.sql` | Stores opaque phone-directory OPRF tokens and challenge state without raw phone numbers. |
 | `crates/server-store/migrations/0009_privacy_pass.sql` | Stores only one-time Privacy Pass token digests and expiry timestamps for anonymous replay prevention. |
 | `crates/server-store/migrations/0010_chat_proof_of_work.sql` | Stores short-lived account/device-bound proof-of-work challenge state without source addresses. |
+| `crates/server-store/migrations/0012_verification_badges.sql` | Stores only the current authority-signed public verification badge. |
 | `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
 | `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
 | `docs/storage.md` | PostgreSQL, payload-store and ephemeral-state guarantees and limits. |
@@ -47,6 +48,7 @@ remain open.
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 | `docs/pairing.md` | Canonical device-pairing QR URI, signature verification and client flow. |
 | `docs/device-delegation.md` | Signed multi-device and multi-admin sub-certificates, delegated registration, and authority rules. |
+| `docs/verification-badges.md` | Authority-signed verification claims, pinned-key validation, expiry, and revocation. |
 | `docs/gateway.md` | Multi-region WebSocket gateway flow, routing, push fallback and deployment gates. |
 | `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
 | `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |

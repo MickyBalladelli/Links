@@ -70,6 +70,7 @@ pub struct DirectoryDeviceRecord {
 pub struct HandleDirectoryRecord {
     pub user_id: Uuid,
     pub devices: Vec<DirectoryDeviceRecord>,
+    pub verification_badge: Option<Vec<u8>>,
 }
 impl GroupKind {
     pub fn as_str(self) -> &'static str {
@@ -158,7 +159,7 @@ impl RelationalStore {
     ) -> Result<Option<HandleDirectoryRecord>, StoreError> {
         validate_handle(handle)?;
         let rows = sqlx::query(
-            "SELECT h.user_id,d.device_id,d.mls_node_id,d.identity_public_key,d.mls_credential,d.delegation_role,d.delegation_certificate FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND a.disabled_at IS NULL AND d.revoked_at IS NULL ORDER BY d.device_id",
+            "SELECT h.user_id,a.verification_badge,d.device_id,d.mls_node_id,d.identity_public_key,d.mls_credential,d.delegation_role,d.delegation_certificate FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND a.disabled_at IS NULL AND d.revoked_at IS NULL ORDER BY d.device_id",
         )
         .bind(handle)
         .fetch_all(&self.pool)
@@ -167,6 +168,16 @@ impl RelationalStore {
             return Ok(None);
         };
         let user_id: Uuid = first.get("user_id");
+        let verification_badge: Option<Vec<u8>> = first.get("verification_badge");
+        if let Some(bytes) = verification_badge.as_ref() {
+            let badge = v1::VerificationBadge::decode(bytes.as_slice())
+                .map_err(|_| StoreError::CorruptObject)?;
+            protocol::validate_verification_badge(&badge)
+                .map_err(|_| StoreError::CorruptObject)?;
+            if badge.subject_user_id != user_id.to_string() {
+                return Err(StoreError::CorruptObject);
+            }
+        }
         let mut devices = Vec::with_capacity(rows.len());
         for row in rows {
             if row.get::<Uuid, _>("user_id") != user_id {
@@ -214,7 +225,11 @@ impl RelationalStore {
                 delegation_certificate,
             });
         }
-        Ok(Some(HandleDirectoryRecord { user_id, devices }))
+        Ok(Some(HandleDirectoryRecord {
+            user_id,
+            devices,
+            verification_badge,
+        }))
     }
     pub async fn register_device(
         &self,
@@ -307,6 +322,45 @@ impl RelationalStore {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    /// Store the current authority-signed public badge for an active account.
+    pub async fn put_verification_badge(
+        &self,
+        user_id: Uuid,
+        badge: &v1::VerificationBadge,
+    ) -> Result<(), StoreError> {
+        protocol::validate_verification_badge(badge)?;
+        if badge.subject_user_id != user_id.to_string() {
+            return Err(StoreError::Invalid);
+        }
+        let mut tx = self.pool.begin().await?;
+        require_active_account(&mut tx, user_id).await?;
+        let updated = sqlx::query(
+            "UPDATE accounts SET verification_badge=$2 WHERE user_id=$1 AND disabled_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(badge.encode_to_vec())
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(StoreError::NotFound);
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Remove a badge during manual revocation. The badge body is never
+    /// replaced with a false value; absence means unverified.
+    pub async fn clear_verification_badge(&self, user_id: Uuid) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE accounts SET verification_badge=NULL WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() != 1 {
+            return Err(StoreError::NotFound);
+        }
         Ok(())
     }
     pub async fn active_devices(&self, user_id: Uuid) -> Result<Vec<Uuid>, StoreError> {

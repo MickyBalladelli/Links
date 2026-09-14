@@ -3,6 +3,7 @@
 //! available. The default outer envelope provider still fails closed; install
 //! `crypto::SealedSenderCrypto` with a platform-backed key resolver for sends.
 pub mod attachments;
+pub mod badges;
 pub mod background;
 pub mod broadcast;
 pub mod contact_discovery;

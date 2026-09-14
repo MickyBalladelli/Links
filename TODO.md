@@ -533,7 +533,11 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
   delegated registration verifies both issuer authority and child
   proof-of-possession, persists the certificate, and publishes it in the
   device directory.
-- [ ] Implement cryptographic proof-of-verification badges.
+- [x] Implement cryptographic proof-of-verification badges.
+  VerificationBadge binds the account, optional handle, badge kind, issuer
+  key, and bounded validity window under a domain-separated Ed25519 signature.
+  Clients verify against a pinned authority key; the account service stores
+  only the public badge and supports trusted issue/revoke hooks.
 - [ ] Build channel, business, and bot client surfaces for Android, iOS, Web, and desktop.
 
 ---

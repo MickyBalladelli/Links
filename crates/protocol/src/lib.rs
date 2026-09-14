@@ -34,6 +34,7 @@ pub const BLUR_HASH_LENGTH: usize = 28;
 pub const ML_KEM_768_PUBLIC_KEY_BYTES: usize = 1184;
 pub const MAX_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub const MAX_SUBCERTIFICATE_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
+pub const MAX_VERIFICATION_BADGE_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 pub const MAX_CURSOR: u64 = i64::MAX as u64;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -116,6 +117,12 @@ pub fn validate_user(user: &v1::User) -> Result<(), ProtocolError> {
             }
         } else if device.delegation_role != 0 {
             return Err(ProtocolError::Invalid("device delegation"));
+        }
+    }
+    if let Some(badge) = user.verification_badge.as_ref() {
+        validate_verification_badge(badge)?;
+        if badge.subject_user_id != user.user_id {
+            return Err(ProtocolError::Invalid("verification badge subject"));
         }
     }
     Ok(())
@@ -206,6 +213,34 @@ pub fn validate_device_subcertificate(
         || certificate.encoded_len() > MAX_MESSAGE_BYTES
     {
         return Err(ProtocolError::Invalid("device subcertificate"));
+    }
+    Ok(())
+}
+
+pub fn validate_verification_badge(
+    badge: &v1::VerificationBadge,
+) -> Result<(), ProtocolError> {
+    if badge.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&badge.badge_id)?;
+    validate_id(&badge.subject_user_id)?;
+    if let Some(handle) = badge.subject_handle.as_deref() {
+        validate_handle(handle)?;
+    }
+    if badge.issuer_public_key.len() != 32
+        || badge.issuer_public_key.iter().all(|byte| *byte == 0)
+        || !matches!(badge.badge_kind, 1 | 2)
+        || badge.issued_at_ms == 0
+        || badge.expires_at_ms <= badge.issued_at_ms
+        || badge
+            .expires_at_ms
+            .saturating_sub(badge.issued_at_ms)
+            > MAX_VERIFICATION_BADGE_TTL_MS
+        || badge.signature.len() != 64
+        || badge.encoded_len() > MAX_MESSAGE_BYTES
+    {
+        return Err(ProtocolError::Invalid("verification badge"));
     }
     Ok(())
 }
