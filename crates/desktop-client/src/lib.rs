@@ -6,6 +6,13 @@
 
 mod session;
 mod surfaces;
+mod call;
+
+pub use call::{
+    DesktopCallEpochKey, DesktopCallMediaEngine, DesktopCallMode, DesktopCallMlsKeyProvider,
+    DesktopCallPlacement, DesktopCallSession, DesktopCallSignal, DesktopCallSignalKind,
+    DesktopCallSignaling, DesktopCallState,
+};
 
 pub use session::{
     DesktopAccessTokenProvider, DesktopConnectionManager, DesktopConnectionState,

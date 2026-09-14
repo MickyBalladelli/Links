@@ -18,7 +18,7 @@ remain open.
 | `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, WebRTC SDP/ICE signal validation, MLS-encrypted SFrame control validation, and MLS group limits. |
 | `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, bounded SFrame epoch-key schedules, MLS-encrypted SFrame key send/receive control, validated channel/business/bot surface roles, and WebRTC SDP/ICE frame helpers. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, and shared-core surface contracts. |
-| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, and channel/business/bot surface adapter. |
+| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, call/live-stream session, and channel/business/bot surface adapter. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
@@ -26,7 +26,7 @@ remain open.
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud SFU region/health/room placement, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
 | `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, transient cross-region WebRTC signaling, and durable publish adapters for cross-region gateway and channel routing. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, internal text shells, and channel/business/bot surface hosts. |
+| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, encrypted voice/video/live-stream sessions, internal text shells, and channel/business/bot surface hosts. |
 | `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `crates/server-store/migrations/0007_pseudonymous_accounts.sql` | Allows username-only accounts to omit phone-derived authentication subjects. |
@@ -66,6 +66,7 @@ remain open.
 | `web/src/WebRtcSession.ts` | Browser WebRTC offer/answer and ICE exchange over authenticated `links.v1` signaling. |
 | `web/src/WebRtcSFrame.ts` | Native WebRTC Encoded Transform SFrame binding with non-extractable AES-128-GCM key rotation. |
 | `web/src/WebRtcCallFlow.ts` | Browser MLS-keyed, SFrame-encrypted WebRTC call orchestration against a managed SFU signaling adapter. |
+| `web/src/WebCallSurface.ts` | Web voice/video/live-stream mode and publisher/subscriber facade over the encrypted call flow. |
 | `web/src/WebTransportConnectionManager.ts` | HTTP/3 WebTransport signaling fallback with reliable length-prefixed protobuf frames and QUIC loss recovery. |
 | `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
@@ -76,15 +77,18 @@ remain open.
 | `docs/webrtc-signaling.md` | Authenticated live-device SDP/ICE exchange, gateway routing, and browser session contract. |
 | `docs/sframe.md` | Native WebRTC SFrame transform contract, key custody, rotation, and browser capability gate. |
 | `docs/call-flow.md` | End-to-end SFU call sequence, MLS key exchange, SDP/ICE, SFrame, and teardown contract. |
+| `docs/platform-calls.md` | Mobile-first call/live-stream adapters and Web/desktop rollout contract. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |
 | `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |
 | `native/apple/Sources/LinksClient/IOSLargeFileSession.swift` | iOS upload receipt, private MLS send, and decrypt orchestration. |
+| `native/apple/Sources/LinksClient/IOSCallSession.swift` | iOS voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
 | `native/android/client/src/main/java/ai/links/app/AndroidVideoTranscoder.java` | Android MediaCodec surface transcode, MP4 mux, and faststart boundary. |
 | `native/android/client/src/main/java/ai/links/app/Mp4FastStart.java` | Android MP4 `moov` relocation and `stco`/`co64` offset repair. |
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileTransfer.java` | Android bounded ChaCha20-Poly1305 staging for video/files. |
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileSession.java` | Android upload receipt, private MLS send, and decrypt orchestration. |
+| `native/android/client/src/main/java/ai/links/app/AndroidCallSession.java` | Android voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
 
 ## Build and test
 

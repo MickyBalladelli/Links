@@ -587,7 +587,12 @@ Add real-time media after messaging and file media are stable.
   key rotation, and teardown through a LiveKit/Mediasoup adapter. Provider SDK
   binding and mobile host adapters remain platform release work. See
   `docs/call-flow.md`.
-- [ ] Add voice/video calls and live streams to mobile first, then Web and desktop.
+- [x] Add voice/video calls and live streams to mobile first, then Web and desktop.
+  iOS `IOSCallSession` and Android `AndroidCallSession` enforce MLS key setup,
+  native SFrame setup, opaque SFU join, SDP/ICE exchange, key rotation, and
+  fail-closed teardown through injected platform media/provider adapters. Web
+  exposes the same modes through `WebCallSurface`; desktop exposes the
+  provider-neutral `DesktopCallSession`. See `docs/platform-calls.md`.
 
 ---
 
