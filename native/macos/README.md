@@ -130,6 +130,15 @@ profile-scoped 256-bit key in Keychain; invalid or tampered state is ignored.
 The shared core remains responsible for its own encrypted MLS, inbox, outbox,
 and cursor state when a concrete durable provider is installed.
 
+`MacOSDurableMessagingStore` is the profile-scoped provider for that host
+boundary. It stores opaque encrypted MLS state, encrypted inbox messages,
+exact encrypted outbox frames, message-ID reservations, conversation sequence
+counters, and the replay cursor in `messaging-v1.bin` under the profile's
+Application Support directory. Each mutation atomically replaces the
+encrypted document; `withTransaction` commits MLS state, inbox, outbox,
+sequence, and cursor changes together. The store is constructed by
+`LinksMacOSAppModel` and can be passed to the concrete Rust-core host factory.
+
 ## Identity seed custody
 
 The macOS client passes `MacOSKeychainSeedProvider` into

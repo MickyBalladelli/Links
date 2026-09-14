@@ -77,6 +77,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private let otpClient: IOSOTPClient?
     private let preKeyAPI: IOSPreKeyHTTPClient?
     private var encryptedStateStore: MacOSEncryptedStateStore?
+    private(set) var durableMessagingStore: MacOSDurableMessagingStore?
     private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
     private var directChatDirectory: (any IOSDirectChatDirectory)?
@@ -89,6 +90,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         do {
             let profile = try Self.profileFromArguments()
             encryptedStateStore = try? MacOSEncryptedStateStore(profile: profile)
+            durableMessagingStore = try? MacOSDurableMessagingStore(profile: profile)
             let provider = MacOSKeychainSeedProvider(profile: profile)
             let identityStore = HardwareIdentityStore(seedProvider: provider)
             let loadedClient = try IOSClient(
@@ -117,6 +119,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             otpClient = nil
             preKeyAPI = nil
             encryptedStateStore = nil
+            durableMessagingStore = nil
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"

@@ -24,13 +24,15 @@ public final class MacOSEncryptedStateStore {
     private let directoryURL: URL
     private let stateURL: URL
     private let keychainService: String
-    private let keychainAccount = "state-key"
-    private let associatedDataPrefix = "links/macos-state/v1\0"
+    private let keychainAccount: String
+    private let associatedDataPrefix: String
 
     public init(profile: ClientProfile = .default,
+                namespace: String = "state",
                 fileManager: FileManager = .default) throws {
         self.profile = profile
         self.fileManager = fileManager
+        guard Self.isValidNamespace(namespace) else { throw StateError.unavailable }
         guard let applicationSupport = fileManager.urls(
             for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw StateError.unavailable
@@ -40,8 +42,16 @@ public final class MacOSEncryptedStateStore {
             .appendingPathComponent("profiles", isDirectory: true)
             .appendingPathComponent(profile.name, isDirectory: true)
             .appendingPathComponent("state", isDirectory: true)
-        stateURL = directoryURL.appendingPathComponent("state-v1.bin", isDirectory: false)
-        keychainService = "ai.links.local-state.v1.\(profile.name)"
+        stateURL = directoryURL.appendingPathComponent(
+            namespace == "state" ? "state-v1.bin" : "\(namespace)-v1.bin",
+            isDirectory: false)
+        keychainService = namespace == "state"
+            ? "ai.links.local-state.v1.\(profile.name)"
+            : "ai.links.local-state.v1.\(profile.name).\(namespace)"
+        keychainAccount = namespace == "state" ? "state-key" : "state-key.\(namespace)"
+        associatedDataPrefix = namespace == "state"
+            ? "links/macos-state/v1\0"
+            : "links/macos-state/\(namespace)/v1\0"
     }
 
     /// Return decrypted state, or nil when this profile has no saved state.
@@ -140,6 +150,16 @@ public final class MacOSEncryptedStateStore {
             kSecAttrAccount as String: keychainAccount,
             kSecAttrSynchronizable as String: false
         ]
+    }
+
+    private static func isValidNamespace(_ namespace: String) -> Bool {
+        guard !namespace.isEmpty, namespace.utf8.count <= 32 else { return false }
+        return namespace.unicodeScalars.allSatisfy {
+            ($0.value >= 97 && $0.value <= 122)
+                || ($0.value >= 48 && $0.value <= 57)
+                || $0.value == 45
+                || $0.value == 95
+        }
     }
 }
 #endif
