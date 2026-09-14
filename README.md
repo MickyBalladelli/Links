@@ -85,6 +85,7 @@ remain open.
 | `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |
 | `native/apple/Sources/LinksClient/IOSLargeFileSession.swift` | iOS upload receipt, private MLS send, and decrypt orchestration. |
 | `native/apple/Sources/LinksClient/IOSCallSession.swift` | iOS voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
+| `native/apple/Sources/LinksClient/IOSMiniAppSandbox.swift` | iOS facade for the opaque native WASM sandbox runtime. |
 | `native/android/client/src/main/java/ai/links/app/AndroidVideoTranscoder.java` | Android MediaCodec surface transcode, MP4 mux, and faststart boundary. |
 | `native/android/client/src/main/java/ai/links/app/Mp4FastStart.java` | Android MP4 `moov` relocation and `stco`/`co64` offset repair. |
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileTransfer.java` | Android bounded ChaCha20-Poly1305 staging for video/files. |
