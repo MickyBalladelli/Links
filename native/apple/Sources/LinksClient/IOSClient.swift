@@ -93,6 +93,7 @@ public enum IOSClientError: Error {
     case authenticatedSessionRequired
     case coreIdentityMismatch
     case metadataUnavailable
+    case profileMismatch
 }
 
 /// Base iOS client session. It owns hardware identity enrollment and public
@@ -114,9 +115,12 @@ public final class IOSClient: SharedCoreIdentitySigner {
     }
 
     private static let metadataKey = "links.client.metadata.v1"
+    private static let profileMetadataPrefix = "links.client.metadata.v1."
     private static let nilUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
     private let identityStore: HardwareIdentityStore
     private let defaults: UserDefaults
+    public let profile: ClientProfile
+    private let metadataKey: String
     private var authenticated: AuthenticatedSession?
 
     public private(set) var identity: IdentityKeyReference?
@@ -125,9 +129,15 @@ public final class IOSClient: SharedCoreIdentitySigner {
     public private(set) var userID: String?
 
     public init(identityStore: HardwareIdentityStore = HardwareIdentityStore(),
-                defaults: UserDefaults = .standard) throws {
+                defaults: UserDefaults = .standard,
+                profile: ClientProfile = .default) throws {
         self.identityStore = identityStore
         self.defaults = defaults
+        self.profile = profile
+        metadataKey = Self.metadataKey(for: profile)
+        guard identityStore.profile == profile else {
+            throw IOSClientError.profileMismatch
+        }
         try restoreMetadata()
     }
 
@@ -324,7 +334,7 @@ public final class IOSClient: SharedCoreIdentitySigner {
     }
 
     private func restoreMetadata() throws {
-        guard let encoded = defaults.data(forKey: Self.metadataKey) else { return }
+        guard let encoded = defaults.data(forKey: metadataKey) else { return }
         let metadata: StoredMetadata
         do {
             metadata = try PropertyListDecoder().decode(StoredMetadata.self, from: encoded)
@@ -362,13 +372,17 @@ public final class IOSClient: SharedCoreIdentitySigner {
         } catch {
             throw IOSClientError.metadataUnavailable
         }
-        defaults.set(encoded, forKey: Self.metadataKey)
-        guard defaults.data(forKey: Self.metadataKey) == encoded else {
+        defaults.set(encoded, forKey: metadataKey)
+        guard defaults.data(forKey: metadataKey) == encoded else {
             throw IOSClientError.metadataUnavailable
         }
     }
 
     private static func nowMs() -> UInt64 {
         UInt64(max(0, Date().timeIntervalSince1970 * 1000))
+    }
+
+    private static func metadataKey(for profile: ClientProfile) -> String {
+        profile == .default ? metadataKey : profileMetadataPrefix + profile.name
     }
 }

@@ -401,7 +401,11 @@ exchanging encrypted one-to-one text through the same local development stack.
   into the macOS `IOSClient`. Only the wrapped seed record is stored in
   Keychain; `IOSClient` persists public metadata only, and seed buffers are
   wiped after each Rust operation.
-- [ ] Namespace Keychain records by an explicit client profile so two local clients cannot open or overwrite each other's identity.
+- [x] Namespace Keychain records by an explicit client profile so two local clients cannot open or overwrite each other's identity.
+  `ClientProfile` validates a stable profile name and scopes the Keychain
+  service, wrapped-seed context, and public metadata key. The macOS app accepts
+  `--profile <name>`, and `IOSClient` rejects mismatched identity-store and
+  client profiles before opening metadata.
 - [ ] Support first-run username registration/login for local development and authenticated device pairing through the existing `links://connect` flow.
 - [ ] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.
 - [ ] Persist only public account/device metadata, MLS credentials, and encrypted local state; keep the bearer token memory-only.

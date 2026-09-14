@@ -40,8 +40,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var onboardingError: String?
     @Published var actionError: String?
     @Published private(set) var isEnrolling = false
+    @Published private(set) var profileName = ClientProfile.default.name
 
-    private let identityStore = MacOSKeychainSeedProvider()
     private let client: IOSClient?
     private var messaging: IOSDirectMessaging?
     private let identityQueue = DispatchQueue(
@@ -51,12 +51,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     init() {
         do {
-            let loadedClient = try IOSClient(identityStore: HardwareIdentityStore(
-                seedProvider: identityStore))
+            let profile = try Self.profileFromArguments()
+            let provider = MacOSKeychainSeedProvider(profile: profile)
+            let identityStore = HardwareIdentityStore(seedProvider: provider)
+            let loadedClient = try IOSClient(
+                identityStore: identityStore,
+                profile: profile)
+            profileName = profile.name
             client = loadedClient
             refreshClientState()
         } catch {
             client = nil
+            profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
             deviceStatus = "Unavailable"
@@ -293,5 +299,16 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     private func shortID(_ value: String) -> String {
         String(value.prefix(8))
+    }
+
+    private static func profileFromArguments() throws -> ClientProfile {
+        let arguments = CommandLine.arguments
+        guard let marker = arguments.firstIndex(of: "--profile") else {
+            return .default
+        }
+        guard arguments.index(after: marker) < arguments.endIndex else {
+            throw ClientProfileError.invalidName
+        }
+        return try ClientProfile(name: arguments[arguments.index(after: marker)])
     }
 }

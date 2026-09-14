@@ -10,9 +10,16 @@ public final class HardwareSeedVault {
         case invalidInput, hardwareUnavailable, keyUnavailable, storageFailure, authenticationFailure
         case keyCreationFailed(Int) // Sanitized OS status, never key material.
     }
-    private let service = "ai.links.identity.seed.v1"
+    private static let baseService = "ai.links.identity.seed.v1"
+    public let profile: ClientProfile
+    private let service: String
     private let algorithm = SecKeyAlgorithm.eciesEncryptionCofactorX963SHA256AESGCM
-    public init() {}
+    public init(profile: ClientProfile = .default) {
+        self.profile = profile
+        service = profile == .default
+            ? Self.baseService
+            : "\(Self.baseService).\(profile.name)"
+    }
 
     /// Caller generates a random 32-byte seed and wipes its buffers after wrapping.
     public func storeSeed(_ seed: Data) throws -> String {
@@ -108,7 +115,12 @@ public final class HardwareSeedVault {
         guard let id = UUID(uuidString: handle), id.uuidString.lowercased() == handle else { throw VaultError.invalidInput }
         return Data("\(service).\(handle)".utf8)
     }
-    private func context(_ handle: String) -> Data { Data("links/seed/v1\0\(handle)".utf8) }
+    private func context(_ handle: String) -> Data {
+        if profile == .default {
+            return Data("links/seed/v1\0\(handle)".utf8)
+        }
+        return Data("links/seed/v1\0\(profile.name)\0\(handle)".utf8)
+    }
     private func recordQuery(_ handle: String) throws -> [String: Any] {
         _ = try tag(handle)
         return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,

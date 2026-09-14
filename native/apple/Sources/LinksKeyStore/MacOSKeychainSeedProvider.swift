@@ -6,9 +6,11 @@ import Foundation
 /// or writes seed bytes to app storage.
 public final class MacOSKeychainSeedProvider: SeedVault {
     private let vault: HardwareSeedVault
+    public let profile: ClientProfile
 
-    public init() {
-        vault = HardwareSeedVault()
+    public init(profile: ClientProfile = .default) {
+        self.profile = profile
+        vault = HardwareSeedVault(profile: profile)
     }
 
     func storeSeed(_ seed: Data) throws -> String {

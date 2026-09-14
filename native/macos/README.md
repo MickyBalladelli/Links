@@ -82,3 +82,15 @@ in Keychain. Seed bytes are exposed only for the synchronous Rust operation and
 are wiped immediately after use. `IOSClient` persists public identity metadata
 only; the seed is never written to UserDefaults, files, logs, URLs, or
 analytics.
+
+Pass an explicit profile to run more than one local identity:
+
+```sh
+open -n "/path/to/Links.app" --args --profile alice
+open -n "/path/to/Links.app" --args --profile bob
+```
+
+Profile names are canonical lower-case ASCII names. Each non-default profile
+uses its own Keychain service and public metadata key. A mismatched provider
+and client profile is rejected before metadata is opened, so one local client
+cannot accidentally validate or overwrite another client's identity.
