@@ -35,6 +35,21 @@ impl Role {
         }
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountKind {
+    Consumer,
+    Pseudonymous,
+    Organization,
+}
+impl AccountKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Consumer => "consumer",
+            Self::Pseudonymous => "pseudonymous",
+            Self::Organization => "organization",
+        }
+    }
+}
 #[derive(Debug, Clone, Copy)]
 pub enum GroupKind {
     Direct,
@@ -71,6 +86,14 @@ pub struct HandleDirectoryRecord {
     pub user_id: Uuid,
     pub devices: Vec<DirectoryDeviceRecord>,
     pub verification_badge: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrganizationControls {
+    pub organization_id: Uuid,
+    pub mini_apps_enabled: bool,
+    pub bots_enabled: bool,
+    pub revision: u64,
 }
 impl GroupKind {
     pub fn as_str(self) -> &'static str {
@@ -120,12 +143,42 @@ impl RelationalStore {
         user_id: Uuid,
         auth_subject_hash: &[u8],
     ) -> Result<(), StoreError> {
-        sqlx::query("INSERT INTO accounts (user_id, auth_subject_hash) VALUES ($1, $2)")
+        self.create_account_with_kind(user_id, auth_subject_hash, AccountKind::Consumer)
+            .await
+    }
+
+    pub async fn create_account_with_kind(
+        &self,
+        user_id: Uuid,
+        auth_subject_hash: &[u8],
+        account_kind: AccountKind,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO accounts (user_id, auth_subject_hash, account_kind) VALUES ($1, $2, $3)",
+        )
             .bind(user_id)
             .bind(auth_subject_hash)
-            .execute(&self.pool)
+            .bind(account_kind.as_str())
+            .execute(&mut *tx)
             .await?;
+        if account_kind == AccountKind::Organization {
+            sqlx::query("INSERT INTO organization_controls (organization_id) VALUES ($1)")
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn create_organization_account(
+        &self,
+        user_id: Uuid,
+        auth_subject_hash: &[u8],
+    ) -> Result<(), StoreError> {
+        self.create_account_with_kind(user_id, auth_subject_hash, AccountKind::Organization)
+            .await
     }
     pub async fn claim_handle(&self, user_id: Uuid, handle: &str) -> Result<(), StoreError> {
         validate_handle(handle)?;
