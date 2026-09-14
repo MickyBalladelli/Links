@@ -426,7 +426,13 @@ exchanging encrypted one-to-one text through the same local development stack.
   later sessions must match the saved user, handle, and MLS credential or the
   client rejects the identity as reused. Pairing an existing account remains
   intentional and uses a new device/node pair.
-- [ ] Generate and upload the initial pre-key inventory, claim and verify recipient pre-keys, and initialize the first two-user MLS conversation through the shared client core.
+- [x] Generate and upload the initial pre-key inventory, claim and verify recipient pre-keys, and initialize the first two-user MLS conversation through the shared client core.
+  `IOSPreKeyHTTPClient` implements the authenticated protobuf inventory,
+  upload, and atomic claim routes. `IOSDirectMessaging` hands those routes and
+  the authenticated directory snapshot to the shared-core bootstrap hooks;
+  the concrete binding calls `prekeys::maintain_inventory`, verifies every
+  `RecipientDevice`, and stages the two-user MLS commit before application
+  messages are allowed.
 
 ### Native networking and encrypted messaging
 

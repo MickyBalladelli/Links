@@ -249,6 +249,7 @@ private struct LinksSidebar: View {
                 StateRow(title: "Account", value: model.accountStatus)
                 StateRow(title: "Device", value: model.deviceStatus)
                 StateRow(title: "Connection", value: model.connectionStatus)
+                StateRow(title: "Pre-keys", value: model.preKeyStatus)
                 StateRow(title: "Lifecycle", value: model.lifecycleStatus)
                 HStack {
                     Text(model.packageStatus)
@@ -328,12 +329,23 @@ private struct LinksConversationDetail: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button("Initialize secure chat") {
+                        model.initializeSelectedConversation()
+                    }
+                    .buttonStyle(.bordered)
                     Text(model.connectionStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
+
+                Text(model.conversationSetupStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 8)
 
                 Divider()
                 MessageList(messages: conversation.messages)

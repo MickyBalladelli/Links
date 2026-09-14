@@ -64,6 +64,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published var otpChannel: IOSOTPChannel = .sms
     @Published private(set) var otpStatus = "Phone OTP not started"
     @Published private(set) var isOTPWorking = false
+    @Published private(set) var preKeyStatus = "Pre-key inventory not initialized"
+    @Published private(set) var conversationSetupStatus = "MLS conversation not initialized"
     @Published var pairingTarget = ""
     @Published var pairingInput = ""
     @Published private(set) var pairingURI: String?
@@ -73,9 +75,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private let client: IOSClient?
     private let authClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
+    private let preKeyAPI: IOSPreKeyHTTPClient?
     private var encryptedStateStore: MacOSEncryptedStateStore?
     private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
+    private var directChatDirectory: (any IOSDirectChatDirectory)?
     private let identityQueue = DispatchQueue(
         label: "ai.links.macos.identity", qos: .userInitiated)
     private var connectionRequested = false
@@ -97,10 +101,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                let loadedAuthClient = try? IOSUsernameAuthClient(baseURL: endpoint) {
                 authClient = loadedAuthClient
                 otpClient = try? IOSOTPClient(baseURL: endpoint)
+                preKeyAPI = try? IOSPreKeyHTTPClient(baseURL: endpoint)
                 authEndpointText = endpoint.absoluteString
             } else {
                 authClient = nil
                 otpClient = nil
+                preKeyAPI = nil
                 authEndpointText = "Invalid local auth endpoint"
             }
             restoreLocalState()
@@ -109,6 +115,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             client = nil
             authClient = nil
             otpClient = nil
+            preKeyAPI = nil
             encryptedStateStore = nil
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
@@ -340,12 +347,21 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// Install the concrete shared-core host when Rust core and durable providers exist.
     /// The shell stays fail-closed until that host is provided.
     func installMessaging(factory: any SharedClientCoreFactory, endpoint: URL) throws {
+        try installMessaging(factory: factory, endpoint: endpoint, directory: nil)
+    }
+
+    /// Install the shared-core host and its authenticated recipient directory.
+    /// The directory must return a current MLS KeyPackage for every active
+    /// recipient device; no placeholder or UI-owned crypto is accepted.
+    func installMessaging(factory: any SharedClientCoreFactory, endpoint: URL,
+                          directory: (any IOSDirectChatDirectory)?) throws {
         guard let client else { throw IOSClientError.identityNotEnrolled }
         messaging = IOSDirectMessaging(
             client: client,
             factory: factory,
             endpoint: endpoint,
             delegate: self)
+        directChatDirectory = directory
         connectionRequested = false
         reconnectAfterBackground = false
         connectionStatus = "Offline"
@@ -363,6 +379,21 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             try messaging.start()
             connectionStatus = "Connecting"
             actionError = nil
+            if let preKeyAPI {
+                preKeyStatus = "Preparing pre-key inventory"
+                Task { @MainActor [weak self] in
+                    guard let self, let messaging = self.messaging else { return }
+                    do {
+                        let inventory = try await messaging.maintainPreKeyInventory(
+                            using: preKeyAPI)
+                        self.preKeyStatus = "Ready: \(inventory.oneTimeCurvePreKeys) curve, "
+                            + "\(inventory.oneTimeKEMPreKeys) KEM keys"
+                    } catch {
+                        self.preKeyStatus = "Pre-key setup failed"
+                        self.actionError = "Initial pre-key inventory could not be uploaded."
+                    }
+                }
+            }
         } catch {
             connectionRequested = false
             connectionStatus = "Failed"
@@ -408,6 +439,38 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         actionError = nil
         persistLocalState()
         return true
+    }
+
+    /// Claim and verify recipient pre-keys, then stage the first two-user MLS
+    /// conversation in the shared client core.
+    func initializeSelectedConversation() {
+        guard let selectedConversationID,
+              let conversation = conversations.first(where: {
+                  $0.id == selectedConversationID
+              }),
+              let messaging,
+              let preKeyAPI,
+              let directChatDirectory else {
+            conversationSetupStatus = "MLS host directory is not configured"
+            actionError = "Configure an authenticated directory with MLS KeyPackages first."
+            return
+        }
+        conversationSetupStatus = "Claiming recipient pre-keys"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await messaging.initializeFirstDirectConversation(
+                    conversationID: conversation.id,
+                    recipientUserID: conversation.recipientUserID,
+                    directory: directChatDirectory,
+                    preKeyAPI: preKeyAPI)
+                self.conversationSetupStatus = "Secure two-user MLS conversation ready"
+                self.actionError = nil
+            } catch {
+                self.conversationSetupStatus = "MLS conversation setup failed"
+                self.actionError = "Recipient pre-key verification or MLS setup failed."
+            }
+        }
     }
 
     func sendMessage() {

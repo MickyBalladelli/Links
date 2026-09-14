@@ -83,6 +83,23 @@ registered `links://connect?...` URL. The app verifies the URI signature and
 account before calling `POST /v1/devices`; bearer tokens never enter the URL or
 the pairing payload.
 
+## Pre-keys and first secure conversation
+
+After a shared-core host is installed, `connect` asks the core to maintain the
+initial pre-key inventory. `IOSPreKeyHTTPClient` sends only protobuf public
+material to `GET /v1/prekeys/status` and `PUT /v1/prekeys`; the core generates
+the keys, wraps private seeds through its native provider, and durably retries
+the exact upload bytes.
+
+`initializeSelectedConversation()` asks an authenticated directory adapter for
+the recipient's active devices and MLS KeyPackages, claims one bundle per
+device through `POST /v1/prekeys/{device_id}/claim`, and passes the opaque
+claims to the shared core. The core verifies each claim against the directory
+identity key, establishes the two-user MLS group, and delivers the pending
+commit before sending application text. Swift does not parse or trust claimed
+key material. A host without the concrete Rust core or authenticated directory
+stays fail-closed and reports the missing integration.
+
 On background and application termination, the macOS delegate calls
 `IOSDirectMessaging.shutdown()`. This closes transport and releases the core;
 it does not clear the shared core's encrypted outbox or durable cursor. If the

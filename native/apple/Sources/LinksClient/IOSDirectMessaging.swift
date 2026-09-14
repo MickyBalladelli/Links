@@ -127,6 +127,70 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         notifyState(.stopped)
     }
 
+    /// Ask the shared Rust core to generate the first profile and replenish
+    /// both one-time pools. The core owns its durable pending-upload record;
+    /// this host only supplies the authenticated protobuf API.
+    public func maintainPreKeyInventory(using api: any IOSPreKeyAPI)
+        async throws -> IOSPreKeyInventory {
+        lock.lock()
+        let sharedCore = core
+        let active = currentState != .stopped
+        lock.unlock()
+        guard let sharedCore, active else { throw IOSMessagingError.notConnected }
+        let token = try client.accessToken()
+        return try await sharedCore.maintainPreKeyInventory(
+            accessToken: token, api: api)
+    }
+
+    /// Discover the recipient's active devices, claim one bundle per device,
+    /// and let the shared core verify the claims and stage the first two-user
+    /// MLS commit. KeyPackages are supplied by the authenticated directory
+    /// adapter and never constructed by this UI layer.
+    public func initializeFirstDirectConversation(
+        conversationID: String,
+        recipientUserID: String,
+        directory: any IOSDirectChatDirectory,
+        preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID),
+              Self.isValidTextID(recipientUserID) else {
+            throw IOSMessagingError.invalidMessage
+        }
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        let token = try client.accessToken()
+        let descriptors = try await directory.queryRecipientDevices(
+            accessToken: token, recipientUserID: recipientUserID)
+        guard !descriptors.isEmpty, descriptors.count <= 100,
+              descriptors.allSatisfy({ $0.userID == recipientUserID }) else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        var deviceIDs = Set<String>()
+        var claimed = [IOSClaimedRecipientDevice]()
+        claimed.reserveCapacity(descriptors.count)
+        for descriptor in descriptors {
+            guard deviceIDs.insert(descriptor.deviceID).inserted else {
+                throw IOSPreKeyError.invalidRecipient
+            }
+            let bundle = try await preKeyAPI.claim(
+                accessToken: token, deviceID: descriptor.deviceID)
+            claimed.append(try IOSClaimedRecipientDevice(
+                descriptor: descriptor, bundle: bundle))
+        }
+        try coreQueue.sync {
+            try sharedCore.initializeDirectConversation(
+                conversationID: conversationID,
+                recipientUserID: recipientUserID,
+                recipientDevices: claimed,
+                transport: manager)
+        }
+    }
+
     public func shutdown() {
         lock.lock()
         let manager = connection
@@ -391,4 +455,5 @@ extension IOSConnectionManager: IOSCoreTransport {}
 public enum IOSMessagingError: Error {
     case invalidMessage
     case notConnected
+    case preKeyBootstrapUnavailable
 }
