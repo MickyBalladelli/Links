@@ -27,6 +27,7 @@ pub mod sync;
 pub mod surfaces;
 pub mod video;
 pub mod voice;
+pub mod webrtc;
 pub use links_protocol as protocol;
 
 use thiserror::Error;
