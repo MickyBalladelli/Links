@@ -647,7 +647,12 @@ This is a separate expansion track. Do not block the centralized release on it.
   `FederatedEnvelopeBatch` messages, bounded peer fan-out, exact NATS subjects,
   expiry checks, opaque payload forwarding, and atomic batch/envelope replay
   claims are implemented in `links-queue`. See `docs/relay-gossip.md`.
-- [ ] Deploy store-and-forward offline buffering nodes across independent relays.
+- [x] Deploy store-and-forward offline buffering nodes across independent relays.
+  `IndependentRelayPool` fans each signed opaque batch into up to three
+  independent JetStream clusters. Each cluster keeps messages for the bounded
+  30-day TTL with explicit acknowledgement and encrypted-at-rest storage;
+  destination nodes verify and deduplicate before local handoff. See
+  `deploy/relays/` and `docs/relay-gossip.md`.
 - [ ] Integrate IPFS / Arweave / Filecoin for client-side encrypted chunk storage and content-addressed retrieval (`ipfs://CID`).
 
 ### Decentralized real-time media

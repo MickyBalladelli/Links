@@ -21,6 +21,7 @@ pub const BROADCAST_SUBJECT_PREFIX: &str = "links.v1.broadcast";
 pub const SIGNAL_SUBJECT_PREFIX: &str = "links.v1.webrtc";
 pub const FEDERATION_RELAY_SUBJECT_PREFIX: &str = "links.v1.federation";
 pub const DEFAULT_RELAY_DEDUP_ENTRIES: usize = 10_000;
+pub const MAX_INDEPENDENT_RELAY_CLUSTERS: usize = 3;
 const FEDERATION_SIGNATURE_DOMAIN: &[u8] = b"links/federation-relay/signature/v1\0";
 const FEDERATION_BODY_DOMAIN: &[u8] = b"links/federation-relay/body/v1\0";
 
@@ -761,6 +762,91 @@ where
             return Err(QueueError::Invalid("federation envelope expiry"));
         }
         Ok(())
+    }
+}
+
+/// Fan a signed batch into independent durable relay clusters. All clusters
+/// receive the same batch ID, so the destination can safely accept the first
+/// copy and discard later copies as replays.
+pub struct IndependentRelayPool<P, S> {
+    source_node_id: String,
+    publishers: Vec<Arc<P>>,
+    signer: Arc<S>,
+}
+
+impl<P, S> IndependentRelayPool<P, S>
+where
+    P: NatsPublisher + 'static,
+    S: FederationNodeSigner + 'static,
+{
+    pub fn new(
+        source_node_id: String,
+        publishers: Vec<Arc<P>>,
+        signer: Arc<S>,
+    ) -> Result<Self, QueueError> {
+        protocol::validate_gateway_locator(&source_node_id)
+            .map_err(|_| QueueError::Invalid("federation source"))?;
+        if publishers.is_empty() || publishers.len() > MAX_INDEPENDENT_RELAY_CLUSTERS {
+            return Err(QueueError::Invalid("independent relay clusters"));
+        }
+        Ok(Self {
+            source_node_id,
+            publishers,
+            signer,
+        })
+    }
+
+    pub fn source_node_id(&self) -> &str {
+        &self.source_node_id
+    }
+
+    pub fn relay_count(&self) -> usize {
+        self.publishers.len()
+    }
+
+    /// Store the batch in every independent relay cluster. A failure returns
+    /// the batch ID for retry; successful clusters deduplicate the retry.
+    pub async fn publish_to_peers(
+        &self,
+        destination_node_ids: &[String],
+        envelopes: Vec<v1::Envelope>,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<String, QueueError> {
+        let batch_id = Uuid::new_v4().hyphenated().to_string();
+        let first_relay = NatsFederationRelay {
+            source_node_id: self.source_node_id.clone(),
+            publisher: Arc::clone(&self.publishers[0]),
+            signer: Arc::clone(&self.signer),
+        };
+        first_relay.validate_publish_request(
+            destination_node_ids,
+            &batch_id,
+            &envelopes,
+            expires_at_ms,
+            now_ms,
+        )?;
+        for publisher in &self.publishers {
+            let relay = NatsFederationRelay {
+                source_node_id: self.source_node_id.clone(),
+                publisher: Arc::clone(publisher),
+                signer: Arc::clone(&self.signer),
+            };
+            if relay
+                .publish_batch_to_peers(
+                    destination_node_ids,
+                    &batch_id,
+                    envelopes.clone(),
+                    expires_at_ms,
+                    now_ms,
+                )
+                .await
+                .is_err()
+            {
+                return Err(QueueError::RelayPublishFailed { batch_id });
+            }
+        }
+        Ok(batch_id)
     }
 }
 

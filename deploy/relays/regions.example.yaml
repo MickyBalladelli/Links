@@ -1,0 +1,61 @@
+# Independent store-and-forward relay deployment contract.
+# Copy endpoint and credential names into the deployment secret manager.
+# This file contains no provider credentials and does not provision clusters.
+provider: nats-jetstream
+max_independent_relay_clusters: 3
+relay_subject_pattern: links.v1.federation.*.relay
+batch:
+  max_envelopes: 100
+  max_bytes: 524288
+  max_retention_ms: 2592000000
+  payload_inspection: disabled
+  payload_decryption: disabled
+relays:
+  - id: relay-eu
+    region: eu-west
+    endpoint_env: LINKS_RELAY_EU_ENDPOINT
+    ca_certificate_env: LINKS_RELAY_EU_CA_CERT
+    client_certificate_env: LINKS_RELAY_EU_CLIENT_CERT
+    client_key_env: LINKS_RELAY_EU_CLIENT_KEY
+    jetstream:
+      stream: LINKS_FEDERATION_RELAY_EU
+      storage: file
+      replicas: 3
+      max_age_ms: 2592000000
+      max_bytes: 107374182400
+      max_msg_size: 524288
+      ack_policy: explicit
+      max_deliver: 8
+      encrypted_at_rest: required
+  - id: relay-us
+    region: us-east
+    endpoint_env: LINKS_RELAY_US_ENDPOINT
+    ca_certificate_env: LINKS_RELAY_US_CA_CERT
+    client_certificate_env: LINKS_RELAY_US_CLIENT_CERT
+    client_key_env: LINKS_RELAY_US_CLIENT_KEY
+    jetstream:
+      stream: LINKS_FEDERATION_RELAY_US
+      storage: file
+      replicas: 3
+      max_age_ms: 2592000000
+      max_bytes: 107374182400
+      max_msg_size: 524288
+      ack_policy: explicit
+      max_deliver: 8
+      encrypted_at_rest: required
+  - id: relay-asia
+    region: ap-southeast
+    endpoint_env: LINKS_RELAY_ASIA_ENDPOINT
+    ca_certificate_env: LINKS_RELAY_ASIA_CA_CERT
+    client_certificate_env: LINKS_RELAY_ASIA_CLIENT_CERT
+    client_key_env: LINKS_RELAY_ASIA_CLIENT_KEY
+    jetstream:
+      stream: LINKS_FEDERATION_RELAY_ASIA
+      storage: file
+      replicas: 3
+      max_age_ms: 2592000000
+      max_bytes: 107374182400
+      max_msg_size: 524288
+      ack_policy: explicit
+      max_deliver: 8
+      encrypted_at_rest: required

@@ -40,9 +40,10 @@ DIDs do not authenticate a server node or replace node-level federation trust.
 
 ## Relay gossip implementation
 
-Cross-node propagation is implemented by `NatsFederationRelay` in
-`links-queue`. It signs one bounded `FederatedEnvelopeBatch` per destination
-peer and publishes to an exact relay subject. Consumers use
+Cross-node propagation is implemented by `NatsFederationRelay` and
+`IndependentRelayPool` in `links-queue`. They sign one bounded
+`FederatedEnvelopeBatch` per destination peer and can store the same batch in
+multiple independent JetStream clusters through exact relay subjects. Consumers use
 `decode_and_claim_relay_for_node` and `RelayDeduplicator` before passing the
 opaque envelopes to the local gateway. See [relay gossip](relay-gossip.md) for
 the wire contract, limits, retry behavior, and deployment boundary.
@@ -51,6 +52,7 @@ the wire contract, limits, retry behavior, and deployment boundary.
 
 The relay implementation is an adapter boundary. It must be deployed only
 after the centralized gateway passes its existing encrypted-routing checks and
-with durable claim storage when relay consumers are scaled horizontally. Client
-P2P media and decentralized storage are not prerequisites for this federation
+with durable claim storage when relay consumers are scaled horizontally. The
+independent cluster deployment contract is in `deploy/relays/`. Client P2P
+media and decentralized storage are not prerequisites for this federation
 choice.

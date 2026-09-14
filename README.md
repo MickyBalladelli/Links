@@ -25,7 +25,7 @@ remain open.
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, organization Mini-App/bot controls, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud SFU region/health/room placement, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
 | `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
-| `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, transient cross-region WebRTC signaling, and durable publish adapters for cross-region gateway and channel routing. |
+| `crates/queue` | Opaque NATS JetStream delivery wire contract, signed federated relay batches, independent store-and-forward relay pooling, broadcast dispatch, transient WebRTC signaling, and durable publish adapters. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, encrypted voice/video/live-stream sessions, native WASM mini-app sandbox hosts, internal text shells, and channel/business/bot surface hosts. |
 | `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
@@ -84,6 +84,8 @@ remain open.
 | `crates/server-store/migrations/0013_organization_controls.sql` | Default-off organization feature gates for Mini-Apps and bots. |
 | `docs/federation.md` | Selected Matrix-style federated server-node layer, encrypted envelope contract, and rollout boundary. |
 | `docs/relay-gossip.md` | Signed opaque federated envelope batches, bounded peer fan-out, JetStream relay subjects, and replay claims. |
+| `deploy/relays/regions.example.yaml` | Three independent encrypted JetStream relay clusters with bounded store-and-forward retention. |
+| `deploy/relays/README.md` | Relay deployment, consumer acknowledgement, failure, and retention runbook. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |

@@ -24,9 +24,11 @@ Relay workers do not decrypt or inspect `sealed_payload`.
 
 `NatsFederationRelay` publishes to the exact
 `links.v1.federation.<destination>.relay` subject. Fan-out is capped at eight
-peers. If a publish partially succeeds, the caller retries with the same batch
-ID; the receiver's `RelayDeduplicator` claims the batch and its envelope IDs
-atomically, so an accepted envelope is never routed twice.
+peers. `IndependentRelayPool` can write the same batch ID to up to three
+independent JetStream clusters for regional failure tolerance. If a publish
+partially succeeds, the caller retries with the same batch ID; the receiver's
+`RelayDeduplicator` claims the batch and its envelope IDs atomically, so an
+accepted envelope is never routed twice.
 
 Receivers call `decode_and_claim_relay_for_node` with the authenticated source
 node public key, expected source and destination IDs, and current time. The
@@ -35,5 +37,6 @@ local gateway routes each envelope. Production deployments must persist the
 claim set when more than one relay consumer can receive the same stream.
 
 Node public keys and mTLS identities remain separate from user/device DIDs.
-Peer allowlisting, TLS, rate limits, retry backoff, and durable stream retention
-belong to the deployment adapter.
+Peer allowlisting, TLS, rate limits, retry backoff, durable stream retention,
+and independent-cluster provisioning belong to the deployment adapter. The
+example deployment contract is in `deploy/relays/`.
