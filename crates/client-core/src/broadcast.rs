@@ -106,6 +106,35 @@ impl BroadcastMasterKey {
             .map_err(|_| CoreError::Authentication)
     }
 
+    /// Decrypt and validate one broker dispatch. Signature and current-admin
+    /// checks remain separate and must use verify_post before rendering.
+    pub fn decrypt_dispatch(
+        &self,
+        dispatch: &v1::BroadcastDispatch,
+    ) -> Result<v1::Message, CoreError> {
+        protocol::validate_broadcast_dispatch(dispatch)?;
+        let plaintext = self.decrypt(
+            &dispatch.conversation_id,
+            dispatch.epoch,
+            &dispatch.post_id,
+            &dispatch.ciphertext,
+        )?;
+        let message = v1::Message::decode(plaintext.as_slice())
+            .map_err(|_| CoreError::Authentication)?;
+        protocol::validate_message(&message)?;
+        let Some(v1::message::Content::BroadcastPost(post)) = message.content.as_ref() else {
+            return Err(CoreError::Authentication);
+        };
+        if message.conversation_id != dispatch.conversation_id
+            || message.message_id != dispatch.post_id
+            || post.post_id != dispatch.post_id
+            || post.epoch != dispatch.epoch
+        {
+            return Err(CoreError::Authentication);
+        }
+        Ok(message)
+    }
+
     fn derive_key(
         &self,
         conversation_id: &str,
@@ -154,6 +183,8 @@ pub async fn publish_broadcast_post<S, V, B>(
     post_id: String,
     epoch: u64,
     payload: Vec<u8>,
+    sent_at_ms: u64,
+    sequence_id: u64,
     signer: &S,
     admins: &V,
     master_key: &BroadcastMasterKey,
@@ -175,7 +206,21 @@ where
         payload,
         signer,
     )?;
-    let ciphertext = master_key.encrypt(conversation_id, epoch, &post_id, &post.encode_to_vec())?;
+    let message = v1::Message {
+        message_id: message_id.to_owned(),
+        conversation_id: conversation_id.to_owned(),
+        sender_device_id: sender_device_id.to_owned(),
+        sent_at_ms,
+        sequence_id,
+        content: Some(v1::message::Content::BroadcastPost(post)),
+    };
+    protocol::validate_message(&message)?;
+    let ciphertext = master_key.encrypt(
+        conversation_id,
+        epoch,
+        &post_id,
+        &message.encode_to_vec(),
+    )?;
     let dispatch = v1::BroadcastDispatch {
         protocol_version: protocol::VERSION,
         conversation_id: conversation_id.to_owned(),

@@ -1,9 +1,9 @@
 syntax = "proto3";
 package links.v1;
 
-// PUBLIC: broker routing wrapper. The ciphertext is a serialized BroadcastPost
-// encrypted with the broadcast master key. Brokers may route this wrapper, but
-// must not decrypt or inspect its contents.
+// PUBLIC: broker routing wrapper. The ciphertext is a serialized Message with
+// BroadcastPost content, encrypted with the broadcast master key. Brokers may
+// route this wrapper, but must not decrypt or inspect its contents.
 message BroadcastDispatch {
   uint32 protocol_version = 1;
   string conversation_id = 2;

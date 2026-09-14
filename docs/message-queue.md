@@ -30,7 +30,7 @@ links.v1.gateway.<subject_gateway_id>.deliver
 
 Broadcast publishers use the separate `BroadcastDispatch` wrapper. Its
 conversation routing token is a SHA-256-derived subject token, and its body is
-the serialized signed post encrypted with the broadcast master key:
+the serialized signed Message encrypted with the broadcast master key:
 
 ```text
 links.v1.broadcast.<hashed_conversation_token>.publish

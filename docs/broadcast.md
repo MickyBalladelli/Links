@@ -22,7 +22,7 @@ the subscriber remains receive-only.
 Publishers call `publish_broadcast_post()` with their hardware-backed
 `MlsIdentitySigner`, `BroadcastAdminVerifier`, `BroadcastMasterKey`, and
 `BroadcastBroker`. The send side checks the current owner/admin role, signs the
-serialized post, encrypts it with an HKDF-derived per-conversation/epoch key,
+serialized Message, encrypts it with an HKDF-derived per-conversation/epoch key,
 and dispatches only a `BroadcastDispatch` ciphertext. `NatsBroadcastPublisher`
 publishes that wrapper to a subject derived from a hash of the conversation ID;
 the broker can route it without learning the post or admin identity.
