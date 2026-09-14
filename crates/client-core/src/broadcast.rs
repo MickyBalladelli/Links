@@ -6,6 +6,16 @@
 //! group, create application messages, stage membership changes, or merge a
 //! local pending commit.
 
+use async_trait::async_trait;
+use chacha20poly1305::{
+    aead::{Aead, KeyInit, Payload},
+    ChaCha20Poly1305, Key, Nonce,
+};
+use hkdf::Hkdf;
+use prost::Message;
+use sha2::Sha256;
+use zeroize::Zeroizing;
+
 use crate::{
     mls::{MlsEngine, MlsIdentitySigner},
     protocol::{self, v1},
@@ -14,6 +24,173 @@ use crate::{
 use uuid::Uuid;
 
 const BROADCAST_POST_DOMAIN: &[u8] = b"links/broadcast-post/v1\0";
+const BROADCAST_KEY_DOMAIN: &[u8] = b"links/broadcast/key/v1\0";
+const BROADCAST_KEY_SALT: &[u8] = b"links/broadcast/salt/v1\0";
+const BROADCAST_CIPHERTEXT_VERSION: u8 = 1;
+const BROADCAST_NONCE_BYTES: usize = 12;
+const BROADCAST_TAG_BYTES: usize = 16;
+const BROADCAST_CIPHERTEXT_HEADER_BYTES: usize = 1 + BROADCAST_NONCE_BYTES;
+
+/// Broadcast master key held by the publishing/subscriber device.
+///
+/// The key is never placed in a broker dispatch. Production adapters should
+/// load it from platform secure storage and keep this value scoped to the
+/// publish/decrypt operation.
+pub struct BroadcastMasterKey(Zeroizing<[u8; 32]>);
+
+impl BroadcastMasterKey {
+    pub fn from_bytes(bytes: [u8; 32]) -> Result<Self, CoreError> {
+        if bytes.iter().all(|byte| *byte == 0) {
+            return Err(CoreError::Authentication);
+        }
+        Ok(Self(Zeroizing::new(bytes)))
+    }
+
+    /// Encrypt a serialized signed post for broker dispatch.
+    pub fn encrypt(
+        &self,
+        conversation_id: &str,
+        epoch: u64,
+        post_id: &str,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, CoreError> {
+        if plaintext.is_empty() || plaintext.len() > protocol::MAX_MESSAGE_BYTES {
+            return Err(CoreError::Authentication);
+        }
+        let key = self.derive_key(conversation_id, epoch)?;
+        let aad = broadcast_aad(conversation_id, epoch, post_id)?;
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
+        let mut nonce = [0u8; BROADCAST_NONCE_BYTES];
+        getrandom::fill(&mut nonce).map_err(|_| CoreError::Provider)?;
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: plaintext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| CoreError::Provider)?;
+        let mut output = Vec::with_capacity(BROADCAST_CIPHERTEXT_HEADER_BYTES + ciphertext.len());
+        output.push(BROADCAST_CIPHERTEXT_VERSION);
+        output.extend_from_slice(&nonce);
+        output.extend_from_slice(&ciphertext);
+        Ok(output)
+    }
+
+    /// Open a broker ciphertext. The signed post is still untrusted until
+    /// verify_post checks its admin signature and current role.
+    pub fn decrypt(
+        &self,
+        conversation_id: &str,
+        epoch: u64,
+        post_id: &str,
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, CoreError> {
+        if ciphertext.len() < BROADCAST_CIPHERTEXT_HEADER_BYTES + BROADCAST_TAG_BYTES
+            || ciphertext[0] != BROADCAST_CIPHERTEXT_VERSION
+        {
+            return Err(CoreError::Authentication);
+        }
+        let key = self.derive_key(conversation_id, epoch)?;
+        let aad = broadcast_aad(conversation_id, epoch, post_id)?;
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
+        cipher
+            .decrypt(
+                Nonce::from_slice(&ciphertext[1..BROADCAST_CIPHERTEXT_HEADER_BYTES]),
+                Payload {
+                    msg: &ciphertext[BROADCAST_CIPHERTEXT_HEADER_BYTES..],
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| CoreError::Authentication)
+    }
+
+    fn derive_key(
+        &self,
+        conversation_id: &str,
+        epoch: u64,
+    ) -> Result<Zeroizing<[u8; 32]>, CoreError> {
+        protocol::validate_id(conversation_id)?;
+        let conversation_uuid =
+            Uuid::parse_str(conversation_id).map_err(|_| CoreError::Authentication)?;
+        let mut info = BROADCAST_KEY_DOMAIN.to_vec();
+        info.extend_from_slice(conversation_uuid.as_bytes());
+        info.extend_from_slice(&epoch.to_be_bytes());
+        let hkdf = Hkdf::<Sha256>::new(Some(BROADCAST_KEY_SALT), self.0.as_ref());
+        let mut key = Zeroizing::new([0u8; 32]);
+        hkdf.expand(&info, key.as_mut())
+            .map_err(|_| CoreError::Provider)?;
+        Ok(key)
+    }
+}
+
+fn broadcast_aad(
+    conversation_id: &str,
+    epoch: u64,
+    post_id: &str,
+) -> Result<Vec<u8>, CoreError> {
+    protocol::validate_id(conversation_id)?;
+    protocol::validate_id(post_id)?;
+    let conversation_uuid =
+        Uuid::parse_str(conversation_id).map_err(|_| CoreError::Authentication)?;
+    let post_uuid = Uuid::parse_str(post_id).map_err(|_| CoreError::Authentication)?;
+    let mut aad = BROADCAST_KEY_DOMAIN.to_vec();
+    aad.extend_from_slice(conversation_uuid.as_bytes());
+    aad.extend_from_slice(&epoch.to_be_bytes());
+    aad.extend_from_slice(post_uuid.as_bytes());
+    Ok(aad)
+}
+
+/// Broker boundary for a broadcast publish. Implementations must return only
+/// after the dispatch is durably accepted.
+#[async_trait]
+pub trait BroadcastBroker: Send + Sync {
+    async fn dispatch(&self, dispatch: v1::BroadcastDispatch) -> Result<(), CoreError>;
+}
+
+/// Sign a post, encrypt the signed protobuf with the broadcast master key, and
+/// dispatch only the opaque ciphertext to the broker.
+pub async fn publish_broadcast_post<S, V, B>(
+    conversation_id: &str,
+    message_id: &str,
+    sender_device_id: &str,
+    post_id: String,
+    epoch: u64,
+    payload: Vec<u8>,
+    signer: &S,
+    admins: &V,
+    master_key: &BroadcastMasterKey,
+    broker: &B,
+) -> Result<v1::BroadcastDispatch, CoreError>
+where
+    S: MlsIdentitySigner,
+    V: BroadcastAdminVerifier,
+    B: BroadcastBroker,
+{
+    let admin_public_key = signer.public_key()?;
+    admins.verify_admin_device(conversation_id, sender_device_id, &admin_public_key)?;
+    let post = sign_post(
+        conversation_id,
+        message_id,
+        sender_device_id,
+        post_id.clone(),
+        epoch,
+        payload,
+        signer,
+    )?;
+    let ciphertext = master_key.encrypt(conversation_id, epoch, &post_id, &post.encode_to_vec())?;
+    let dispatch = v1::BroadcastDispatch {
+        protocol_version: protocol::VERSION,
+        conversation_id: conversation_id.to_owned(),
+        epoch,
+        post_id,
+        ciphertext,
+    };
+    protocol::validate_broadcast_dispatch(&dispatch)?;
+    broker.dispatch(dispatch.clone()).await?;
+    Ok(dispatch)
+}
 
 /// Directory/RBAC policy for broadcast publisher devices. Implementations must
 /// verify that the device is active, belongs to the conversation, and currently
