@@ -675,7 +675,13 @@ This is a separate expansion track. Do not block the centralized release on it.
   tokens, signed usage receipts, and route selection. Every route requires
   SFrame and forwards only RTP headers plus encrypted media. See
   `docs/media-relays.md` and `deploy/media-relays/`.
-- [ ] Add decentralized transport, storage, and media support to the existing Android, iOS, Web, and desktop clients.
+- [x] Add decentralized transport, storage, and media support to the existing Android, iOS, Web, and desktop clients.
+  `links-client-core::decentralized` retries opaque envelopes across trusted
+  transport endpoints, verifies client-encrypted CID chunks across storage
+  gateways, and selects fresh SFrame-only media relays with open/token
+  admission. Android, iOS, and Web expose matching host adapters; desktop and
+  Web/WASM re-export the shared Rust contract. See
+  `docs/decentralized-clients.md`.
 
 ---
 

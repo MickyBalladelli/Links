@@ -16,9 +16,9 @@ remain open.
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors, boundary validation, W3C `did:key` Ed25519 encoding and binding validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, content-addressed CID derivation/verification, signed SFU and media-relay DHT record validation, relay token and usage-receipt validation, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, WebRTC SDP/ICE signal validation, MLS-encrypted SFrame control validation, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, chunked client-side CID encryption/retrieval, bounded SFrame epoch-key schedules, MLS-encrypted SFrame key send/receive control, validated channel/business/bot surface roles, WebRTC SDP/ICE frame helpers, and native wasmi mini-app sandbox execution with host-mediated network and opaque-key permissions. |
-| `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, and shared-core surface contracts. |
-| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, call/live-stream session, native mini-app sandbox and permission facade, and channel/business/bot surface adapter. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, chunked client-side CID encryption/retrieval, decentralized opaque transport/storage/media adapters, bounded SFrame epoch-key schedules, MLS-encrypted SFrame key send/receive control, validated channel/business/bot surface roles, WebRTC SDP/ICE frame helpers, and native wasmi mini-app sandbox execution with host-mediated network and opaque-key permissions. |
+| `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, shared decentralized transport/storage/media contract, and shared-core surface contracts. |
+| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, decentralized transport/storage/media contract, call/live-stream session, native mini-app sandbox and permission facade, and channel/business/bot surface adapter. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, organization Mini-App/bot feature controls, append-only encrypted payload store, S3-compatible encrypted blob boundary, provider-neutral IPFS/Arweave/Filecoin CID block boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, W3C `did:key` derivation, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
@@ -26,7 +26,7 @@ remain open.
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud and DHT SFU discovery/placement, open and token-incentivized media relay routing, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
 | `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, signed federated relay batches, independent store-and-forward relay pooling, broadcast dispatch, transient WebRTC signaling, and durable publish adapters. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, encrypted voice/video/live-stream sessions, native WASM mini-app sandbox hosts, internal text shells, and channel/business/bot surface hosts. |
+| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, decentralized transport/storage/media adapters, encrypted voice/video/live-stream sessions, native WASM mini-app sandbox hosts, internal text shells, and channel/business/bot surface hosts. |
 | `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
 | `crates/server-store/migrations/0007_pseudonymous_accounts.sql` | Allows username-only accounts to omit phone-derived authentication subjects. |
@@ -55,6 +55,7 @@ remain open.
 | `docs/sfu.md` | Managed LiveKit Cloud regional SFU placement, SFrame confidentiality, failover, and deployment gates. |
 | `docs/sfu-discovery.md` | Signed DHT SFU records, trust binding, expiry/health filtering, and discovery adapter boundary. |
 | `docs/media-relays.md` | Open and token-incentivized WebRTC relay records, admission tokens, usage receipts, SFrame-only routing, and deployment boundary. |
+| `docs/decentralized-clients.md` | Android, iOS, Web, and desktop decentralized transport, CID storage, and SFrame media adapter contract. |
 | `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
 | `deploy/livekit/regions.example.yaml` | Managed LiveKit Cloud regional endpoint and SFrame policy contract. |
 | `deploy/sfu-dht/regions.example.yaml` | Authenticated regional DHT, signed SFU node records, health probes, and key configuration boundary. |
@@ -72,6 +73,7 @@ remain open.
 | `web/src/WebRtcCallFlow.ts` | Browser MLS-keyed, SFrame-encrypted WebRTC call orchestration against a managed SFU signaling adapter. |
 | `web/src/WebCallSurface.ts` | Web voice/video/live-stream mode and publisher/subscriber facade over the encrypted call flow. |
 | `web/src/WebTransportConnectionManager.ts` | HTTP/3 WebTransport signaling fallback with reliable length-prefixed protobuf frames and QUIC loss recovery. |
+| `web/src/WebDecentralizedClient.ts` | Browser opaque relay transport retries, CID-verified provider storage, and trusted SFrame media relay selection. |
 | `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
 | `crates/desktop-client/src/session.rs` | Desktop image encryption, transfer, ciphertext cache, and render boundary. |
@@ -98,12 +100,14 @@ remain open.
 | `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |
 | `native/apple/Sources/LinksClient/IOSLargeFileSession.swift` | iOS upload receipt, private MLS send, and decrypt orchestration. |
 | `native/apple/Sources/LinksClient/IOSCallSession.swift` | iOS voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
+| `native/apple/Sources/LinksClient/IOSDecentralizedClient.swift` | iOS opaque relay transport retries, CID-verified provider storage, and trusted SFrame media relay selection. |
 | `native/apple/Sources/LinksClient/IOSMiniAppSandbox.swift` | iOS facade for the opaque native WASM sandbox runtime. |
 | `native/android/client/src/main/java/ai/links/app/AndroidVideoTranscoder.java` | Android MediaCodec surface transcode, MP4 mux, and faststart boundary. |
 | `native/android/client/src/main/java/ai/links/app/Mp4FastStart.java` | Android MP4 `moov` relocation and `stco`/`co64` offset repair. |
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileTransfer.java` | Android bounded ChaCha20-Poly1305 staging for video/files. |
 | `native/android/client/src/main/java/ai/links/app/AndroidLargeFileSession.java` | Android upload receipt, private MLS send, and decrypt orchestration. |
 | `native/android/client/src/main/java/ai/links/app/AndroidCallSession.java` | Android voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
+| `native/android/client/src/main/java/ai/links/app/AndroidDecentralizedClient.java` | Android opaque relay transport retries, CID-verified provider storage, and trusted SFrame media relay selection. |
 | `native/android/client/src/main/java/ai/links/app/AndroidMiniAppSandbox.java` | Android facade for the opaque native WASM sandbox runtime. |
 
 ## Build and test
