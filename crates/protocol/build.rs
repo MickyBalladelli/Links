@@ -5,6 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "media",
         "receipts",
         "message",
+        "broadcast",
         "envelope",
         "sync",
         "transport",

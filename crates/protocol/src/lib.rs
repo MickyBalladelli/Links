@@ -162,6 +162,25 @@ pub fn validate_broadcast_post(post: &v1::BroadcastPost) -> Result<(), ProtocolE
     Ok(())
 }
 
+/// Validate the public broker wrapper while leaving the broadcast payload
+/// opaque. Only the client holding the broadcast master key can open it.
+pub fn validate_broadcast_dispatch(
+    dispatch: &v1::BroadcastDispatch,
+) -> Result<(), ProtocolError> {
+    if dispatch.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&dispatch.conversation_id)?;
+    validate_id(&dispatch.post_id)?;
+    if dispatch.epoch > MAX_CURSOR || dispatch.ciphertext.is_empty() {
+        return Err(ProtocolError::Invalid("broadcast dispatch"));
+    }
+    if dispatch.encoded_len() > MAX_QUEUE_MESSAGE_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    Ok(())
+}
+
 pub fn validate_opus_audio_metadata(audio: &v1::OpusAudioMetadata) -> Result<(), ProtocolError> {
     if !matches!(
         v1::opus_audio_metadata::Container::try_from(audio.container),
