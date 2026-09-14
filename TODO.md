@@ -693,7 +693,11 @@ Run these checks continuously at the relevant phase boundary, with the full audi
   Audit scope and evidence checklist are prepared in
   `docs/crypto-audit-scope.md`; leave this item open until an independent
   auditor reviews a pinned commit and signs the final report.
-- [ ] Verify the zero-knowledge routing stance for centralized and decentralized deployments.
+- [x] Verify the zero-knowledge routing stance for centralized and decentralized deployments.
+  Static code and wire-contract review confirms that centralized gateways,
+  federation queues, storage providers, DHTs, and media relays receive only
+  routing metadata plus opaque encrypted bytes. Residual metadata and required
+  operational evidence are recorded in `docs/zero-knowledge-routing.md`.
 - [ ] Centralized benchmark: verify less than 50ms delivery latency for 1M concurrent WebSocket connections.
 - [ ] Decentralized benchmark: measure multi-hop gossip propagation across 50 international nodes.
 - [ ] Review battery use, reconnect behavior, offline delivery, key recovery, and multi-device removal before public release.

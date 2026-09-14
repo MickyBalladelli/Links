@@ -40,6 +40,7 @@ remain open.
 | `docs/blob-storage.md` | S3-compatible encrypted attachment storage and Cloudflare/CloudFront edge deployment contract. |
 | `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
 | `docs/crypto-audit-scope.md` | Independent PQXDH, MLS, SFrame, identity, envelope, and media-routing audit scope and sign-off record. |
+| `docs/zero-knowledge-routing.md` | Centralized/decentralized routing verification matrix, code evidence, metadata limits, and release checks. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 | `docs/directory.md` | Global `@username` lookup, active-device W3C `did:key` and public keys, revocation visibility and pre-key handoff. |
 | `docs/contact-discovery.md` | Local E.164 address-book hashing with Argon2id and a persistent client salt. |
