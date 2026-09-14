@@ -66,3 +66,15 @@ The seed is held in process memory by the foundation. Production desktop
 applications must supply an audited OS keychain/provider and durable local
 metadata boundary before relying on restart persistence. The native socket,
 durable `ClientCore` provider, and UI event loop remain host integration work.
+
+## Logging boundary
+
+The desktop and gateway APIs do not log request bodies, message events, MLS
+state, seeds, bearer tokens, or opaque sealed payloads. Secret-bearing Rust
+values have redacted `Debug` implementations: received text, call access
+tokens and SDP, SFrame epoch keys, image keys/ciphertext, media relay tokens,
+and push bodies render only as `REDACTED`. The server's only built-in process
+messages are startup and generic cleanup-failure messages. Production socket,
+HTTP, queue, proxy, crash, trace, and analytics integrations must keep body
+logging disabled and record only allowlisted status, size, latency, and
+failure-class fields.

@@ -6,7 +6,7 @@
 //! then exchange SDP and ICE. The SFU adapter never sees the key.
 
 use links_client_core::CoreError;
-use std::mem;
+use std::{fmt, mem};
 use uuid::Uuid;
 
 const MAX_TOKEN_BYTES: usize = 4_096;
@@ -39,13 +39,26 @@ pub enum DesktopCallSignalKind {
     IceCandidate,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopCallPlacement {
     pub room_name: String,
     pub region: String,
     pub endpoint: String,
     pub access_token: String,
     pub require_sframe: bool,
+}
+
+impl fmt::Debug for DesktopCallPlacement {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DesktopCallPlacement")
+            .field("room_name", &"[REDACTED]")
+            .field("region", &self.region)
+            .field("endpoint", &self.endpoint)
+            .field("access_token", &"[REDACTED]")
+            .field("require_sframe", &self.require_sframe)
+            .finish()
+    }
 }
 
 impl DesktopCallPlacement {
@@ -75,13 +88,26 @@ impl DesktopCallPlacement {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopCallSignal {
     pub session_id: Uuid,
     pub kind: DesktopCallSignalKind,
     pub sdp: String,
     pub sdp_mid: Option<String>,
     pub sdp_mline_index: Option<u32>,
+}
+
+impl fmt::Debug for DesktopCallSignal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DesktopCallSignal")
+            .field("session_id", &"[REDACTED]")
+            .field("kind", &self.kind)
+            .field("sdp", &"[REDACTED]")
+            .field("sdp_mid", &"[REDACTED]")
+            .field("sdp_mline_index", &self.sdp_mline_index)
+            .finish()
+    }
 }
 
 impl DesktopCallSignal {
@@ -113,12 +139,24 @@ impl DesktopCallSignal {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopCallEpochKey {
     pub media_session_id: Uuid,
     pub key_id: u64,
     pub epoch: u64,
     pub key: Vec<u8>,
+}
+
+impl fmt::Debug for DesktopCallEpochKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DesktopCallEpochKey")
+            .field("media_session_id", &"[REDACTED]")
+            .field("key_id", &self.key_id)
+            .field("epoch", &self.epoch)
+            .field("key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl DesktopCallEpochKey {

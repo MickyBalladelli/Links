@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
     fs,
+    fmt,
     io::{Read, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -62,11 +63,17 @@ impl DesktopEncryptedLargeFile {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopLargeFileUploadReceipt {
     pub attachment_id: String,
     pub ciphertext_size_bytes: u64,
     pub ciphertext_sha256: Vec<u8>,
+}
+
+impl fmt::Debug for DesktopLargeFileUploadReceipt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DesktopLargeFileUploadReceipt(REDACTED)")
+    }
 }
 
 impl DesktopLargeFileUploadReceipt {
@@ -91,7 +98,7 @@ pub trait DesktopLargeFileUploader: Send {
     ) -> Result<PathBuf, CoreError>;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopImageMetadata {
     pub attachment_id: String,
     pub mime_type: String,
@@ -102,6 +109,12 @@ pub struct DesktopImageMetadata {
     pub width: u32,
     pub height: u32,
     pub blur_hash: String,
+}
+
+impl fmt::Debug for DesktopImageMetadata {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DesktopImageMetadata(REDACTED)")
+    }
 }
 
 impl DesktopImageMetadata {
@@ -152,10 +165,16 @@ impl DesktopImageMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopEncryptedImage {
     pub metadata: DesktopImageMetadata,
     pub ciphertext: Vec<u8>,
+}
+
+impl fmt::Debug for DesktopEncryptedImage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DesktopEncryptedImage(REDACTED)")
+    }
 }
 
 impl DesktopEncryptedImage {
@@ -182,11 +201,17 @@ impl DesktopEncryptedImage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopImageUploadReceipt {
     pub attachment_id: String,
     pub ciphertext_size_bytes: u64,
     pub ciphertext_sha256: Vec<u8>,
+}
+
+impl fmt::Debug for DesktopImageUploadReceipt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DesktopImageUploadReceipt(REDACTED)")
+    }
 }
 
 impl DesktopImageUploadReceipt {
@@ -291,13 +316,19 @@ pub enum DesktopFrameResult {
     RecoveryComplete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DesktopReceivedTextMessage {
     pub conversation_id: String,
     pub sender_device_id: String,
     pub text: String,
     pub sequence_id: u64,
     pub sent_at_ms: u64,
+}
+
+impl fmt::Debug for DesktopReceivedTextMessage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DesktopReceivedTextMessage(REDACTED)")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

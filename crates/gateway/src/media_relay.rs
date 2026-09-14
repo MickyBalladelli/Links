@@ -12,7 +12,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use links_protocol::{self as protocol, v1};
 use prost::Message;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
@@ -495,7 +495,7 @@ impl SfuDhtClient for MemoryMediaRelayDht {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MediaRelayAccessToken {
     token_id: Uuid,
     relay_node_id: String,
@@ -505,6 +505,12 @@ pub struct MediaRelayAccessToken {
     max_duration_ms: u64,
     credit_units: u64,
     signature: [u8; 64],
+}
+
+impl fmt::Debug for MediaRelayAccessToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MediaRelayAccessToken(REDACTED)")
+    }
 }
 
 impl MediaRelayAccessToken {

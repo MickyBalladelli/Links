@@ -13,7 +13,7 @@ use links_server_store::{
     StoreError,
 };
 use prost::Message;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -168,17 +168,29 @@ pub struct PushWakeup {
     pub cursor: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ApnsSilentPush {
     pub push_type: &'static str,
     pub priority: &'static str,
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl fmt::Debug for ApnsSilentPush {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ApnsSilentPush(REDACTED)")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct FcmSilentPush {
     pub priority: &'static str,
     pub data: Vec<(String, String)>,
+}
+
+impl fmt::Debug for FcmSilentPush {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("FcmSilentPush(REDACTED)")
+    }
 }
 
 impl PushWakeup {

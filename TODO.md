@@ -454,7 +454,7 @@ exchanging encrypted one-to-one text through the same local development stack.
   shared-core call returns, after its durable inbox/cursor commit and QueueAck
   path. The macOS model renders only from that post-commit callback.
 - [x] Add reconnect, offline outbox retry, stale-cursor recovery, send failure, authentication expiry, and dependency outage states to the UI. `LinksMacOSAppModel` now exposes these states, queued outbox count, recovery action, and visible delivery banners; `IOSDirectMessaging` reconnects and retries durable outbox work when the transport returns.
-- [ ] Keep message text, decrypted metadata, seeds, bearer tokens, and sealed payloads out of application and server logs.
+- [x] Keep message text, decrypted metadata, seeds, bearer tokens, and sealed payloads out of application and server logs. Secret-bearing desktop/gateway values use redacted `Debug` implementations, native/server paths emit no request or payload bodies, and the desktop logging boundary is documented.
 
 ### Local development backend and two-client runner
 
