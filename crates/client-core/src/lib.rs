@@ -7,6 +7,7 @@ pub mod background;
 pub mod broadcast;
 pub mod contact_discovery;
 pub mod crypto;
+pub mod delegation;
 pub mod envelopes;
 pub mod identity;
 pub mod images;
