@@ -138,14 +138,6 @@ impl WebRtcSignalDelivery {
         Ok(())
     }
 
-    fn to_proto(&self) -> protocol::v1::WebRtcSignalDelivery {
-        protocol::v1::WebRtcSignalDelivery {
-            request_id: self.request_id.clone(),
-            sender_device_id: self.sender_device_id.to_string(),
-            signal: Some(self.signal.to_proto()),
-        }
-    }
-
     fn from_proto(delivery: protocol::v1::WebRtcSignalDelivery) -> Result<Self, CoreError> {
         protocol::validate_webrtc_signal_delivery(&delivery)?;
         let sender_device_id =

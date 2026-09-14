@@ -41,6 +41,17 @@ export interface WebWasmRtcSignalDelivery {
   sdp_mline_index(): number
 }
 
+export interface WebRtcSignalDelivery {
+  requestID: string
+  senderDeviceID: string
+  sessionID: string
+  targetDeviceID: string
+  kind: number
+  sdp: string
+  sdpMid: string
+  sdpMLineIndex: number
+}
+
 export interface WebClientWasmModule {
   WebClientIdentity: WebClientIdentityModule
 }
@@ -190,7 +201,17 @@ export class LinksWebClient {
     return this.core.is_webrtc_signal_frame(frame)
   }
 
-  decodeWebRtcSignal(frame: Uint8Array): WebWasmRtcSignalDelivery {
-    return this.core.decode_webrtc_signal(frame)
+  decodeWebRtcSignal(frame: Uint8Array): WebRtcSignalDelivery {
+    const delivery = this.core.decode_webrtc_signal(frame)
+    return {
+      requestID: delivery.request_id(),
+      senderDeviceID: delivery.sender_device_id(),
+      sessionID: delivery.session_id(),
+      targetDeviceID: delivery.target_device_id(),
+      kind: delivery.kind(),
+      sdp: delivery.sdp(),
+      sdpMid: delivery.sdp_mid(),
+      sdpMLineIndex: delivery.sdp_mline_index()
+    }
   }
 }
