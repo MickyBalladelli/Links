@@ -194,6 +194,22 @@ where
     }
 }
 
+/// Decode one broker broadcast dispatch before passing it to the client-core
+/// receive contract. This never opens the master-key ciphertext.
+pub fn decode_broadcast_dispatch(payload: &[u8]) -> Result<v1::BroadcastDispatch, QueueError> {
+    if payload.is_empty() || payload.len() > protocol::MAX_QUEUE_MESSAGE_BYTES {
+        return Err(if payload.len() > protocol::MAX_QUEUE_MESSAGE_BYTES {
+            QueueError::Protocol(protocol::ProtocolError::TooLarge)
+        } else {
+            QueueError::Protocol(protocol::ProtocolError::Malformed)
+        });
+    }
+    let dispatch = v1::BroadcastDispatch::decode(payload)
+        .map_err(|_| QueueError::Protocol(protocol::ProtocolError::Malformed))?;
+    protocol::validate_broadcast_dispatch(&dispatch)?;
+    Ok(dispatch)
+}
+
 /// RegionBus implementation for NATS JetStream. A real adapter supplies the
 /// mTLS-authenticated JetStream publisher and configures stream retention,
 /// replicas and consumer acknowledgements outside this crate.
