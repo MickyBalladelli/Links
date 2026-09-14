@@ -256,6 +256,9 @@ fn write_output(
         return Err(wasmi::Error::new("invalid output buffer"));
     }
     let length = length as usize;
+    if length > caller.data().max_output_bytes {
+        return Err(wasmi::Error::new("sandbox output limit exceeded"));
+    }
     let memory = caller
         .get_export(SANDBOX_MEMORY_EXPORT)
         .and_then(Extern::into_memory)
