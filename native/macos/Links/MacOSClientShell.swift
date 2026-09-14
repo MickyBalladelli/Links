@@ -249,6 +249,10 @@ private struct LinksSidebar: View {
                 StateRow(title: "Account", value: model.accountStatus)
                 StateRow(title: "Device", value: model.deviceStatus)
                 StateRow(title: "Connection", value: model.connectionStatus)
+                StateRow(title: "Delivery", value: model.deliveryState.title)
+                if model.pendingOutboxCount > 0 {
+                    StateRow(title: "Outbox", value: "\(model.pendingOutboxCount) queued")
+                }
                 StateRow(title: "Pre-keys", value: model.preKeyStatus)
                 StateRow(title: "Lifecycle", value: model.lifecycleStatus)
                 HStack {
@@ -258,8 +262,8 @@ private struct LinksSidebar: View {
                         showingPairing = true
                     }
                     .buttonStyle(.link)
-                    Button(model.hasMessagingHost ? "Disconnect" : "Connect") {
-                        if model.hasMessagingHost {
+                    Button(model.isConnectionRequested ? "Disconnect" : "Connect") {
+                        if model.isConnectionRequested {
                             model.disconnect()
                         } else {
                             model.connect()
@@ -340,6 +344,8 @@ private struct LinksConversationDetail: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
 
+                DeliveryStatusBanner(model: model)
+
                 Text(model.conversationSetupStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -363,6 +369,46 @@ private struct LinksConversationDetail: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct DeliveryStatusBanner: View {
+    @ObservedObject var model: LinksMacOSAppModel
+
+    private var state: LinksMacOSDeliveryState { model.deliveryState }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: state.systemImage)
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(state.title)
+                    .font(.callout.weight(.semibold))
+                Text(state.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if case .staleCursor = state {
+                Button("Recover") {
+                    model.recoverStaleCursor()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+        .background(color.opacity(0.08))
+    }
+
+    private var color: Color {
+        switch state {
+        case .ready: return .green
+        case .connecting, .reconnecting, .offlineOutboxRetry: return .orange
+        case .staleCursor, .authenticationExpired, .sendFailed, .dependencyOutage:
+            return .red
+        case .notConfigured, .offline: return .secondary
         }
     }
 }

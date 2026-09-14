@@ -25,12 +25,26 @@ public struct SharedCoreIdentity: Equatable {
     }
 }
 
+/// User-visible failure classes from the shared core. Concrete Rust bindings
+/// set `SharedClientCore.messagingIssue` when a frame or outbox operation
+/// fails; the host never guesses from plaintext or logs.
+public enum IOSMessagingIssue: Equatable, Sendable {
+    case staleCursor
+    case authenticationExpired
+    case dependencyOutage
+    case sendFailed
+}
+
 /// The native adapter for links-client-core. A production implementation
 /// owns the Rust ClientCore, MLS provider, envelope provider, and durable store.
 /// There is no software or plaintext fallback when this adapter is unavailable.
 public protocol SharedClientCore: AnyObject {
     var userID: String { get }
     var deviceID: String { get }
+    /// Last typed failure from the Rust binding, if one is available.
+    var messagingIssue: IOSMessagingIssue? { get }
+    /// Number of encrypted, durable outbox frames awaiting acceptance.
+    var pendingOutboxCount: Int { get }
     func durableCursor() throws -> UInt64
     func createHello(accessToken: String, lastSeenCursor: UInt64) throws -> Data
     /// Return recoveryComplete only after local inbox/MLS commit and QueueAck.
@@ -39,6 +53,12 @@ public protocol SharedClientCore: AnyObject {
                            fullSync: Bool,
                            onTextMessage: (IOSReceivedTextMessage) -> Void)
         throws -> IOSCoreFrameResult
+    /// Retry exact persisted outbox frames after reconnect. The binding must
+    /// never re-encrypt or create a new message for this operation.
+    func retryOutbox(transport: any IOSCoreTransport) throws
+    /// Reset only an expired replay cursor before an explicit full recovery.
+    /// The binding must preserve encrypted inbox data and MLS state.
+    func resetReplayCursorForRecovery() throws
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
     /// Surface-aware route. Channel publishers can implement this with the
@@ -76,6 +96,18 @@ public protocol SharedClientCore: AnyObject {
                        metadata: IOSLargeFileMetadata,
                        receipt: IOSLargeFileUploadReceipt,
                        transport: any IOSCoreTransport) throws
+}
+
+public extension SharedClientCore {
+    var messagingIssue: IOSMessagingIssue? { nil }
+
+    var pendingOutboxCount: Int { 0 }
+
+    func retryOutbox(transport: any IOSCoreTransport) throws {}
+
+    func resetReplayCursorForRecovery() throws {
+        throw IOSMessagingError.staleCursorRecoveryUnavailable
+    }
 }
 
 public protocol SharedCoreIdentitySigner: AnyObject {

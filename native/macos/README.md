@@ -68,6 +68,16 @@ Keychain storage.
 The SwiftUI app observes `scenePhase` so future transport and durable store
 hosts have explicit active, inactive, and background lifecycle hooks.
 
+### Delivery states
+
+The client shell exposes transport and durable-delivery state in the sidebar
+and conversation header. It shows reconnecting and encrypted outbox retry
+counts, keeps send failures visible, routes expired authentication back to
+sign-in, and reports dependency outages without discarding local state. A
+stale replay cursor shows a `Recover` action; recovery resets the cursor only
+through the shared core boundary and fails closed when that host operation is
+not available. Messages are rendered only from the post-commit callback.
+
 ## Local username auth and pairing
 
 After the hardware identity is enrolled, the first-run screen can register or

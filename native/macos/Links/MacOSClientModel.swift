@@ -28,6 +28,72 @@ enum LinksMacOSAuthMode: String, CaseIterable, Identifiable {
     var title: String { rawValue == "register" ? "Register" : "Log in" }
 }
 
+enum LinksMacOSDeliveryState: Equatable {
+    case notConfigured
+    case offline
+    case connecting
+    case ready
+    case reconnecting
+    case offlineOutboxRetry(count: Int)
+    case staleCursor
+    case authenticationExpired
+    case sendFailed
+    case dependencyOutage
+
+    var title: String {
+        switch self {
+        case .notConfigured: return "Not configured"
+        case .offline: return "Offline"
+        case .connecting: return "Connecting"
+        case .ready: return "Ready"
+        case .reconnecting: return "Reconnecting"
+        case .offlineOutboxRetry: return "Retrying encrypted outbox"
+        case .staleCursor: return "Recovery needed"
+        case .authenticationExpired: return "Sign-in required"
+        case .sendFailed: return "Send failed"
+        case .dependencyOutage: return "Service unavailable"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .notConfigured:
+            return "Install the shared Rust core and host providers."
+        case .offline:
+            return "Messages stay local until the connection returns."
+        case .connecting:
+            return "Opening the encrypted connection."
+        case .ready:
+            return "Encrypted connection is ready."
+        case .reconnecting:
+            return "Connection dropped. Retrying automatically."
+        case .offlineOutboxRetry(let count):
+            let suffix = count == 1 ? "" : "s"
+            return "\(count) encrypted message\(suffix) waiting to retry."
+        case .staleCursor:
+            return "Mailbox cursor expired. Full recovery is required."
+        case .authenticationExpired:
+            return "Sign in again to reconnect."
+        case .sendFailed:
+            return "The message was not accepted. Pending encrypted data is preserved."
+        case .dependencyOutage:
+            return "The account or messaging service is unavailable."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .ready: return "checkmark.circle.fill"
+        case .connecting, .reconnecting, .offlineOutboxRetry: return "arrow.clockwise"
+        case .staleCursor: return "arrow.triangle.2.circlepath"
+        case .authenticationExpired: return "person.crop.circle.badge.exclamationmark"
+        case .sendFailed: return "exclamationmark.bubble"
+        case .dependencyOutage: return "network.slash"
+        case .notConfigured, .offline: return "wifi.slash"
+        }
+    }
+}
+
 private final class IOSClientBox: @unchecked Sendable {
     let client: IOSClient
 
@@ -47,6 +113,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var accountStatus = "Signed out"
     @Published private(set) var deviceStatus = "No device enrolled"
     @Published private(set) var connectionStatus = "Core not configured"
+    @Published private(set) var deliveryState = LinksMacOSDeliveryState.notConfigured
+    @Published private(set) var pendingOutboxCount = 0
     @Published private(set) var lifecycleStatus = "Launching"
     @Published private(set) var conversations: [LinksMacOSConversation] = []
     @Published var selectedConversationID: String?
@@ -147,6 +215,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     var hasMessagingHost: Bool { messaging != nil }
 
+    var isConnectionRequested: Bool { connectionRequested }
+
     func scenePhaseDidChange(_ phase: ScenePhase) {
         switch phase {
         case .active:
@@ -162,6 +232,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             reconnectAfterBackground = connectionRequested && messaging != nil
             messaging?.shutdown()
             connectionStatus = "Offline"
+            deliveryState = .offline
         @unknown default:
             lifecycleStatus = "Unknown"
         }
@@ -368,19 +439,24 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         connectionRequested = false
         reconnectAfterBackground = false
         connectionStatus = "Offline"
+        deliveryState = .offline
+        pendingOutboxCount = 0
         actionError = nil
     }
 
     func connect() {
         guard let messaging else {
             connectionStatus = "Core not configured"
+            deliveryState = .notConfigured
             actionError = "Messaging host is not configured yet."
             return
         }
         connectionRequested = true
+        deliveryState = .connecting
+        connectionStatus = deliveryState.title
         do {
             try messaging.start()
-            connectionStatus = "Connecting"
+            pendingOutboxCount = messaging.pendingOutboxCount
             actionError = nil
             if let preKeyAPI {
                 preKeyStatus = "Preparing pre-key inventory"
@@ -399,7 +475,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             }
         } catch {
             connectionRequested = false
-            connectionStatus = "Failed"
+            deliveryState = .dependencyOutage
+            connectionStatus = deliveryState.title
             actionError = "Connection could not start."
         }
     }
@@ -408,7 +485,27 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         connectionRequested = false
         reconnectAfterBackground = false
         messaging?.stop()
-        connectionStatus = "Offline"
+        deliveryState = .offline
+        connectionStatus = deliveryState.title
+    }
+
+    func recoverStaleCursor() {
+        guard let messaging else {
+            deliveryState = .notConfigured
+            connectionStatus = deliveryState.title
+            return
+        }
+        guard deliveryState == .staleCursor else { return }
+        deliveryState = .connecting
+        connectionStatus = deliveryState.title
+        do {
+            try messaging.recoverFromStaleCursor()
+            actionError = nil
+        } catch {
+            deliveryState = .staleCursor
+            connectionStatus = deliveryState.title
+            actionError = "Full mailbox recovery is unavailable on this host."
+        }
     }
 
     /// Stop transport before process termination. The shared core owns the
@@ -419,7 +516,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         reconnectAfterBackground = false
         lifecycleStatus = "Stopping"
         messaging?.shutdown()
-        connectionStatus = "Offline"
+        deliveryState = .offline
+        connectionStatus = deliveryState.title
     }
 
     func createConversation(title: String, recipientUserID: String) -> Bool {
@@ -495,6 +593,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 conversationID: conversation.id,
                 recipientUserID: conversation.recipientUserID,
                 text: text)
+            pendingOutboxCount = messaging.pendingOutboxCount
             conversations[index].messages.append(LinksMacOSMessage(
                 id: UUID(),
                 text: text,
@@ -505,29 +604,61 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             actionError = nil
             persistLocalState()
         } catch {
-            actionError = "Message was not sent. Check the connection."
+            pendingOutboxCount = messaging.pendingOutboxCount
+            if pendingOutboxCount > 0 {
+                deliveryState = .offlineOutboxRetry(count: pendingOutboxCount)
+                connectionStatus = deliveryState.title
+                actionError = "Message queued in the encrypted outbox for retry."
+            } else if messaging.state == .connecting
+                        || messaging.state == .reconnecting
+                        || messaging.state == .dependencyOutage {
+                deliveryState = .reconnecting
+                connectionStatus = deliveryState.title
+                actionError = "Offline. Message stays in the composer until reconnect."
+            } else {
+                deliveryState = .sendFailed
+                connectionStatus = deliveryState.title
+                actionError = "Message was not sent. Check the connection."
+            }
         }
     }
 
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
                                     didChange state: IOSDirectMessaging.State) {
         Task { @MainActor [weak self] in
-            self?.handleMessagingStateChange(state)
+            self?.handleMessagingStateChange(state, messaging: messaging)
         }
     }
 
-    private func handleMessagingStateChange(_ state: IOSDirectMessaging.State) {
+    private func handleMessagingStateChange(_ state: IOSDirectMessaging.State,
+                                            messaging: IOSDirectMessaging) {
+        pendingOutboxCount = messaging.pendingOutboxCount
         switch state {
         case .stopped:
-            connectionStatus = "Offline"
+            deliveryState = .offline
         case .connecting:
-            connectionStatus = "Connecting"
+            deliveryState = connectionRequested ? .connecting : .offline
         case .ready:
-            connectionStatus = "Ready"
-            actionError = nil
+            deliveryState = pendingOutboxCount > 0
+                ? .offlineOutboxRetry(count: pendingOutboxCount) : .ready
+            if pendingOutboxCount == 0 { actionError = nil }
+        case .reconnecting:
+            deliveryState = pendingOutboxCount > 0
+                ? .offlineOutboxRetry(count: pendingOutboxCount) : .reconnecting
+        case .staleCursor:
+            deliveryState = .staleCursor
+        case .authenticationRequired:
+            deliveryState = .authenticationExpired
+            client?.clearAuthenticatedSession()
+            connectionRequested = false
+        case .dependencyOutage:
+            deliveryState = .dependencyOutage
+        case .sendFailed:
+            deliveryState = .sendFailed
         case .failed:
-            connectionStatus = "Failed"
+            deliveryState = .dependencyOutage
         }
+        connectionStatus = deliveryState.title
     }
 
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
@@ -559,13 +690,35 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging) {
         Task { @MainActor [weak self] in
-            self?.handleMessagingFailure()
+            self?.handleMessagingFailure(.dependencyOutage, messaging: messaging)
         }
     }
 
-    private func handleMessagingFailure() {
-        connectionStatus = "Failed"
-        actionError = "Encrypted messaging core failed."
+    nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging,
+                                            reason: IOSMessagingIssue) {
+        Task { @MainActor [weak self] in
+            self?.handleMessagingFailure(reason, messaging: messaging)
+        }
+    }
+
+    private func handleMessagingFailure(_ reason: IOSMessagingIssue,
+                                        messaging: IOSDirectMessaging) {
+        pendingOutboxCount = messaging.pendingOutboxCount
+        switch reason {
+        case .staleCursor:
+            deliveryState = .staleCursor
+        case .authenticationExpired:
+            deliveryState = .authenticationExpired
+            client?.clearAuthenticatedSession()
+            connectionRequested = false
+        case .dependencyOutage:
+            deliveryState = .dependencyOutage
+        case .sendFailed:
+            deliveryState = pendingOutboxCount > 0
+                ? .offlineOutboxRetry(count: pendingOutboxCount) : .sendFailed
+        }
+        connectionStatus = deliveryState.title
+        actionError = deliveryState.detail
     }
 
     private func refreshClientState() {

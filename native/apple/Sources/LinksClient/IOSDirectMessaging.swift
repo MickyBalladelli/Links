@@ -40,6 +40,15 @@ public protocol IOSDirectMessagingDelegate: AnyObject {
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didReceive message: IOSReceivedTextMessage)
     func directMessagingDidFail(_ messaging: IOSDirectMessaging)
+    func directMessagingDidFail(_ messaging: IOSDirectMessaging,
+                                reason: IOSMessagingIssue)
+}
+
+public extension IOSDirectMessagingDelegate {
+    func directMessagingDidFail(_ messaging: IOSDirectMessaging,
+                                reason: IOSMessagingIssue) {
+        directMessagingDidFail(messaging)
+    }
 }
 
 /// Connected iOS one-to-one text flow. Shared Rust core owns MLS, Sealed
@@ -49,6 +58,11 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         case stopped
         case connecting
         case ready
+        case reconnecting
+        case staleCursor
+        case authenticationRequired
+        case dependencyOutage
+        case sendFailed
         case failed
     }
 
@@ -89,6 +103,12 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         return currentState == .ready && connection?.isConnected == true
     }
 
+    public var pendingOutboxCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return core?.pendingOutboxCount ?? 0
+    }
+
     public func start() throws {
         lock.lock()
         let alreadyStarted = currentState == .connecting || currentState == .ready
@@ -109,9 +129,10 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         core = sharedCore
         connection = manager
         coreFailed = false
-        currentState = .connecting
+        let nextState: State = currentState == .stopped ? .connecting : .reconnecting
+        currentState = nextState
         lock.unlock()
-        notifyState(.connecting)
+        notifyState(nextState)
         manager.start()
     }
 
@@ -125,6 +146,27 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         lock.unlock()
         manager?.stop()
         notifyState(.stopped)
+    }
+
+    /// Clear an expired server cursor only through the shared durable core,
+    /// then reconnect with a full replay from cursor zero.
+    public func recoverFromStaleCursor() throws {
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let stale = currentState == .staleCursor
+        lock.unlock()
+        guard let sharedCore, let manager, stale else {
+            throw IOSMessagingError.staleCursorRecoveryUnavailable
+        }
+        try sharedCore.resetReplayCursorForRecovery()
+        lock.lock()
+        coreFailed = false
+        currentState = .connecting
+        lock.unlock()
+        notifyState(.connecting)
+        manager.stop()
+        manager.start()
     }
 
     /// Ask the shared Rust core to generate the first profile and replenish
@@ -218,11 +260,18 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         guard let sharedCore, let manager, ready, manager.isConnected else {
             throw IOSMessagingError.notConnected
         }
-        try sharedCore.sendText(
-            conversationID: conversationID,
-            recipientUserID: recipientUserID,
-            text: text,
-            transport: manager)
+        do {
+            try sharedCore.sendText(
+                conversationID: conversationID,
+                recipientUserID: recipientUserID,
+                text: text,
+                transport: manager)
+        } catch {
+            let issue = issue(for: sharedCore, error: error, fallback: .sendFailed)
+            setState(for: issue)
+            notifyFailure(issue)
+            throw error
+        }
     }
 
     /// Generate a private placeholder from normalized RGB pixels.
@@ -362,16 +411,37 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             lock.unlock()
             return
         }
+        let sharedCore = core
         let next: State
         switch state {
-        case .stopped: next = coreFailed ? .failed : .stopped
-        case .connecting: next = .connecting
-        case .ready: next = .ready
-        case .failed: next = .failed
+        // A deliberate stop after a typed core failure must not overwrite the
+        // visible stale-cursor, authentication, or send-failure state.
+        case .stopped: next = coreFailed ? currentState : .stopped
+        case .connecting:
+            next = currentState == .stopped || currentState == .connecting
+                ? .connecting
+                : .reconnecting
+        case .ready:
+            next = .ready
+        case .failed:
+            next = client.isAuthenticated ? .dependencyOutage : .authenticationRequired
         }
         currentState = next
         lock.unlock()
         notifyState(next)
+        if state == .ready, let sharedCore {
+            do {
+                try sharedCore.retryOutbox(transport: manager)
+                let pending = sharedCore.pendingOutboxCount
+                if pending > 0 {
+                    notifyState(.reconnecting)
+                }
+            } catch {
+                let issue = issue(for: sharedCore, error: error, fallback: .sendFailed)
+                setState(for: issue)
+                notifyFailure(issue)
+            }
+        }
     }
 
     public func connectionManager(_ manager: IOSConnectionManager, didReceive frame: Data) {
@@ -393,18 +463,27 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             for message in committedMessages {
                 notifyMessage(message)
             }
+            // Accepted frames can retire encrypted outbox entries. Refresh
+            // the host's visible queue state after the core call completes.
+            lock.lock()
+            let nextState = currentState
+            lock.unlock()
+            notifyState(nextState)
         } catch {
+            let issue = issue(for: sharedCore, error: error,
+                              fallback: client.isAuthenticated
+                                  ? .dependencyOutage : .authenticationExpired)
             lock.lock()
             guard connection === manager else {
                 lock.unlock()
                 return
             }
             coreFailed = true
-            currentState = .failed
+            currentState = state(for: issue)
             lock.unlock()
             manager.stop()
-            notifyState(.failed)
-            notifyFailure()
+            notifyState(state(for: issue))
+            notifyFailure(issue)
         }
     }
 
@@ -414,10 +493,18 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             lock.unlock()
             return
         }
-        currentState = .failed
+        let issue: IOSMessagingIssue = client.isAuthenticated
+            ? .dependencyOutage : .authenticationExpired
+        if issue == .authenticationExpired {
+            coreFailed = true
+        }
+        currentState = state(for: issue)
         lock.unlock()
-        notifyState(.failed)
-        notifyFailure()
+        notifyState(state(for: issue))
+        notifyFailure(issue)
+        if issue == .authenticationExpired {
+            manager.stop()
+        }
     }
 
     public func connectionManagerDidDisconnect(_ manager: IOSConnectionManager) {
@@ -426,9 +513,10 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             lock.unlock()
             return
         }
-        currentState = .connecting
+        let nextState: State = currentState == .connecting ? .connecting : .reconnecting
+        currentState = nextState
         lock.unlock()
-        notifyState(.connecting)
+        notifyState(nextState)
     }
 
     private func notifyState(_ state: State) {
@@ -445,11 +533,38 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         }
     }
 
-    private func notifyFailure() {
+    private func notifyFailure(_ issue: IOSMessagingIssue) {
         callbackQueue.async { [weak self] in
             guard let self else { return }
-            self.delegate?.directMessagingDidFail(self)
+            self.delegate?.directMessagingDidFail(self, reason: issue)
         }
+    }
+
+    private func setState(for issue: IOSMessagingIssue) {
+        lock.lock()
+        currentState = state(for: issue)
+        lock.unlock()
+        notifyState(state(for: issue))
+    }
+
+    private func state(for issue: IOSMessagingIssue) -> State {
+        switch issue {
+        case .staleCursor: return .staleCursor
+        case .authenticationExpired: return .authenticationRequired
+        case .dependencyOutage: return .dependencyOutage
+        case .sendFailed: return .sendFailed
+        }
+    }
+
+    private func issue(for sharedCore: any SharedClientCore, error: Error,
+                       fallback: IOSMessagingIssue) -> IOSMessagingIssue {
+        if let issue = sharedCore.messagingIssue {
+            return issue
+        }
+        if error is IOSClientError || !client.isAuthenticated {
+            return .authenticationExpired
+        }
+        return fallback
     }
 
     private static func isValidTextID(_ value: String) -> Bool {
@@ -463,4 +578,5 @@ public enum IOSMessagingError: Error {
     case invalidMessage
     case notConnected
     case preKeyBootstrapUnavailable
+    case staleCursorRecoveryUnavailable
 }
