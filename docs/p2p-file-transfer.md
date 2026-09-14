@@ -24,6 +24,7 @@ supports a persisted temporary file, resume after reconnect, streaming hash,
 and atomic finalization. No server upload-size limit is applied to this path;
 the `u64` manifest and chunked channel are the limits instead.
 
-The WebRTC session/SDP exchange remains a separate signaling concern. Hosts
-must not pass an unordered, lossy, or unauthenticated DataChannel to the file
-transfer adapter.
+`WebRtcSession` provides the separate authenticated signaling concern: it
+exchanges SDP offers/answers and ICE candidates over `links.v1` before handing
+the resulting peer connection to a file-transfer host. Hosts must not pass an
+unordered, lossy, or unauthenticated DataChannel to the file transfer adapter.

@@ -549,7 +549,10 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
 
 Add real-time media after messaging and file media are stable.
 
-- [ ] Implement WebRTC session SDP exchange.
+- [x] Implement WebRTC session SDP exchange.
+  `links.v1` carries bounded offer, answer, and ICE signals between live
+  authenticated device sockets; the browser `WebRtcSession` owns the
+  RTCPeerConnection offer/answer flow and candidate exchange.
 - [ ] Implement SFrame frame-level encryption hooks through the WebRTC Encoded Transform API.
 - [ ] Transmit SFrame epoch keys through the MLS control channel.
 - [ ] Deploy managed global SFU clusters using LiveKit or Mediasoup.

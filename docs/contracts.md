@@ -84,6 +84,17 @@ attachment metadata and content key; the DataChannel carries ciphertext only.
 The channel must be established and authenticated by the host's signaling
 layer before a transfer begins.
 
+WebRTC session signaling uses the `WebRtcSignal` client frame and
+`WebRtcSignalDelivery` server frame. The signal carries a random session ID,
+target device ID, bounded SDP text, and an offer, answer, or ICE-candidate
+kind. The gateway derives the sender device ID from the authenticated socket,
+routes only to a live target device, and never appends signaling to the
+encrypted mailbox. Cross-region adapters use transient signaling subjects.
+The browser `WebRtcSession` creates the offer or answer, applies remote
+descriptions, queues early ICE candidates until a remote description exists,
+and exposes only the established peer connection/DataChannel to the media
+host.
+
 `Envelope` contains version, envelope ID, recipient device, expiry and opaque
 sealed bytes. No sender, conversation, phone number, or plaintext content field
 is allowed. Core envelope adapters bind a domain-separated encoding of the outer

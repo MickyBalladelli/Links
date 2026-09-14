@@ -15,16 +15,16 @@ remain open.
 | Path | Responsibility |
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
-| `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, and validated channel/business/bot surface roles. |
+| `crates/protocol` | Generated common types, descriptors, boundary validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, WebRTC SDP/ICE signal validation, and MLS group limits. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, validated channel/business/bot surface roles, and WebRTC SDP/ICE frame helpers. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, and shared-core surface contracts. |
 | `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, and channel/business/bot surface adapter. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
-| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
-| `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, and durable publish adapters for cross-region gateway and channel routing. |
+| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, and configured APNs/FCM silent wakeup contracts. |
+| `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, transient cross-region WebRTC signaling, and durable publish adapters for cross-region gateway and channel routing. |
 | `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, internal text shells, and channel/business/bot surface hosts. |
 | `web` | TypeScript Web host for the shared Rust/WASM client core. |
 | `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
@@ -66,6 +66,7 @@ remain open.
 | `docs/voice-notes.md` | Opus profile, Ogg container, encryption boundary and platform codec contract. |
 | `docs/video-transcoding.md` | Native VideoToolbox/MediaCodec profiles and hardware-only transcode boundary. |
 | `docs/p2p-file-transfer.md` | WebRTC DataChannel ciphertext-only transfer, resume, backpressure, and integrity contract. |
+| `docs/webrtc-signaling.md` | Authenticated live-device SDP/ICE exchange, gateway routing, and browser session contract. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |
 | `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |
