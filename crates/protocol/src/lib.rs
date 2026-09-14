@@ -29,6 +29,9 @@ pub const MAX_WEBRTC_SDP_MID_BYTES: usize = 128;
 pub const MAX_SFU_DISCOVERY_RECORD_BYTES: usize = 8 * 1024;
 pub const MAX_SFU_DISCOVERY_TTL_MS: u64 = 10 * 60 * 1000;
 pub const MAX_SFU_DISCOVERY_RESULTS: usize = 16;
+pub const MAX_MEDIA_RELAY_RECORD_BYTES: usize = 8 * 1024;
+pub const MAX_MEDIA_RELAY_TOKEN_BYTES: usize = 4 * 1024;
+pub const MAX_MEDIA_RELAY_USAGE_RECEIPT_BYTES: usize = 4 * 1024;
 pub const SFRAME_CIPHER_SUITE_AES_128_GCM_SHA256_128: u32 = 1;
 pub const SFRAME_AES_128_KEY_BYTES: usize = 16;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
@@ -682,6 +685,143 @@ pub fn decode_sfu_discovery_record(
     let record = v1::SfuDiscoveryRecord::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
     validate_sfu_discovery_record(&record)?;
     Ok(record)
+}
+
+pub fn validate_media_relay_record(
+    record: &v1::MediaRelayRecord,
+) -> Result<(), ProtocolError> {
+    if record.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_gateway_locator(&record.node_id)?;
+    validate_gateway_locator(&record.region)?;
+    if record.websocket_url.is_empty()
+        || record.websocket_url.len() > 512
+        || !record.websocket_url.starts_with("wss://")
+        || record
+            .websocket_url
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'#')
+    {
+        return Err(ProtocolError::Invalid("relay websocket url"));
+    }
+    if !record.turn_url.is_empty()
+        && (record.turn_url.len() > 512
+            || !(record.turn_url.starts_with("turn:") || record.turn_url.starts_with("turns:"))
+            || record
+                .turn_url
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'#'))
+    {
+        return Err(ProtocolError::Invalid("relay turn url"));
+    }
+    if record.public_key.len() != 32
+        || record.public_key.iter().all(|byte| *byte == 0)
+        || record.sequence == 0
+        || record.expires_at_ms == 0
+        || !matches!(record.mode, 1 | 2)
+        || (record.mode == 1 && record.price_units_per_minute != 0)
+        || (record.mode == 2 && record.price_units_per_minute == 0)
+        || record.max_bitrate_kbps == 0
+        || !record.supports_sframe
+        || record.signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("media relay record"));
+    }
+    if record.encoded_len() > MAX_MEDIA_RELAY_RECORD_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    Ok(())
+}
+
+pub fn decode_media_relay_record(
+    bytes: &[u8],
+) -> Result<v1::MediaRelayRecord, ProtocolError> {
+    if bytes.is_empty() || bytes.len() > MAX_MEDIA_RELAY_RECORD_BYTES {
+        return Err(if bytes.len() > MAX_MEDIA_RELAY_RECORD_BYTES {
+            ProtocolError::TooLarge
+        } else {
+            ProtocolError::Malformed
+        });
+    }
+    let record = v1::MediaRelayRecord::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
+    validate_media_relay_record(&record)?;
+    Ok(record)
+}
+
+pub fn validate_media_relay_access_token(
+    token: &v1::MediaRelayAccessToken,
+) -> Result<(), ProtocolError> {
+    if token.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&token.token_id)?;
+    validate_gateway_locator(&token.relay_node_id)?;
+    validate_id(&token.session_id)?;
+    if token.expires_at_ms == 0
+        || token.max_bytes == 0
+        || token.max_duration_ms == 0
+        || token.credit_units == 0
+        || token.signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("media relay token"));
+    }
+    if token.encoded_len() > MAX_MEDIA_RELAY_TOKEN_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    Ok(())
+}
+
+pub fn decode_media_relay_access_token(
+    bytes: &[u8],
+) -> Result<v1::MediaRelayAccessToken, ProtocolError> {
+    if bytes.is_empty() || bytes.len() > MAX_MEDIA_RELAY_TOKEN_BYTES {
+        return Err(if bytes.len() > MAX_MEDIA_RELAY_TOKEN_BYTES {
+            ProtocolError::TooLarge
+        } else {
+            ProtocolError::Malformed
+        });
+    }
+    let token = v1::MediaRelayAccessToken::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
+    validate_media_relay_access_token(&token)?;
+    Ok(token)
+}
+
+pub fn validate_media_relay_usage_receipt(
+    receipt: &v1::MediaRelayUsageReceipt,
+) -> Result<(), ProtocolError> {
+    if receipt.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_id(&receipt.token_id)?;
+    validate_gateway_locator(&receipt.relay_node_id)?;
+    validate_id(&receipt.session_id)?;
+    if receipt.bytes_relayed == 0
+        || receipt.duration_ms == 0
+        || receipt.issued_at_ms == 0
+        || receipt.signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("media relay usage"));
+    }
+    if receipt.encoded_len() > MAX_MEDIA_RELAY_USAGE_RECEIPT_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    Ok(())
+}
+
+pub fn decode_media_relay_usage_receipt(
+    bytes: &[u8],
+) -> Result<v1::MediaRelayUsageReceipt, ProtocolError> {
+    if bytes.is_empty() || bytes.len() > MAX_MEDIA_RELAY_USAGE_RECEIPT_BYTES {
+        return Err(if bytes.len() > MAX_MEDIA_RELAY_USAGE_RECEIPT_BYTES {
+            ProtocolError::TooLarge
+        } else {
+            ProtocolError::Malformed
+        });
+    }
+    let receipt = v1::MediaRelayUsageReceipt::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
+    validate_media_relay_usage_receipt(&receipt)?;
+    Ok(receipt)
 }
 
 pub fn decode_message(bytes: &[u8]) -> Result<v1::Message, ProtocolError> {

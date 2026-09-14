@@ -1,0 +1,49 @@
+syntax = "proto3";
+package links.v1;
+
+// Public relay capability record for the DHT. It contains endpoint and
+// pricing metadata only; it never contains room, account, participant, token,
+// MLS, SFrame, or media data.
+message MediaRelayRecord {
+  uint32 protocol_version = 1;
+  string node_id = 2;
+  string region = 3;
+  string websocket_url = 4;
+  string turn_url = 5;
+  bytes public_key = 6;
+  uint64 sequence = 7;
+  uint64 expires_at_ms = 8;
+  uint32 mode = 9;
+  uint64 price_units_per_minute = 10;
+  uint32 max_bitrate_kbps = 11;
+  bool supports_sframe = 12;
+  bytes signature = 13;
+}
+
+// Short-lived, node-bound credit capability. It is presented only to the
+// selected relay, not published into the DHT.
+message MediaRelayAccessToken {
+  uint32 protocol_version = 1;
+  string token_id = 2;
+  string relay_node_id = 3;
+  string session_id = 4;
+  uint64 expires_at_ms = 5;
+  uint64 max_bytes = 6;
+  uint64 max_duration_ms = 7;
+  uint64 credit_units = 8;
+  bytes signature = 9;
+}
+
+// Signed proof of token relay work. It contains opaque session identifiers,
+// not user or conversation identity.
+message MediaRelayUsageReceipt {
+  uint32 protocol_version = 1;
+  string token_id = 2;
+  string relay_node_id = 3;
+  string session_id = 4;
+  uint64 bytes_relayed = 5;
+  uint64 duration_ms = 6;
+  uint64 charged_units = 7;
+  uint64 issued_at_ms = 8;
+  bytes signature = 9;
+}
