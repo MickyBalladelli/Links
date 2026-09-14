@@ -1,9 +1,9 @@
 use crate::{
     service::{
         AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest,
-        DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
+        CreateGroupRequest, DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
-        PrivacyPassRedeemRequest, StartRequest,
+        PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest,
     },
     AuthError,
 };
@@ -13,7 +13,7 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use links_protocol::{v1, MAX_PREKEY_UPLOAD_BYTES};
@@ -28,6 +28,19 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/auth/username/login", post(username_login))
         .route("/v1/auth/me", get(me))
         .route("/v1/devices", post(register_device))
+        .route("/v1/devices/{device_id}", delete(revoke_device))
+        .layer(DefaultBodyLimit::max(4096));
+    let group_routes = Router::new()
+        .route("/v1/groups", post(create_group))
+        .route("/v1/groups/{group_id}/members", get(group_members))
+        .route(
+            "/v1/groups/{group_id}/members/{user_id}/role",
+            put(set_group_role),
+        )
+        .route(
+            "/v1/groups/{group_id}/members/{user_id}",
+            delete(remove_group_member),
+        )
         .layer(DefaultBodyLimit::max(4096));
     let passkey_routes = Router::new()
         .route("/v1/passkeys/register/start", post(passkey_register_start))
@@ -73,6 +86,7 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .layer(DefaultBodyLimit::max(4096));
     Router::new()
         .merge(auth_routes)
+        .merge(group_routes)
         .merge(passkey_routes)
         .merge(prekey_routes)
         .merge(directory_routes)
@@ -246,6 +260,61 @@ async fn register_device(
         )
         .await?,
     ))
+}
+async fn revoke_device(
+    State(auth): State<Arc<AccountAuth>>,
+    Path(device_id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.revoke_device(bearer(&headers)?, device_id).await?,
+    ))
+}
+async fn create_group(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<CreateGroupRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.create_group(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn group_members(
+    State(auth): State<Arc<AccountAuth>>,
+    Path(group_id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.group_members(bearer(&headers)?, group_id).await?,
+    ))
+}
+async fn set_group_role(
+    State(auth): State<Arc<AccountAuth>>,
+    Path((group_id, user_id)): Path<(uuid::Uuid, uuid::Uuid)>,
+    headers: HeaderMap,
+    request: Result<Json<SetGroupRoleRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.set_group_role(
+        bearer(&headers)?,
+        group_id,
+        user_id,
+        request.map_err(|_| AuthError::Invalid)?.0,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn remove_group_member(
+    State(auth): State<Arc<AccountAuth>>,
+    Path((group_id, user_id)): Path<(uuid::Uuid, uuid::Uuid)>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.remove_group_member(bearer(&headers)?, group_id, user_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn passkey_register_start(
     State(auth): State<Arc<AccountAuth>>,

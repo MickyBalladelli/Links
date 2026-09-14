@@ -19,14 +19,14 @@ pub enum Role {
     Member,
 }
 impl Role {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Owner => "owner",
             Self::Admin => "admin",
             Self::Member => "member",
         }
     }
-    fn parse(value: &str) -> Result<Self, StoreError> {
+    pub fn parse(value: &str) -> Result<Self, StoreError> {
         match value {
             "owner" => Ok(Self::Owner),
             "admin" => Ok(Self::Admin),
@@ -70,13 +70,18 @@ pub struct HandleDirectoryRecord {
     pub devices: Vec<DirectoryDeviceRecord>,
 }
 impl GroupKind {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Direct => "direct",
             Self::Group => "group",
             Self::Channel => "channel",
         }
     }
+}
+
+pub struct GroupMemberRecord {
+    pub user_id: Uuid,
+    pub role: Role,
 }
 
 #[derive(Clone)]
@@ -704,6 +709,38 @@ impl RelationalStore {
             .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Return the current account-level membership snapshot to a group member.
+    /// MLS leaves remain private to clients; this is only the RBAC control plane.
+    pub async fn group_members(
+        &self,
+        group_id: Uuid,
+        actor: Uuid,
+    ) -> Result<Vec<GroupMemberRecord>, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        lock_group(&mut tx, group_id).await?;
+        require_active_account(&mut tx, actor).await?;
+        if role_in(&mut tx, group_id, actor).await?.is_none() {
+            return Err(StoreError::Forbidden);
+        }
+        let rows = sqlx::query(
+            "SELECT user_id,role FROM group_memberships WHERE group_id=$1 ORDER BY joined_at,user_id",
+        )
+        .bind(group_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let members = rows
+            .into_iter()
+            .map(|row| {
+                Ok(GroupMemberRecord {
+                    user_id: row.get("user_id"),
+                    role: Role::parse(row.get("role"))?,
+                })
+            })
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        tx.commit().await?;
+        Ok(members)
     }
 }
 

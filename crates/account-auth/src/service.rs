@@ -7,7 +7,9 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
 use links_protocol::{self, v1, validate_handle};
-use links_server_store::postgres::RelationalStore;
+use links_server_store::{
+    postgres::{GroupKind, RelationalStore, Role},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -234,6 +236,45 @@ pub struct DeviceRegistrationResponse {
     pub mls_node_id: Uuid,
     pub public_key: String,
     pub mls_credential: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateGroupRequest {
+    pub group_id: Uuid,
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct GroupResponse {
+    pub group_id: Uuid,
+    pub owner_id: Uuid,
+    pub kind: String,
+}
+
+#[derive(Serialize)]
+pub struct GroupMemberResponse {
+    pub user_id: Uuid,
+    pub role: String,
+}
+
+#[derive(Serialize)]
+pub struct GroupMembersResponse {
+    pub group_id: Uuid,
+    pub members: Vec<GroupMemberResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetGroupRoleRequest {
+    pub role: String,
+}
+
+#[derive(Serialize)]
+pub struct DeviceRevocationResponse {
+    pub device_id: Uuid,
+    pub revoked: bool,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Session {
@@ -1096,6 +1137,115 @@ impl AccountAuth {
         Ok(AuthenticatedAccount {
             user_id: row.get("user_id"),
             device_id: row.get("device_id"),
+        })
+    }
+
+    /// Create the account-level control-plane record for a group. MLS state is
+    /// created separately by the elected member and never lives on the server.
+    pub async fn create_group(
+        &self,
+        token: &str,
+        request: CreateGroupRequest,
+    ) -> Result<GroupResponse, AuthError> {
+        if request.group_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let kind = match request.kind.as_deref().unwrap_or("group") {
+            "direct" => GroupKind::Direct,
+            "group" => GroupKind::Group,
+            "channel" => GroupKind::Channel,
+            _ => return Err(AuthError::Invalid),
+        };
+        let account = self.authenticate(token).await?;
+        RelationalStore::from_pool(self.pool.clone())
+            .create_group(request.group_id, account.user_id, kind)
+            .await?;
+        Ok(GroupResponse {
+            group_id: request.group_id,
+            owner_id: account.user_id,
+            kind: kind.as_str().to_owned(),
+        })
+    }
+
+    /// Return an authenticated membership snapshot. Role changes are applied
+    /// by separate endpoints so the client can stage the matching MLS commit.
+    pub async fn group_members(
+        &self,
+        token: &str,
+        group_id: Uuid,
+    ) -> Result<GroupMembersResponse, AuthError> {
+        if group_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        let members = RelationalStore::from_pool(self.pool.clone())
+            .group_members(group_id, account.user_id)
+            .await?
+            .into_iter()
+            .map(|member| GroupMemberResponse {
+                user_id: member.user_id,
+                role: member.role.as_str().to_owned(),
+            })
+            .collect();
+        Ok(GroupMembersResponse { group_id, members })
+    }
+
+    /// Apply RBAC using the bearer-session account as actor. The target user
+    /// comes from the path, never from an untrusted actor field in JSON.
+    pub async fn set_group_role(
+        &self,
+        token: &str,
+        group_id: Uuid,
+        target_user_id: Uuid,
+        request: SetGroupRoleRequest,
+    ) -> Result<(), AuthError> {
+        if group_id.is_nil() || target_user_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let role = Role::parse(&request.role).map_err(|_| AuthError::Invalid)?;
+        let account = self.authenticate(token).await?;
+        RelationalStore::from_pool(self.pool.clone())
+            .set_role(group_id, account.user_id, target_user_id, role)
+            .await?;
+        Ok(())
+    }
+
+    /// Remove a member or let the authenticated member leave. The caller must
+    /// deliver the corresponding MLS remove commit before the next epoch.
+    pub async fn remove_group_member(
+        &self,
+        token: &str,
+        group_id: Uuid,
+        target_user_id: Uuid,
+    ) -> Result<(), AuthError> {
+        if group_id.is_nil() || target_user_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        RelationalStore::from_pool(self.pool.clone())
+            .remove_member(group_id, account.user_id, target_user_id)
+            .await?;
+        Ok(())
+    }
+
+    /// Revoke a physical client from the authenticated account. Every local
+    /// MLS group containing that device must then stage a remove commit with
+    /// `OpenMlsEngine::remove_devices`.
+    pub async fn revoke_device(
+        &self,
+        token: &str,
+        device_id: Uuid,
+    ) -> Result<DeviceRevocationResponse, AuthError> {
+        if device_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        RelationalStore::from_pool(self.pool.clone())
+            .revoke_device(account.user_id, device_id)
+            .await?;
+        Ok(DeviceRevocationResponse {
+            device_id,
+            revoked: true,
         })
     }
 
