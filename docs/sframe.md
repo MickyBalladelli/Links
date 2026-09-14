@@ -46,6 +46,10 @@ The handler must authorize the sender, install the key in the local media
 controller with `WebRtcSession.installSFrameControlKey()`, and make repeated
 delivery idempotent before the queue cursor is acknowledged.
 
+For background wakeups, `BackgroundWorker::run_once_with_sframe()` provides
+the same handler boundary. The default worker rejects control messages rather
+than storing raw media keys in the ordinary inbox.
+
 ## Key custody
 
 MLS remains the source of epoch key material. This task only adds the local
