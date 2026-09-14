@@ -113,8 +113,12 @@ impl SFrameKeySchedule {
         if let Some(active) = self
             .current
             .as_ref()
-            .or(self.previous.as_ref())
             .filter(|active| active.key_id() == key.key_id())
+            .or_else(|| {
+                self.previous
+                    .as_ref()
+                    .filter(|active| active.key_id() == key.key_id())
+            })
         {
             if active.epoch() == key.epoch() && active.key_bytes() == key.key_bytes() {
                 return Ok(());
