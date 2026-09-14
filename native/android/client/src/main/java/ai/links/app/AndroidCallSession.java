@@ -365,9 +365,13 @@ public final class AndroidCallSession {
 
     private void validateKey(EpochKey key) throws IOException {
         if (key == null || !mediaSessionId.equals(key.mediaSessionId)
-                || key.keyId < 0 || key.epoch < 0
-                || key.copyKey().length != 16 || allZero(key.copyKey()))
-            throw new IOException("Invalid SFrame key material");
+                || key.keyId < 0 || key.epoch < 0) throw new IOException("Invalid SFrame key material");
+        byte[] copy = key.copyKey();
+        try {
+            if (copy.length != 16 || allZero(copy)) throw new IOException("Invalid SFrame key material");
+        } finally {
+            Arrays.fill(copy, (byte) 0);
+        }
     }
 
     private static CompletableFuture<Void> failed(Throwable error) {
@@ -414,10 +418,11 @@ public final class AndroidCallSession {
 
     private static boolean validEndpoint(String value) {
         if (value == null || !value.startsWith("wss://")) return false;
-        String authority = value.substring("wss://".length());
+        String remainder = value.substring("wss://".length());
+        String authority = remainder.split("/", 2)[0];
         return !authority.isEmpty() && authority.indexOf('@') < 0
                 && authority.indexOf('?') < 0 && authority.indexOf('#') < 0
-                && authority.indexOf('/') < 0;
+                && authority.indexOf(' ') < 0;
     }
 
     private static void requireUuid(String value, String field) throws IOException {

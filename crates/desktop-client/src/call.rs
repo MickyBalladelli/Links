@@ -225,6 +225,7 @@ where
         if media_session_id.is_nil() {
             return Err(CoreError::Provider);
         }
+        validate_placement(&placement)?;
         Ok(Self {
             mode,
             placement,
@@ -307,6 +308,7 @@ where
             if !self.joined || signal.session_id != self.session_id {
                 return Err(CoreError::Provider);
             }
+            validate_signal(&signal, self.session_id)?;
             match signal.kind {
                 DesktopCallSignalKind::IceCandidate => {
                     if !self.remote_description_set {
@@ -402,6 +404,34 @@ fn validate_key(key: &DesktopCallEpochKey, expected_media_session_id: Uuid) -> R
     Ok(())
 }
 
+fn validate_placement(placement: &DesktopCallPlacement) -> Result<(), CoreError> {
+    if !placement.require_sframe
+        || !valid_room_name(&placement.room_name)
+        || !valid_region(&placement.region)
+        || !valid_endpoint(&placement.endpoint)
+        || placement.access_token.is_empty()
+        || placement.access_token.len() > MAX_TOKEN_BYTES
+    {
+        return Err(CoreError::Provider);
+    }
+    Ok(())
+}
+
+fn validate_signal(signal: &DesktopCallSignal, session_id: Uuid) -> Result<(), CoreError> {
+    if signal.session_id != session_id
+        || signal.session_id.is_nil()
+        || signal.sdp.is_empty()
+        || signal.sdp.len() > MAX_SIGNAL_BYTES
+        || signal
+            .sdp_mid
+            .as_ref()
+            .is_some_and(|value| value.len() > 256)
+    {
+        return Err(CoreError::Provider);
+    }
+    Ok(())
+}
+
 fn valid_room_name(value: &str) -> bool {
     let bytes = value.as_bytes();
     (MIN_ROOM_NAME_BYTES..=MAX_ROOM_NAME_BYTES).contains(&bytes.len())
@@ -422,9 +452,10 @@ fn valid_endpoint(value: &str) -> bool {
     let Some(authority) = value.strip_prefix("wss://") else {
         return false;
     };
+    let authority = authority.split('/').next().unwrap_or_default();
     !authority.is_empty()
         && authority
             .as_bytes()
             .iter()
-            .all(|byte| !matches!(byte, b'@' | b'?' | b'#' | b'/' | b' '))
+            .all(|byte| !matches!(byte, b'@' | b'?' | b'#' | b' '))
 }
