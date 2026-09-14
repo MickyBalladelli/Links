@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LinksClient
 import LinksKeyStore
@@ -39,8 +40,6 @@ final class LinksMacOSAppModel: ObservableObject {
     }
 
     var packageStatus: String {
-        _ = keyStore
-        _ = client
         return "LinksClient + LinksKeyStore"
     }
 }
@@ -75,7 +74,8 @@ private struct LinksRootView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(22)
-        .frame(width: 240, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minWidth: 240, idealWidth: 240, maxWidth: 240,
+               maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var conversationPlaceholder: some View {

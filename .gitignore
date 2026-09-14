@@ -9,3 +9,11 @@
 /native/android/.gradle/
 /native/android/build/
 /native/android/local.properties
+/native/macos/.build/
+/native/macos/.swiftpm/
+/native/macos/DerivedData/
+/native/macos/build/
+/native/macos/Links.xcodeproj/xcuserdata/
+/native/macos/Links.xcodeproj/project.xcworkspace/xcuserdata/
+/.xcode-derived-data/
+*.xcuserstate
