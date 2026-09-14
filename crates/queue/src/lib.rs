@@ -38,6 +38,8 @@ pub enum QueueError {
     SignatureInvalid,
     #[error("federation relay batch expired")]
     Expired,
+    #[error("federation relay publish failed for batch {batch_id}")]
+    RelayPublishFailed { batch_id: String },
 }
 
 impl From<QueueError> for GatewayError {
@@ -54,7 +56,7 @@ impl From<QueueError> for GatewayError {
             | QueueError::WrongDestination
             | QueueError::SignatureInvalid
             | QueueError::Expired => Self::Invalid,
-            QueueError::Unavailable => Self::Unavailable,
+            QueueError::Unavailable | QueueError::RelayPublishFailed { .. } => Self::Unavailable,
         }
     }
 }
@@ -673,15 +675,18 @@ where
         now_ms: u64,
     ) -> Result<String, QueueError> {
         let batch_id = Uuid::new_v4().hyphenated().to_string();
-        self.publish_batch_to_peers(
+        let result = self
+            .publish_batch_to_peers(
             destination_node_ids,
             &batch_id,
             envelopes,
             expires_at_ms,
             now_ms,
         )
-        .await?;
-        Ok(batch_id)
+        .await;
+        result.map(|_| batch_id.clone()).map_err(|_| {
+            QueueError::RelayPublishFailed { batch_id }
+        })
     }
 
     pub async fn publish_batch_to_peers(
@@ -704,7 +709,9 @@ where
         {
             return Err(QueueError::Invalid("duplicate federation destination"));
         }
-        validate_relay_fields(&self.source_node_id, &destination_node_ids[0], batch_id)?;
+        for destination_node_id in destination_node_ids {
+            validate_relay_fields(&self.source_node_id, destination_node_id, batch_id)?;
+        }
         serialize_relay_envelopes(&envelopes, now_ms)?;
         for destination_node_id in destination_node_ids {
             let batch = FederationRelayBatch::sign(
