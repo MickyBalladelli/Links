@@ -592,6 +592,9 @@ pub fn encode_server_frame(frame: &v1::ServerFrame) -> Result<Vec<u8>, GatewayEr
     }
     if let Some(v1::server_frame::Body::WebRtcSignal(delivery)) = frame.body.as_ref() {
         protocol::validate_webrtc_signal_delivery(delivery)?;
+        if delivery.request_id != frame.request_id {
+            return Err(GatewayError::Invalid);
+        }
     }
     if frame.encoded_len() > protocol::MAX_FRAME_BYTES {
         return Err(GatewayError::Invalid);

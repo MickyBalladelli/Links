@@ -178,6 +178,9 @@ pub fn decode_server_signal(bytes: &[u8]) -> Result<WebRtcSignalDelivery, CoreEr
         Some(protocol::v1::server_frame::Body::WebRtcSignal(delivery)) => delivery,
         _ => return Err(CoreError::Authentication),
     };
+    if delivery.request_id != frame.request_id {
+        return Err(CoreError::Authentication);
+    }
     WebRtcSignalDelivery::from_proto(delivery)
 }
 
