@@ -82,6 +82,7 @@ remain open.
 | `docs/mini-app-permissions.md` | Fine-grained HTTPS host/method grants, mediated network calls, and opaque hardware-key operation grants for Mini-Apps. |
 | `docs/organization-controls.md` | Authenticated organization gates for exposing Mini-Apps and bots, with owner/admin update rules and revisioning. |
 | `crates/server-store/migrations/0013_organization_controls.sql` | Default-off organization feature gates for Mini-Apps and bots. |
+| `docs/federation.md` | Selected Matrix-style federated server-node layer, encrypted envelope contract, and rollout boundary. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |

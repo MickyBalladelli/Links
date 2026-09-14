@@ -628,7 +628,12 @@ This is a separate expansion track. Do not block the centralized release on it.
 
 ### Protocol and identity
 
-- [ ] Select one protocol layer: federated server nodes (Matrix-style), decentralized relay network (Nostr/XMTP-style), or P2P Libp2p mesh.
+- [x] Select one protocol layer: federated server nodes (Matrix-style), decentralized relay network (Nostr/XMTP-style), or P2P Libp2p mesh.
+  Links selects Matrix-style federated server nodes. Each account keeps a
+  home node; nodes exchange only authenticated, encrypted `Envelope` batches.
+  Existing MLS, Sealed Sender, queues, cursors, and client replay stay intact.
+  Nostr/XMTP relays and Libp2p mesh are not selected for this expansion. See
+  `docs/federation.md`.
 - [ ] Implement W3C Decentralized Identifiers (DIDs) or smart-contract key registries on Solana / Base to map `@handles` to public identity keys.
 
 ### Routing and storage
