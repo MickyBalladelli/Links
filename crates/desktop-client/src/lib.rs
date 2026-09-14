@@ -28,6 +28,7 @@ pub use session::{
 };
 pub use surfaces::DesktopSurfaceClient;
 pub use links_client_core::surfaces::{SurfaceKind, SurfaceProfile, SurfaceRole};
+pub use links_client_core::decentralized;
 pub use links_client_core::sandbox::{
     SandboxCryptoGrant, SandboxCryptoOperation, SandboxCryptoRequest, SandboxError,
     SandboxHost, SandboxLimits, SandboxNetworkRequest, SandboxNetworkResponse,
