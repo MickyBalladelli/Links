@@ -1,8 +1,9 @@
 use crate::{
     service::{
-        AccountAuth, ContactPsiQueryRequest, DeviceRegistrationRequest, EncryptedKeyBackupRequest,
-        FinishRequest, PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest,
-        PrivacyPassIssueRequest, PrivacyPassRedeemRequest, StartRequest,
+        AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest,
+        DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
+        PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
+        PrivacyPassRedeemRequest, StartRequest,
     },
     AuthError,
 };
@@ -60,6 +61,16 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/privacy-pass/issue", post(privacy_pass_issue))
         .route("/v1/privacy-pass/redeem", post(privacy_pass_redeem))
         .layer(DefaultBodyLimit::max(4096));
+    let chat_pow_routes = Router::new()
+        .route(
+            "/v1/chat-requests/proof-of-work/challenge",
+            get(chat_pow_challenge),
+        )
+        .route(
+            "/v1/chat-requests/proof-of-work/verify",
+            post(chat_pow_verify),
+        )
+        .layer(DefaultBodyLimit::max(4096));
     Router::new()
         .merge(auth_routes)
         .merge(passkey_routes)
@@ -67,6 +78,7 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .merge(directory_routes)
         .merge(contact_psi_routes)
         .merge(privacy_pass_routes)
+        .merge(chat_pow_routes)
         .layer(middleware::from_fn(no_store))
         .with_state(auth)
 }
@@ -189,6 +201,31 @@ async fn privacy_pass_redeem(
     Ok(Json(
         auth.privacy_pass_redeem(peer.ip(), request.map_err(|_| AuthError::Invalid)?.0)
             .await?,
+    ))
+}
+async fn chat_pow_challenge(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.chat_pow_challenge(bearer(&headers)?, peer.ip())
+            .await?,
+    ))
+}
+async fn chat_pow_verify(
+    State(auth): State<Arc<AccountAuth>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    request: Result<Json<ChatProofOfWorkVerifyRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.chat_pow_verify(
+            bearer(&headers)?,
+            peer.ip(),
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
     ))
 }
 async fn me(

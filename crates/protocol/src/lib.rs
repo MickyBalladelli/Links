@@ -8,6 +8,7 @@ pub mod v1 {
 }
 pub mod contact_psi;
 pub mod privacy_pass;
+pub mod proof_of_work;
 pub mod sync_compression;
 pub use sync_compression::{
     compress_sync_batch, decompress_sync_batch, validate_sync_batch,

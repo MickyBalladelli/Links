@@ -477,7 +477,9 @@ Add discovery options after the basic phone-based account works.
 - [x] Integrate Privacy Pass anonymous blind signatures to rate-limit new chat requests without tracking identities.
   RFC 9578 P-384/SHA-384 VOPRF issuance uses authenticated account/IP quotas;
   anonymous redemption stores only a one-time token digest and expiry.
-- [ ] Implement client-side proof-of-work micro-challenges for unverified accounts initiating 1-to-1 connections.
+- [x] Implement client-side proof-of-work micro-challenges for unverified accounts initiating 1-to-1 connections.
+  Pseudonymous accounts receive five-minute SHA-256 hashcash challenges at
+  bounded difficulty; the server verifies and consumes each challenge once.
 
 ---
 

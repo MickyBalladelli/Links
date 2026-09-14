@@ -88,6 +88,8 @@ application, proxy, provider SDK, or analytics layer.
 | `GET /v1/privacy-pass/challenge` | None | Short-lived challenge for a new-chat admission token. |
 | `POST /v1/privacy-pass/issue` | Bearer session plus one blinded P-384 point | Blind VOPRF evaluation; the issuer does not see the challenge or nonce. |
 | `POST /v1/privacy-pass/redeem` | Challenge, token | One-time anonymous admission check; no account identifier is accepted or stored. |
+| `GET /v1/chat-requests/proof-of-work/challenge` | Bearer session for a pseudonymous account | Five-minute, bounded SHA-256 hashcash challenge. |
+| `POST /v1/chat-requests/proof-of-work/verify` | Bearer session plus challenge and nonce | Verifies and consumes one client proof before new-chat admission. |
 | `GET /me` | `Authorization: Bearer <access_token>` | Authenticated user/device after current revocation and account-status checks. |
 | `POST /v1/devices` | Bearer session plus target `device_id`, `mls_node_id`, public key, pairing nonce and target signature | Registers an additional physical client as a distinct device/node and returns its MLS credential. |
 
@@ -120,6 +122,15 @@ device, conversation, or chat-request identifier is stored with redemption.
 The gateway or new-chat host must require a successful redemption before
 accepting a new-chat request. Keep issuance and redemption logs and operational
 contexts separate, because correlating them would weaken the anonymity goal.
+
+Unverified username-only accounts are `pseudonymous` accounts. Before a
+one-to-one connection start, they request a proof-of-work challenge and solve
+it locally on a background worker. The challenge binds to the account and
+device, expires after five minutes, and uses 18 leading zero bits by default
+with a server-enforced range of 12–24 bits. The server stores only a keyed
+challenge digest, account/device binding, difficulty, expiry, and consumed
+state in the challenge table; a separate keyed source-address bucket protects
+the rate limit. Phone-verified accounts do not need this proof.
 
 The phone must already be canonical E.164: `+` followed by 8–15 ASCII digits, with
 a nonzero country-code prefix. This is format validation, not proof that a number

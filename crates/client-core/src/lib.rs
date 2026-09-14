@@ -16,6 +16,7 @@ pub mod passkey_backup;
 pub mod pqxdh;
 pub mod prekeys;
 pub mod privacy_pass;
+pub mod proof_of_work;
 pub mod receive;
 pub mod send;
 pub mod sequences;
@@ -39,6 +40,8 @@ pub enum CoreError {
     P2pTransfer(#[from] p2p_transfer::P2pTransferError),
     #[error(transparent)]
     PrivacyPass(#[from] protocol::privacy_pass::PrivacyPassError),
+    #[error(transparent)]
+    ProofOfWork(#[from] protocol::proof_of_work::ProofOfWorkError),
     #[error("cryptographic provider unavailable")]
     CryptoUnavailable,
     #[error("authentication failed")]

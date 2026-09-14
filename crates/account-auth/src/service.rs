@@ -23,6 +23,7 @@ pub const CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
 pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PRIVACY_PASS_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
+pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
@@ -169,6 +170,28 @@ pub struct PrivacyPassRedeemRequest {
 
 #[derive(Serialize)]
 pub struct PrivacyPassRedeemResponse {
+    pub protocol_version: u32,
+    pub accepted: bool,
+}
+
+#[derive(Serialize)]
+pub struct ChatProofOfWorkChallengeResponse {
+    pub protocol_version: u32,
+    pub challenge: String,
+    pub difficulty_bits: u8,
+    pub expires_at_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatProofOfWorkVerifyRequest {
+    pub protocol_version: u32,
+    pub challenge: String,
+    pub nonce: u64,
+}
+
+#[derive(Serialize)]
+pub struct ChatProofOfWorkVerifyResponse {
     pub protocol_version: u32,
     pub accepted: bool,
 }
@@ -595,6 +618,49 @@ impl AccountAuth {
             limit,
         )])
         .await
+    }
+
+    async fn enforce_chat_pow_rate_limits(
+        &self,
+        domain: &'static [u8],
+        user_id: Uuid,
+        peer_ip: IpAddr,
+        user_limit: i32,
+        ip_limit: i32,
+    ) -> Result<(), AuthError> {
+        self.enforce_rate_limit_set([
+            (
+                self.digest(domain, user_id.as_bytes()),
+                3_600_000,
+                user_limit,
+            ),
+            (
+                self.digest(
+                    b"links/chat-request-pow-ip-hour/v1\0",
+                    peer_ip.to_string().as_bytes(),
+                ),
+                3_600_000,
+                ip_limit,
+            ),
+        ])
+        .await
+    }
+
+    async fn require_unverified_account(
+        &self,
+        account: &AuthenticatedAccount,
+    ) -> Result<(), AuthError> {
+        let unverified: Option<bool> = sqlx::query_scalar(
+            "SELECT account_kind='pseudonymous' FROM accounts WHERE user_id=$1 AND disabled_at IS NULL",
+        )
+        .bind(account.user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        if unverified == Some(true) {
+            Ok(())
+        } else {
+            Err(AuthError::Denied)
+        }
     }
 
     async fn issue_session(
@@ -1611,6 +1677,111 @@ impl AccountAuth {
         })
     }
 
+    /// Create a short-lived hashcash challenge for a pseudonymous account.
+    /// Phone-verified accounts do not need this admission proof.
+    pub async fn chat_pow_challenge(
+        &self,
+        token: &str,
+        peer_ip: IpAddr,
+    ) -> Result<ChatProofOfWorkChallengeResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        self.require_unverified_account(&account).await?;
+        self.enforce_chat_pow_rate_limits(
+            b"links/chat-request-pow-challenge-user-hour/v1\0",
+            account.user_id,
+            peer_ip,
+            20,
+            200,
+        )
+        .await?;
+        let now = self.now()?;
+        let expires_at_ms = now
+            .checked_add(PROOF_OF_WORK_CHALLENGE_TTL_MS as i64)
+            .ok_or(AuthError::Unavailable)? as u64;
+        let challenge = Zeroizing::new(random()?);
+        let challenge_hash = self.digest(b"links/chat-request-pow-challenge/v1\0", &*challenge);
+        sqlx::query(
+            "INSERT INTO proof_of_work_challenges (challenge_hash,user_id,device_id,difficulty_bits,expires_at_ms,state) VALUES ($1,$2,$3,$4,$5,'issued')",
+        )
+        .bind(challenge_hash.as_slice())
+        .bind(account.user_id)
+        .bind(account.device_id)
+        .bind(i16::from(links_protocol::proof_of_work::DEFAULT_DIFFICULTY_BITS))
+        .bind(expires_at_ms as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(ChatProofOfWorkChallengeResponse {
+            protocol_version: links_protocol::proof_of_work::VERSION,
+            challenge: encode(&*challenge),
+            difficulty_bits: links_protocol::proof_of_work::DEFAULT_DIFFICULTY_BITS,
+            expires_at_ms,
+        })
+    }
+
+    /// Verify and consume one client proof-of-work challenge. The challenge is
+    /// bound to the authenticated account and device, but no IP is persisted.
+    pub async fn chat_pow_verify(
+        &self,
+        token: &str,
+        peer_ip: IpAddr,
+        request: ChatProofOfWorkVerifyRequest,
+    ) -> Result<ChatProofOfWorkVerifyResponse, AuthError> {
+        if request.protocol_version != links_protocol::proof_of_work::VERSION {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        self.require_unverified_account(&account).await?;
+        self.enforce_chat_pow_rate_limits(
+            b"links/chat-request-pow-verify-user-hour/v1\0",
+            account.user_id,
+            peer_ip,
+            60,
+            300,
+        )
+        .await?;
+        let challenge =
+            decode::<{ links_protocol::proof_of_work::CHALLENGE_BYTES }>(&request.challenge)?;
+        let challenge_hash = self.digest(b"links/chat-request-pow-challenge/v1\0", &challenge);
+        let now = self.now()?;
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT user_id,device_id,difficulty_bits,expires_at_ms,state FROM proof_of_work_challenges WHERE challenge_hash=$1 FOR UPDATE",
+        )
+        .bind(challenge_hash.as_slice())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        let expires_at_ms: i64 = row.get("expires_at_ms");
+        let state: String = row.get("state");
+        let difficulty_bits: u8 = row
+            .get::<i16, _>("difficulty_bits")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        if state != "issued"
+            || expires_at_ms <= now
+            || row.get::<Uuid, _>("user_id") != account.user_id
+            || row.get::<Uuid, _>("device_id") != account.device_id
+        {
+            return Err(AuthError::Denied);
+        }
+        links_protocol::proof_of_work::verify(&challenge, difficulty_bits, request.nonce)
+            .map_err(|_| AuthError::Denied)?;
+        let updated = sqlx::query(
+            "UPDATE proof_of_work_challenges SET state='consumed' WHERE challenge_hash=$1 AND state='issued'",
+        )
+        .bind(challenge_hash.as_slice())
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(AuthError::Denied);
+        }
+        tx.commit().await?;
+        Ok(ChatProofOfWorkVerifyResponse {
+            protocol_version: links_protocol::proof_of_work::VERSION,
+            accepted: true,
+        })
+    }
+
     pub async fn purge_expired(&self) -> Result<(), AuthError> {
         let now = self.now()?;
         sqlx::query("DELETE FROM auth_sessions WHERE expires_at_ms <= $1")
@@ -1631,6 +1802,10 @@ impl AccountAuth {
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM privacy_pass_redeemed WHERE expires_at_ms <= $1")
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM proof_of_work_challenges WHERE expires_at_ms <= $1")
             .bind(now)
             .execute(&self.pool)
             .await?;
