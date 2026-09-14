@@ -561,7 +561,13 @@ Add real-time media after messaging and file media are stable.
   Private `MlsControl` payloads carry validated SFrame epoch keys inside MLS
   application ciphertext; direct and group send helpers fan them out through
   Sealed Sender, and receive handlers install them before cursor acknowledgement.
-- [ ] Deploy managed global SFU clusters using LiveKit or Mediasoup.
+- [x] Deploy managed global SFU clusters using LiveKit or Mediasoup.
+  LiveKit Cloud is the first managed provider. The gateway now has a typed
+  multi-region endpoint, health, failover, pinned-placement, opaque-room, and
+  SFrame-required contract in `crates/gateway/src/sfu.rs`; the regional
+  deployment manifest and operator runbook are in `deploy/livekit/` and
+  `docs/sfu.md`. External project provisioning, quotas, DNS, and credentials
+  remain an operator release gate.
 - [ ] Configure SFUs to route encrypted media frames using unencrypted RTP headers without decrypting media.
 - [ ] Add WebTransport (QUIC) as a fallback channel for low-latency media signaling in high-packet-loss environments.
 - [ ] Implement the complete call flow: SDP exchange, MLS key exchange, client-side frame encryption, and SFU streaming.

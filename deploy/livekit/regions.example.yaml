@@ -1,0 +1,22 @@
+# Managed LiveKit Cloud regional deployment contract.
+# Copy values into the deployment system; do not commit API keys or access
+# tokens. The gateway consumes only these public endpoint URLs.
+provider: livekit-cloud
+project_id_env: LINKS_LIVEKIT_PROJECT_ID
+require_sframe: true
+default_region: eu
+regions:
+  - id: eu
+    websocket_url_env: LINKS_LIVEKIT_EU_WSS_URL
+    turn_url_env: LINKS_LIVEKIT_EU_TURN_URL
+  - id: us
+    websocket_url_env: LINKS_LIVEKIT_US_WSS_URL
+    turn_url_env: LINKS_LIVEKIT_US_TURN_URL
+  - id: asia
+    websocket_url_env: LINKS_LIVEKIT_ASIA_WSS_URL
+    turn_url_env: LINKS_LIVEKIT_ASIA_TURN_URL
+
+# Health state is supplied by the deployment control plane. A failed region
+# is drained before its endpoint is marked unhealthy. Room placement uses the
+# preferred region when healthy, then the default region, then another healthy
+# region. Use select_pinned_region for strict data-residency requirements.

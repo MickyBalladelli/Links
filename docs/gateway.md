@@ -85,3 +85,9 @@ The repository provides the gateway core and provider interfaces. Concrete
 Redis, bus, APNs and FCM adapters plus cloud load-balancer/IaC rollout are
 deployment work and must pass regional failover, duplicate delivery, stale
 lease, queue outage, push outage and reconnect acceptance checks before release.
+
+WebRTC media uses the managed LiveKit Cloud deployment contract in
+`crates/gateway/src/sfu.rs` and `deploy/livekit/regions.example.yaml`. The
+gateway-side registry selects a healthy regional endpoint for an opaque room;
+it does not issue provider secrets or inspect media. See [managed global SFU
+operations](sfu.md) for the SFrame and failover boundary.

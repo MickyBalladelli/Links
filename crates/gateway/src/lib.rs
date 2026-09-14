@@ -17,6 +17,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod sfu;
+
 pub const HELLO_DEADLINE_MS: u64 = 5_000;
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 pub const HEARTBEAT_TIMEOUT_MS: u64 = 90_000;
@@ -39,6 +41,8 @@ pub enum GatewayError {
     Conflict,
     #[error(transparent)]
     Protocol(#[from] protocol::ProtocolError),
+    #[error(transparent)]
+    Sfu(#[from] sfu::SfuError),
 }
 impl From<StoreError> for GatewayError {
     fn from(error: StoreError) -> Self {
