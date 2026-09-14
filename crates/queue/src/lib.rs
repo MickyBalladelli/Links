@@ -71,8 +71,7 @@ fn subject_token(gateway_id: &str) -> String {
 /// hashed before it reaches NATS, so the broker sees only an opaque routing
 /// token.
 pub fn broadcast_subject(conversation_id: &str) -> Result<String, QueueError> {
-    protocol::validate_id(conversation_id)
-        .map_err(|_| QueueError::Invalid("broadcast subject"))?;
+    protocol::validate_id(conversation_id).map_err(|_| QueueError::Invalid("broadcast subject"))?;
     let uuid = uuid::Uuid::parse_str(conversation_id)
         .map_err(|_| QueueError::Invalid("broadcast subject"))?;
     let mut hasher = Sha256::new();

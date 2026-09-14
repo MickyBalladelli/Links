@@ -125,11 +125,7 @@ impl BroadcastMasterKey {
     }
 }
 
-fn broadcast_aad(
-    conversation_id: &str,
-    epoch: u64,
-    post_id: &str,
-) -> Result<Vec<u8>, CoreError> {
+fn broadcast_aad(conversation_id: &str, epoch: u64, post_id: &str) -> Result<Vec<u8>, CoreError> {
     protocol::validate_id(conversation_id)?;
     protocol::validate_id(post_id)?;
     let conversation_uuid =

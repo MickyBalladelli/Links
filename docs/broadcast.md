@@ -19,13 +19,19 @@ applies broadcast updates before opening encrypted envelopes, durably commits
 the mailbox cursor before QueueAck, and returns no outbound delivery receipts;
 the subscriber remains receive-only.
 
-Publishers call `send_broadcast_post()` with their hardware-backed
-`MlsIdentitySigner` and `BroadcastAdminVerifier`. The send side checks the
-current owner/admin role before publishing. The receive side first checks that
-the MLS-authenticated sender device equals the signed admin device, verifies the
+Publishers call `publish_broadcast_post()` with their hardware-backed
+`MlsIdentitySigner`, `BroadcastAdminVerifier`, `BroadcastMasterKey`, and
+`BroadcastBroker`. The send side checks the current owner/admin role, signs the
+serialized post, encrypts it with an HKDF-derived per-conversation/epoch key,
+and dispatches only a `BroadcastDispatch` ciphertext. `NatsBroadcastPublisher`
+publishes that wrapper to a subject derived from a hash of the conversation ID;
+the broker can route it without learning the post or admin identity.
+
+The receive side first opens the master-key ciphertext, then checks that the
+MLS-authenticated sender device equals the signed admin device, verifies the
 Ed25519 signature, and asks `BroadcastAdminVerifier` for the current role.
 Invalid, unsigned, revoked, or non-admin posts fail before storage or rendering.
 
 Read-only is an application policy around MLS, not a wire-level MLS capability.
-The publisher path must still authenticate admin devices and sign posts before
-the later broadcast publishing milestone is released.
+Master keys must be provisioned to authorized publisher/subscriber devices
+through the existing secure device setup; they are never stored in the broker.

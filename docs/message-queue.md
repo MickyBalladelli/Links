@@ -28,6 +28,18 @@ are escaped as `~2E` and `~3A` so NATS subject tokens cannot be confused:
 links.v1.gateway.<subject_gateway_id>.deliver
 ```
 
+Broadcast publishers use the separate `BroadcastDispatch` wrapper. Its
+conversation routing token is a SHA-256-derived subject token, and its body is
+the serialized signed post encrypted with the broadcast master key:
+
+```text
+links.v1.broadcast.<hashed_conversation_token>.publish
+```
+
+Use a separate JetStream stream and subscriber permissions for broadcast
+subjects. The queue adapter validates only the wrapper and forwards its
+ciphertext unchanged.
+
 Use a JetStream stream such as `LINKS_GATEWAY_DELIVERIES` with subjects
 `links.v1.gateway.*.deliver`, encrypted storage, replicas across failure
 domains, and a durable consumer per gateway deployment. The consumer checks its
