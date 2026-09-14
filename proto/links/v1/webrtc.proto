@@ -1,0 +1,36 @@
+syntax = "proto3";
+package links.v1;
+
+// Signaling only. SDP and ICE data are routed to the target device; media
+// keys and media frames never use this message.
+message WebRtcSignal {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    OFFER = 1;
+    ANSWER = 2;
+    ICE_CANDIDATE = 3;
+  }
+  string session_id = 1;
+  string target_device_id = 2;
+  Kind kind = 3;
+  string sdp = 4;
+  string sdp_mid = 5;
+  uint32 sdp_mline_index = 6;
+}
+
+// Gateway-to-device delivery. The gateway supplies sender identity from the
+// authenticated socket and ignores any sender field from the client.
+message WebRtcSignalDelivery {
+  string request_id = 1;
+  string sender_device_id = 2;
+  WebRtcSignal signal = 3;
+}
+
+// Cross-region signaling is transient. It is never written to the encrypted
+// mailbox because SDP/ICE exchange requires a live peer session.
+message GatewayWebRtcSignal {
+  uint32 protocol_version = 1;
+  string source_gateway_id = 2;
+  string destination_gateway_id = 3;
+  WebRtcSignalDelivery delivery = 4;
+}

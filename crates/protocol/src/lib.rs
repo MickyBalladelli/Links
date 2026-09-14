@@ -22,6 +22,8 @@ pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_BATCH_ITEMS: usize = 100;
 pub const MAX_FANOUT_DEVICES: usize = 100;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_WEBRTC_SDP_BYTES: usize = 256 * 1024;
+pub const MAX_WEBRTC_SDP_MID_BYTES: usize = 128;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_ONE_TIME_PREKEYS: usize = 100;
@@ -81,6 +83,57 @@ pub fn validate_blur_hash(value: &str) -> Result<(), ProtocolError> {
     {
         return Err(ProtocolError::Invalid("blur_hash"));
     }
+    Ok(())
+}
+
+pub fn validate_webrtc_signal(signal: &v1::WebRtcSignal) -> Result<(), ProtocolError> {
+    validate_id(&signal.session_id)?;
+    validate_id(&signal.target_device_id)?;
+    if !matches!(signal.kind, 1..=3)
+        || signal.sdp.is_empty()
+        || signal.sdp.len() > MAX_WEBRTC_SDP_BYTES
+        || signal.sdp_mid.len() > MAX_WEBRTC_SDP_MID_BYTES
+    {
+        return Err(ProtocolError::Invalid("WebRTC signal"));
+    }
+    Ok(())
+}
+
+pub fn validate_webrtc_signal_delivery(
+    delivery: &v1::WebRtcSignalDelivery,
+) -> Result<(), ProtocolError> {
+    validate_id(&delivery.request_id)?;
+    validate_id(&delivery.sender_device_id)?;
+    validate_webrtc_signal(
+        delivery
+            .signal
+            .as_ref()
+            .ok_or(ProtocolError::Invalid("WebRTC signal"))?,
+    )?;
+    if delivery
+        .signal
+        .as_ref()
+        .is_some_and(|signal| signal.target_device_id == delivery.sender_device_id)
+    {
+        return Err(ProtocolError::Invalid("WebRTC signal target"));
+    }
+    Ok(())
+}
+
+pub fn validate_gateway_webrtc_signal(
+    message: &v1::GatewayWebRtcSignal,
+) -> Result<(), ProtocolError> {
+    if message.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_gateway_locator(&message.source_gateway_id)?;
+    validate_gateway_locator(&message.destination_gateway_id)?;
+    validate_webrtc_signal_delivery(
+        message
+            .delivery
+            .as_ref()
+            .ok_or(ProtocolError::Invalid("WebRTC delivery"))?,
+    )?;
     Ok(())
 }
 

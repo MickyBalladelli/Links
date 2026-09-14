@@ -2,6 +2,7 @@ syntax = "proto3";
 package links.v1;
 import "links/v1/envelope.proto";
 import "links/v1/sync.proto";
+import "links/v1/webrtc.proto";
 
 // One binary protobuf frame per WebSocket message; see docs/contracts.md.
 message ClientFrame {
@@ -11,6 +12,7 @@ message ClientFrame {
     Envelope send = 3;
     Replay replay = 4;
     QueueAck ack = 5;
+    WebRtcSignal web_rtc_signal = 6;
   }
 }
 message Hello {
@@ -29,6 +31,7 @@ message ServerFrame {
     SyncBatch batch = 4;
     ProtocolError error = 5;
     CompressedSyncBatch compressed_batch = 6;
+    WebRtcSignalDelivery web_rtc_signal = 7;
   }
 }
 message Welcome { uint32 protocol_version = 1; uint32 heartbeat_seconds = 2; }
