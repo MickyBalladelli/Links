@@ -653,7 +653,13 @@ This is a separate expansion track. Do not block the centralized release on it.
   30-day TTL with explicit acknowledgement and encrypted-at-rest storage;
   destination nodes verify and deduplicate before local handoff. See
   `deploy/relays/` and `docs/relay-gossip.md`.
-- [ ] Integrate IPFS / Arweave / Filecoin for client-side encrypted chunk storage and content-addressed retrieval (`ipfs://CID`).
+- [x] Integrate IPFS / Arweave / Filecoin for client-side encrypted chunk storage and content-addressed retrieval (`ipfs://CID`).
+  `ContentAddressedLargeFileEncryptor` derives CIDv1 SHA-256 addresses from
+  ciphertext chunks and stores the ordered references in private media
+  metadata. `ContentAddressedStore` verifies every block before upload and
+  after download; IPFS, Arweave, and Filecoin adapters share the provider
+  boundary. See `docs/content-addressed-storage.md` and
+  `deploy/content-addressed/`.
 
 ### Decentralized real-time media
 

@@ -1,0 +1,33 @@
+# Provider-neutral encrypted content-addressed storage deployment contract.
+# Configure one or more providers. Do not commit API keys or wallet secrets.
+providers:
+  - id: ipfs-primary
+    kind: ipfs
+    api_url_env: LINKS_IPFS_API_URL
+    gateway_url_env: LINKS_IPFS_GATEWAY_URL
+    api_token_env: LINKS_IPFS_API_TOKEN
+    tls_required: true
+    pin: required
+  - id: arweave-archive
+    kind: arweave
+    gateway_url_env: LINKS_ARWEAVE_GATEWAY_URL
+    wallet_secret_env: LINKS_ARWEAVE_WALLET_SECRET
+    tls_required: true
+    immutable_transactions: required
+    cid_index: required
+  - id: filecoin-redundant
+    kind: filecoin
+    gateway_url_env: LINKS_FILECOIN_GATEWAY_URL
+    api_token_env: LINKS_FILECOIN_API_TOKEN
+    tls_required: true
+    replication: 3
+    cid_index: required
+policy:
+  max_chunk_bytes: 262144
+  max_chunks: 1024
+  max_retention_ms: 2592000000
+  content_type: application/octet-stream
+  verify_cid_before_put: required
+  verify_cid_after_get: required
+  plaintext_inspection: disabled
+  key_storage: client_only

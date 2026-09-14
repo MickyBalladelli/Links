@@ -1,6 +1,7 @@
 //! Server-side metadata only. This crate must never depend on links-client-core.
 pub mod ephemeral;
 pub mod blob;
+pub mod content_addressed;
 pub mod payload;
 pub mod postgres;
 pub mod redis;

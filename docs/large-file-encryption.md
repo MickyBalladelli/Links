@@ -53,3 +53,13 @@ Large files may use the authenticated, ordered and reliable WebRTC
 durable resume, per-chunk digests, backpressure, and final whole-file
 verification. Signaling and the MLS metadata exchange remain outside the
 channel.
+
+## Content-addressed providers
+
+`ContentAddressedLargeFileEncryptor` can upload each encrypted chunk as a
+CIDv1 SHA-256 raw block. The receiver gets the ordered private CID list from
+`MediaMetadata`, fetches each block through an IPFS, Arweave, or Filecoin
+adapter, verifies the CID and complete ciphertext digest, then decrypts. The
+canonical provider-neutral URI is `ipfs://CID`; provider transaction or deal
+IDs never enter public message or routing metadata. See
+[content-addressed storage](content-addressed-storage.md).
