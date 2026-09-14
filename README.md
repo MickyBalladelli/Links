@@ -21,7 +21,7 @@ remain open.
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
 | `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
-| `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts and MLS basic credentials. |
+| `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
 | `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, group membership/RBAC HTTP API, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing and configured APNs/FCM silent wakeup contracts. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, and durable publish adapters for cross-region gateway and channel routing. |
@@ -46,6 +46,7 @@ remain open.
 | `docs/group-rbac.md` | Authenticated group membership/RBAC API, device revocation, MLS leaf changes, and epoch checkpoint flow. |
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 | `docs/pairing.md` | Canonical device-pairing QR URI, signature verification and client flow. |
+| `docs/device-delegation.md` | Signed multi-device and multi-admin sub-certificates, delegated registration, and authority rules. |
 | `docs/gateway.md` | Multi-region WebSocket gateway flow, routing, push fallback and deployment gates. |
 | `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
 | `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |

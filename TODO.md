@@ -526,7 +526,13 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
 
 ### Organization accounts
 
-- [ ] Support multi-device and multi-admin key delegation through signed sub-certificates.
+- [x] Support multi-device and multi-admin key delegation through signed sub-certificates.
+  DeviceSubCertificate binds issuer and subject device/MLS identities, role,
+  validity, and public keys under an Ed25519 signature. Owners can delegate
+  device or admin leaves; admins can delegate device leaves. Authenticated
+  delegated registration verifies both issuer authority and child
+  proof-of-possession, persists the certificate, and publishes it in the
+  device directory.
 - [ ] Implement cryptographic proof-of-verification badges.
 - [ ] Build channel, business, and bot client surfaces for Android, iOS, Web, and desktop.
 

@@ -8,6 +8,7 @@ use hmac::{Hmac, Mac};
 use links_identity::{verify, DeviceBinding};
 use links_protocol::{self, v1, validate_handle};
 use links_server_store::postgres::{GroupKind, RelationalStore, Role};
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -97,6 +98,8 @@ pub struct UsernameDirectoryDeviceResponse {
     pub mls_node_id: Uuid,
     pub identity_public_key: String,
     pub mls_credential: String,
+    pub delegation_role: String,
+    pub delegation_certificate: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +230,15 @@ pub struct DeviceRegistrationRequest {
     pub nonce: String,
     pub signature: String,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegatedDeviceRegistrationRequest {
+    pub certificate: String,
+    pub nonce: String,
+    pub signature: String,
+}
+
 #[derive(Serialize)]
 pub struct DeviceRegistrationResponse {
     pub user_id: Uuid,
@@ -234,6 +246,7 @@ pub struct DeviceRegistrationResponse {
     pub mls_node_id: Uuid,
     pub public_key: String,
     pub mls_credential: String,
+    pub delegation_certificate: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -900,6 +913,8 @@ impl AccountAuth {
                 mls_node_id: device.mls_node_id,
                 identity_public_key: encode(&public_key),
                 mls_credential: encode(&device.mls_credential),
+                delegation_role: device.delegation_role,
+                delegation_certificate: device.delegation_certificate.as_deref().map(encode),
             });
         }
         Ok(Some(UsernameDirectoryResponse {
@@ -1308,6 +1323,7 @@ impl AccountAuth {
                     mls_node_id: request.mls_node_id,
                     public_key: encode(&public_key),
                     mls_credential: encode(&credential),
+                    delegation_certificate: None,
                 });
             }
             return Err(AuthError::Conflict);
@@ -1335,6 +1351,100 @@ impl AccountAuth {
             mls_node_id: request.mls_node_id,
             public_key: encode(&public_key),
             mls_credential: encode(&credential),
+            delegation_certificate: None,
+        })
+    }
+
+    /// Register a device authorized by an active owner/admin key. The issuer
+    /// certificate grants either a device leaf or another admin leaf; an
+    /// admin may not create another admin. The new device also proves local
+    /// possession of its subject key before it is added to the account.
+    pub async fn register_delegated_device(
+        &self,
+        token: &str,
+        request: DelegatedDeviceRegistrationRequest,
+    ) -> Result<DeviceRegistrationResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let certificate_bytes = decode_blob(&request.certificate, links_protocol::MAX_MESSAGE_BYTES)?;
+        let certificate = v1::DeviceSubCertificate::decode(certificate_bytes.as_slice())
+            .map_err(|_| AuthError::Invalid)?;
+        links_protocol::validate_device_subcertificate(&certificate)
+            .map_err(|_| AuthError::Invalid)?;
+        if certificate.user_id != account.user_id.to_string()
+            || certificate.issuer_device_id != account.device_id.to_string()
+        {
+            return Err(AuthError::Denied);
+        }
+        let now = self.now()? as u64;
+        links_identity::verify_device_subcertificate(&certificate, now)?;
+        let subject_device_id = Uuid::parse_str(&certificate.subject_device_id)
+            .map_err(|_| AuthError::Invalid)?;
+        let subject_mls_node_id = Uuid::parse_str(&certificate.subject_mls_node_id)
+            .map_err(|_| AuthError::Invalid)?;
+        let subject_public_key: [u8; 32] = certificate
+            .subject_public_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| AuthError::Invalid)?;
+        let nonce = decode::<32>(&request.nonce)?;
+        let subject_signature = decode::<64>(&request.signature)?;
+        verify(
+            &subject_public_key,
+            &links_identity::device_pairing_transcript(
+                account.user_id,
+                subject_device_id,
+                subject_mls_node_id,
+                &subject_public_key,
+                &nonce,
+            )?,
+            &subject_signature,
+        )?;
+
+        let issuer = sqlx::query(
+            "SELECT delegation_role,delegation_certificate FROM devices WHERE user_id=$1 AND device_id=$2 AND revoked_at IS NULL",
+        )
+        .bind(account.user_id)
+        .bind(account.device_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        let issuer_role: String = issuer.get("delegation_role");
+        match (issuer_role.as_str(), certificate.delegation_role) {
+            ("owner", 1 | 2) => {}
+            ("admin", 1) => {}
+            _ => return Err(AuthError::Denied),
+        }
+        if issuer_role == "admin" {
+            let issuer_bytes: Vec<u8> = issuer
+                .get::<Option<Vec<u8>>, _>("delegation_certificate")
+                .ok_or(AuthError::Unavailable)?;
+            let issuer_certificate = v1::DeviceSubCertificate::decode(issuer_bytes.as_slice())
+                .map_err(|_| AuthError::Unavailable)?;
+            links_identity::verify_device_subcertificate(&issuer_certificate, now)?;
+            if issuer_certificate.user_id != account.user_id.to_string()
+                || issuer_certificate.subject_device_id != account.device_id.to_string()
+                || issuer_certificate.delegation_role != 2
+            {
+                return Err(AuthError::Unavailable);
+            }
+        }
+        let binding = DeviceBinding {
+            user_id: account.user_id,
+            device_id: subject_device_id,
+            mls_node_id: subject_mls_node_id,
+            public_key: subject_public_key,
+        };
+        let credential = binding.mls_credential()?;
+        RelationalStore::from_pool(self.pool.clone())
+            .register_delegated_device(account.user_id, &certificate, &credential)
+            .await?;
+        Ok(DeviceRegistrationResponse {
+            user_id: account.user_id,
+            device_id: subject_device_id,
+            mls_node_id: subject_mls_node_id,
+            public_key: encode(&subject_public_key),
+            mls_credential: encode(&credential),
+            delegation_certificate: Some(encode(&certificate_bytes)),
         })
     }
 

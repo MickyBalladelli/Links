@@ -63,6 +63,8 @@ pub struct DirectoryDeviceRecord {
     pub mls_node_id: Uuid,
     pub identity_public_key: Vec<u8>,
     pub mls_credential: Vec<u8>,
+    pub delegation_role: String,
+    pub delegation_certificate: Option<Vec<u8>>,
 }
 
 pub struct HandleDirectoryRecord {
@@ -156,7 +158,7 @@ impl RelationalStore {
     ) -> Result<Option<HandleDirectoryRecord>, StoreError> {
         validate_handle(handle)?;
         let rows = sqlx::query(
-            "SELECT h.user_id,d.device_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND a.disabled_at IS NULL AND d.revoked_at IS NULL ORDER BY d.device_id",
+            "SELECT h.user_id,d.device_id,d.mls_node_id,d.identity_public_key,d.mls_credential,d.delegation_role,d.delegation_certificate FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND a.disabled_at IS NULL AND d.revoked_at IS NULL ORDER BY d.device_id",
         )
         .bind(handle)
         .fetch_all(&self.pool)
@@ -178,11 +180,38 @@ impl RelationalStore {
             {
                 return Err(StoreError::CorruptObject);
             }
+            let delegation_role: String = row.get("delegation_role");
+            let delegation_role_id = match delegation_role.as_str() {
+                "owner" => 0,
+                "device" => 1,
+                "admin" => 2,
+                _ => return Err(StoreError::CorruptObject),
+            };
+            let delegation_certificate: Option<Vec<u8>> = row.get("delegation_certificate");
+            if let Some(bytes) = delegation_certificate.as_ref() {
+                let certificate = v1::DeviceSubCertificate::decode(bytes.as_slice())
+                    .map_err(|_| StoreError::CorruptObject)?;
+                protocol::validate_device_subcertificate(&certificate)
+                    .map_err(|_| StoreError::CorruptObject)?;
+                if certificate.user_id != user_id.to_string()
+                    || certificate.subject_device_id != row.get::<Uuid, _>("device_id").to_string()
+                    || certificate.subject_mls_node_id
+                        != row.get::<Uuid, _>("mls_node_id").to_string()
+                    || certificate.subject_public_key != identity_public_key
+                    || certificate.delegation_role != delegation_role_id
+                {
+                    return Err(StoreError::CorruptObject);
+                }
+            } else if delegation_role_id != 0 {
+                return Err(StoreError::CorruptObject);
+            }
             devices.push(DirectoryDeviceRecord {
                 device_id: row.get("device_id"),
                 mls_node_id: row.get("mls_node_id"),
                 identity_public_key,
                 mls_credential,
+                delegation_role,
+                delegation_certificate,
             });
         }
         Ok(Some(HandleDirectoryRecord { user_id, devices }))
@@ -199,6 +228,84 @@ impl RelationalStore {
         require_active_account(&mut tx, user_id).await?;
         sqlx::query("INSERT INTO devices (device_id, user_id, mls_node_id, identity_public_key, mls_credential) VALUES ($1,$2,$3,$4,$5)")
             .bind(device_id).bind(user_id).bind(mls_node_id).bind(public_key).bind(credential).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Atomically register a device authorized by a signed sub-certificate.
+    /// The issuer must be an active owner, or an active admin delegating only
+    /// a device role. The certificate is retained as public audit material.
+    pub async fn register_delegated_device(
+        &self,
+        user_id: Uuid,
+        certificate: &v1::DeviceSubCertificate,
+        credential: &[u8],
+    ) -> Result<(), StoreError> {
+        protocol::validate_device_subcertificate(certificate)?;
+        let certificate_user = Uuid::parse_str(&certificate.user_id)
+            .map_err(|_| StoreError::Invalid)?;
+        let issuer_device_id = Uuid::parse_str(&certificate.issuer_device_id)
+            .map_err(|_| StoreError::Invalid)?;
+        let issuer_mls_node_id = Uuid::parse_str(&certificate.issuer_mls_node_id)
+            .map_err(|_| StoreError::Invalid)?;
+        let subject_device_id = Uuid::parse_str(&certificate.subject_device_id)
+            .map_err(|_| StoreError::Invalid)?;
+        let subject_mls_node_id = Uuid::parse_str(&certificate.subject_mls_node_id)
+            .map_err(|_| StoreError::Invalid)?;
+        if certificate_user != user_id
+            || subject_device_id.is_nil()
+            || subject_mls_node_id.is_nil()
+            || credential.is_empty()
+            || credential.len() > 65_536
+        {
+            return Err(StoreError::Invalid);
+        }
+        let role = match certificate.delegation_role {
+            1 => "device",
+            2 => "admin",
+            _ => return Err(StoreError::Invalid),
+        };
+        let mut tx = self.pool.begin().await?;
+        require_active_account(&mut tx, user_id).await?;
+        let issuer = sqlx::query(
+            "SELECT user_id,mls_node_id,identity_public_key,delegation_role,revoked_at IS NULL AS active FROM devices WHERE device_id=$1 FOR UPDATE",
+        )
+        .bind(issuer_device_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::Forbidden)?;
+        if issuer.get::<Uuid, _>("user_id") != user_id
+            || issuer.get::<Uuid, _>("mls_node_id") != issuer_mls_node_id
+            || issuer.get::<Vec<u8>, _>("identity_public_key")
+                != certificate.issuer_public_key
+            || !issuer.get::<bool, _>("active")
+        {
+            return Err(StoreError::Forbidden);
+        }
+        match (issuer.get::<String, _>("delegation_role").as_str(), role) {
+            ("owner", "device" | "admin") | ("admin", "device") => {}
+            _ => return Err(StoreError::Forbidden),
+        }
+        let subject_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM devices WHERE device_id=$1 OR mls_node_id=$2)")
+                .bind(subject_device_id)
+                .bind(subject_mls_node_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if subject_exists {
+            return Err(StoreError::Conflict);
+        }
+        sqlx::query("INSERT INTO devices (device_id,user_id,mls_node_id,identity_public_key,mls_credential,delegation_role,delegated_by_device_id,delegation_certificate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
+            .bind(subject_device_id)
+            .bind(user_id)
+            .bind(subject_mls_node_id)
+            .bind(&certificate.subject_public_key)
+            .bind(credential)
+            .bind(role)
+            .bind(issuer_device_id)
+            .bind(certificate.encode_to_vec())
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }

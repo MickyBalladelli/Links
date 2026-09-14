@@ -1,7 +1,8 @@
 use crate::{
     service::{
         AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest, CreateGroupRequest,
-        DeviceRegistrationRequest, EncryptedKeyBackupRequest, FinishRequest,
+        DelegatedDeviceRegistrationRequest, DeviceRegistrationRequest,
+        EncryptedKeyBackupRequest, FinishRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
         PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest,
     },
@@ -28,6 +29,7 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/auth/username/login", post(username_login))
         .route("/v1/auth/me", get(me))
         .route("/v1/devices", post(register_device))
+        .route("/v1/devices/delegated", post(register_delegated_device))
         .route("/v1/devices/{device_id}", delete(revoke_device))
         .layer(DefaultBodyLimit::max(4096));
     let group_routes = Router::new()
@@ -255,6 +257,19 @@ async fn register_device(
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
         auth.register_device(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn register_delegated_device(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<DelegatedDeviceRegistrationRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.register_delegated_device(
             bearer(&headers)?,
             request.map_err(|_| AuthError::Invalid)?.0,
         )
