@@ -400,7 +400,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
         }
         try setAuthenticatedSession(
             userID: session.userID, accessToken: session.accessToken,
-            expiresAtMs: session.expiresAtMs)
+            expiresAtMs: session.expiresAtMs,
+            mlsCredential: challenge.mlsCredential)
         return session
     }
 

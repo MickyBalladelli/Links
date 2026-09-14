@@ -410,7 +410,10 @@ exchanging encrypted one-to-one text through the same local development stack.
   `IOSUsernameAuthClient` signs nonce-bound username registration/login requests,
   keeps the bearer in memory, and the macOS shell can create or approve signed
   `links://connect` payloads through the authenticated device endpoint.
-- [ ] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.
+- [x] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.
+  The macOS account screen uses `IOSOTPClient` for HTTPS-only `start` and
+  `finish` calls, keeps phone/code input memory-only, and stores the returned
+  public MLS credential with the account metadata.
 - [ ] Persist only public account/device metadata, MLS credentials, and encrypted local state; keep the bearer token memory-only.
 - [ ] Generate a fresh non-nil `user_id`, `device_id`, and `mls_node_id` for every new local profile; reject accidental identity reuse.
 - [ ] Generate and upload the initial pre-key inventory, claim and verify recipient pre-keys, and initialize the first two-user MLS conversation through the shared client core.

@@ -1,4 +1,5 @@
 import SwiftUI
+import LinksClient
 
 struct LinksRootView: View {
     @ObservedObject var model: LinksMacOSAppModel
@@ -109,6 +110,46 @@ private struct LinksAccountOnboardingView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+
+                Divider()
+                Text("Phone account (OTP)")
+                    .font(.headline)
+                Text("Use this only with a real HTTPS account-auth service configured for Twilio Verify.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    TextField("Phone, for example +33123456789", text: $model.phoneInput)
+                        .textFieldStyle(.roundedBorder)
+                    Picker("Channel", selection: $model.otpChannel) {
+                        ForEach(IOSOTPChannel.allCases, id: \.self) { channel in
+                            Text(channel.rawValue.capitalized).tag(channel)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 120)
+                }
+                Button("Send verification code") {
+                    model.startOTPEnrollment()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.otpAvailable || model.isOTPWorking)
+                if model.hasOTPChallenge {
+                    HStack {
+                        TextField("Verification code", text: $model.otpCodeInput)
+                            .textFieldStyle(.roundedBorder)
+                            .textContentType(.oneTimeCode)
+                        Button("Verify") {
+                            model.finishOTPEnrollment()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isOTPWorking)
+                    }
+                }
+                Text(model.otpAvailable
+                     ? model.otpStatus
+                     : "Phone OTP disabled until the endpoint uses HTTPS.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Divider()
                 Text("Join an existing account")

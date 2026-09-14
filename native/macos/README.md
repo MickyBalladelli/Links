@@ -69,6 +69,12 @@ is `http://127.0.0.1:8080`; override it with `LINKS_AUTH_URL` or
 `--auth-url <url>`. Plain HTTP is accepted only for loopback development. A
 non-loopback endpoint must use HTTPS.
 
+Phone enrollment appears on the same screen when `--auth-url` points to an
+HTTPS account-auth service configured with a real Twilio Verify account. The
+macOS host sends the signed device proof, accepts SMS or WhatsApp codes, and
+keeps the phone number and verification code in memory only. Loopback HTTP
+deliberately disables this OTP path.
+
 The account screen can create a signed `links://connect` link for an existing
 account. Scan it on that account's authenticated device, then log in on this
 Mac with the account username. An authenticated macOS client can also approve

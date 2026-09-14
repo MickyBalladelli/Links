@@ -54,6 +54,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published var authMode: LinksMacOSAuthMode = .register
     @Published private(set) var authEndpointText = "http://127.0.0.1:8080"
     @Published private(set) var isAuthenticating = false
+    @Published var phoneInput = ""
+    @Published var otpCodeInput = ""
+    @Published var otpChannel: IOSOTPChannel = .sms
+    @Published private(set) var otpStatus = "Phone OTP not started"
+    @Published private(set) var isOTPWorking = false
     @Published var pairingTarget = ""
     @Published var pairingInput = ""
     @Published private(set) var pairingURI: String?
@@ -62,6 +67,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     private let client: IOSClient?
     private let authClient: IOSUsernameAuthClient?
+    private let otpClient: IOSOTPClient?
+    private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
     private let identityQueue = DispatchQueue(
         label: "ai.links.macos.identity", qos: .userInitiated)
@@ -82,15 +89,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             if let endpoint = try? Self.authEndpointFromArguments(),
                let loadedAuthClient = try? IOSUsernameAuthClient(baseURL: endpoint) {
                 authClient = loadedAuthClient
+                otpClient = try? IOSOTPClient(baseURL: endpoint)
                 authEndpointText = endpoint.absoluteString
             } else {
                 authClient = nil
+                otpClient = nil
                 authEndpointText = "Invalid local auth endpoint"
             }
             refreshClientState()
         } catch {
             client = nil
             authClient = nil
+            otpClient = nil
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
@@ -106,6 +116,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     var requiresAccountAuthentication: Bool {
         client?.isEnrolled == true && client?.isAuthenticated != true
     }
+
+    var otpAvailable: Bool { otpClient != nil }
+
+    var hasOTPChallenge: Bool { otpChallenge != nil }
 
     var selectedConversation: LinksMacOSConversation? {
         guard let selectedConversationID else { return nil }
@@ -182,6 +196,56 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 guard let self else { return }
                 self.isAuthenticating = false
                 self.onboardingError = "Username auth failed. Check the handle and local auth service."
+            }
+        }
+    }
+
+    func startOTPEnrollment() {
+        guard let client, let otpClient, client.isEnrolled, !isOTPWorking else {
+            otpStatus = "Use an HTTPS account-auth endpoint for phone OTP"
+            return
+        }
+        let phone = phoneInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        isOTPWorking = true
+        otpStatus = "Sending verification code"
+        Task { @MainActor [weak self] in
+            do {
+                let challenge = try await client.startOTP(
+                    using: otpClient, phone: phone, channel: self?.otpChannel ?? .sms)
+                guard let self else { return }
+                self.otpChallenge = challenge
+                self.otpCodeInput = ""
+                self.isOTPWorking = false
+                self.otpStatus = "Code sent. It expires in 10 minutes."
+            } catch {
+                guard let self else { return }
+                self.isOTPWorking = false
+                self.otpStatus = "Could not send verification code"
+            }
+        }
+    }
+
+    func finishOTPEnrollment() {
+        guard let client, let otpClient, let challenge = otpChallenge, !isOTPWorking else {
+            otpStatus = "Request a verification code first"
+            return
+        }
+        let code = otpCodeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        otpCodeInput = ""
+        isOTPWorking = true
+        otpStatus = "Checking verification code"
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await client.finishOTP(using: otpClient, challenge: challenge, code: code)
+                guard let self else { return }
+                self.otpChallenge = nil
+                self.isOTPWorking = false
+                self.otpStatus = "Phone account enrolled"
+                self.refreshClientState()
+            } catch {
+                guard let self else { return }
+                self.isOTPWorking = false
+                self.otpStatus = "Verification failed. Request a new code if it expired."
             }
         }
     }

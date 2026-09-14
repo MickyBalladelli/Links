@@ -1,7 +1,7 @@
 import Foundation
 import LinksKeyStore
 
-public enum IOSOTPChannel: String, Sendable {
+public enum IOSOTPChannel: String, CaseIterable, Sendable {
     case sms
     case whatsapp
 }
