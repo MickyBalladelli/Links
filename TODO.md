@@ -509,7 +509,11 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
   `BroadcastSubscriber` is a read-only client-core MLS profile: it accepts only
   broadcast welcomes/commits and application messages, while rejecting local
   publishing, group creation, membership changes, and pending-commit merges.
-- [ ] Enforce Ed25519 signatures on all broadcast posts by admin devices.
+- [x] Enforce Ed25519 signatures on all broadcast posts by admin devices.
+  BroadcastPost is an encrypted Message content with a domain-separated
+  Ed25519 transcript. The publisher helper signs it with the admin device key;
+  subscribers verify the signature, sender-device binding, and current admin
+  RBAC policy before storing or rendering the post.
 - [ ] Implement the publish flow: admin signs post, encrypts with broadcast master key, and dispatches to the broker.
 - [ ] Implement the receive flow: subscriber fetches signed payload, verifies the admin signature, decrypts, and renders.
 

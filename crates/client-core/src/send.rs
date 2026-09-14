@@ -7,9 +7,10 @@
 
 use crate::{
     attachments::{EncryptedImage, EncryptedVoiceNote},
+    broadcast::{sign_post, BroadcastAdminVerifier},
     crypto::{EnvelopeCrypto, RecipientKeyDirectory},
     envelopes::{ClientCore, FanoutRecipient},
-    mls::{MlsEngine, PendingCommit},
+    mls::{MlsEngine, MlsIdentitySigner, PendingCommit},
     prekeys::claimed_bundle,
     protocol::{self, v1},
     sequences::ConversationSequence,
@@ -345,6 +346,63 @@ where
         conversation_id,
         message_id,
         v1::message::Content::Text(text),
+        sent_at_ms,
+        expires_at_ms,
+    )
+    .await
+}
+
+/// Sign and send one broadcast post through the normal MLS/group fan-out
+/// coordinator. Receivers reject ordinary unsigned group content on a
+/// broadcast conversation.
+pub async fn send_broadcast_post<C, M, D, T, O, S, V>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    message_id: String,
+    post_id: String,
+    epoch: u64,
+    payload: Vec<u8>,
+    signer: &S,
+    admins: &V,
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<GroupSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: GroupChatDirectory,
+    T: GroupChatTransport,
+    O: GroupChatStore,
+    S: MlsIdentitySigner,
+    V: BroadcastAdminVerifier,
+{
+    let public_key = signer.public_key()?;
+    if public_key == [0; 32] {
+        return Err(CoreError::Authentication);
+    }
+    admins.verify_admin_device(&conversation_id, core.device_id(), &public_key)?;
+    let post = sign_post(
+        &conversation_id,
+        &message_id,
+        core.device_id(),
+        post_id,
+        epoch,
+        payload,
+        signer,
+    )?;
+    send_group_message(
+        core,
+        sequence,
+        directory,
+        transport,
+        store,
+        conversation_id,
+        message_id,
+        v1::message::Content::BroadcastPost(post),
         sent_at_ms,
         expires_at_ms,
     )

@@ -118,6 +118,12 @@ authorization and post signatures remain separate controls. The broadcast
 receive coordinator does not create delivery receipts, so the passive profile
 has no outbound message path.
 
+Broadcast application messages use `BroadcastPost` content. The publisher
+helper signs a domain-separated transcript with the admin device's Ed25519 key;
+the receive coordinator checks the signature, requires the signed admin device
+to equal the MLS-authenticated sender device, and calls `BroadcastAdminVerifier`
+for the current owner/admin role before storage or rendering.
+
 ## Complexity and remaining gates
 
 OpenMLS TreeKEM updates derive and publish only the changed path, giving

@@ -7,6 +7,9 @@ around their normal MLS engine. This is a passive/read-only profile:
 - `BroadcastCommit` advances the subscriber through publisher-supplied MLS
   epochs.
 - Application messages are decrypted locally after MLS authentication.
+- Every post is a `BroadcastPost` content carrying a domain-separated Ed25519
+  signature from the admin device. The signature binds the conversation, MLS
+  sender device, post ID, epoch, admin public key, and payload.
 - Group creation, publishing, direct-chat control updates, membership changes,
   and local pending-commit merges fail closed.
 
@@ -15,6 +18,13 @@ around their normal MLS engine. This is a passive/read-only profile:
 applies broadcast updates before opening encrypted envelopes, durably commits
 the mailbox cursor before QueueAck, and returns no outbound delivery receipts;
 the subscriber remains receive-only.
+
+Publishers call `send_broadcast_post()` with their hardware-backed
+`MlsIdentitySigner` and `BroadcastAdminVerifier`. The send side checks the
+current owner/admin role before publishing. The receive side first checks that
+the MLS-authenticated sender device equals the signed admin device, verifies the
+Ed25519 signature, and asks `BroadcastAdminVerifier` for the current role.
+Invalid, unsigned, revoked, or non-admin posts fail before storage or rendering.
 
 Read-only is an application policy around MLS, not a wire-level MLS capability.
 The publisher path must still authenticate admin devices and sign posts before
