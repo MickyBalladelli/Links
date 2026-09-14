@@ -209,7 +209,7 @@ public final class IOSDecentralizedClient {
 
     public func selectMediaRelay(sessionID: String, durationMs: UInt64,
                                  access: IOSDecentralizedRelayAccess? = nil,
-                                 nowMs: UInt64 = IOSDecentralizedClient.nowMs())
+                                 nowMs: UInt64 = IOSDecentralizedClient.currentTimeMs())
         throws -> IOSDecentralizedMediaRoute {
         guard IOSClient.isCanonicalUUID(sessionID), durationMs > 0,
               durationMs <= Self.maximumLeaseMs else {
@@ -235,7 +235,7 @@ public final class IOSDecentralizedClient {
         throw IOSDecentralizedError.mediaUnavailable
     }
 
-    private static func nowMs() -> UInt64 {
+    public static func currentTimeMs() -> UInt64 {
         UInt64(Date().timeIntervalSince1970 * 1_000)
     }
 
