@@ -11,10 +11,12 @@ import type {
   WebReceivedTextMessage
 } from './WebTextMessaging'
 import {
-  WebRtcSFrameController
+  WebRtcSFrameController,
+  importWebRtcSFrameKey
 } from './WebRtcSFrame'
 import type {
   WebRtcSFrameControllerOptions,
+  WebRtcSFrameControlKey,
   WebRtcSFrameEpochKey,
   WebRtcSFrameTransformError
 } from './WebRtcSFrame'
@@ -135,6 +137,20 @@ export class WebRtcSession implements WebCoreTransport {
   /** Install the current MLS epoch media key into all attached transforms. */
   async installSFrameKey(epochKey: WebRtcSFrameEpochKey): Promise<void> {
     await this.enableSFrame().installKey(epochKey)
+  }
+
+  /** Install a decrypted MLS SFrame control update for this peer session. */
+  async installSFrameControlKey(update: WebRtcSFrameControlKey): Promise<void> {
+    requireCanonicalUUID(update.mediaSessionID, 'SFrame media session ID')
+    if (this.sessionIDValue === null || update.mediaSessionID !== this.sessionIDValue) {
+      throw new Error('SFrame media session mismatch')
+    }
+    const key = await importWebRtcSFrameKey(update.key)
+    await this.installSFrameKey({
+      key,
+      keyID: update.keyID,
+      epoch: update.epoch
+    })
   }
 
   /** Attach SFrame to all media transceivers created so far. */

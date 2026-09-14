@@ -20,6 +20,13 @@ export interface WebRtcSFrameEpochKey {
   epoch: bigint | number
 }
 
+export interface WebRtcSFrameControlKey {
+  mediaSessionID: string
+  keyID: bigint | number
+  epoch: bigint | number
+  key: BufferSource
+}
+
 interface SFrameTransformOptions {
   cipherSuite: WebRtcSFrameCipherSuite
 }
