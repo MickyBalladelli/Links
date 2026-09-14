@@ -699,5 +699,9 @@ Run these checks continuously at the relevant phase boundary, with the full audi
   routing metadata plus opaque encrypted bytes. Residual metadata and required
   operational evidence are recorded in `docs/zero-knowledge-routing.md`.
 - [ ] Centralized benchmark: verify less than 50ms delivery latency for 1M concurrent WebSocket connections.
+  The runbook and target contract are prepared in
+  `docs/centralized-websocket-benchmark.md` and
+  `deploy/benchmarks/centralized-websocket-1m.yaml`; keep this open until
+  three real runs produce a signed worst-run report.
 - [ ] Decentralized benchmark: measure multi-hop gossip propagation across 50 international nodes.
 - [ ] Review battery use, reconnect behavior, offline delivery, key recovery, and multi-device removal before public release.

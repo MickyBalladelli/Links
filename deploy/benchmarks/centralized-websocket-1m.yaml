@@ -1,0 +1,43 @@
+# Centralized WebSocket 1M benchmark target.
+# This is a run contract only. It does not provision servers or load clients.
+benchmark:
+  name: links-centralized-websocket-1m
+  protocol: links.v1
+  region: eu
+  active_connections: 1000000
+  minimum_warmup_ms: 300000
+  minimum_steady_state_ms: 600000
+  delivery_sample_ms: 300000
+  repetitions: 3
+  payload_profiles:
+    - name: normal-sealed-envelope
+      bytes_env: LINKS_BENCHMARK_NORMAL_ENVELOPE_B64
+    - name: medium-sealed-envelope
+      bytes_env: LINKS_BENCHMARK_MEDIUM_ENVELOPE_B64
+    - name: maximum-sealed-envelope
+      bytes_env: LINKS_BENCHMARK_MAX_ENVELOPE_B64
+  connection:
+    endpoint_env: LINKS_BENCHMARK_WSS_ENDPOINT
+    hello_frame_env: LINKS_BENCHMARK_HELLO_FRAME_B64
+    tls_minimum: TLSv1.3
+    heartbeat_interval_ms: 30000
+    heartbeat_timeout_ms: 90000
+  workload:
+    local_delivery_ratio: 0.50
+    cross_instance_delivery_ratio: 0.30
+    offline_replay_ratio: 0.10
+    duplicate_retry_ratio: 0.10
+    sender_rate_per_second_env: LINKS_BENCHMARK_SEND_RATE
+  acceptance:
+    latency_percentile: p99
+    max_delivery_latency_ms: 50
+    max_lost_envelopes: 0
+    max_duplicate_deliveries: 0
+    privacy_log_inspection: required
+  infrastructure:
+    gateway_instances_minimum: 2
+    shared_ephemeral_state: redis
+    durable_payload_store: postgresql
+    queue: nats-jetstream
+    load_generator_outside_gateway: true
+    resource_capture: required
