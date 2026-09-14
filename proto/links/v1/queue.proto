@@ -11,3 +11,17 @@ message GatewayDelivery {
   uint64 cursor = 4;
   bytes serialized_envelope = 5;
 }
+
+// Signed opaque envelope batch exchanged by federated server nodes. Relay
+// workers may validate routing, signatures and protobuf boundaries, but never
+// decrypt or inspect the serialized Envelope sealed_payload bytes.
+message FederatedEnvelopeBatch {
+  uint32 protocol_version = 1;
+  string source_node_id = 2;
+  string destination_node_id = 3;
+  string batch_id = 4;
+  uint64 expires_at_ms = 5;
+  repeated bytes serialized_envelopes = 6;
+  bytes body_sha256 = 7;
+  bytes signature = 8;
+}

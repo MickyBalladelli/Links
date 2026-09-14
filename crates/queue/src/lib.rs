@@ -5,16 +5,23 @@
 //! the chosen NATS client stay in the deployment adapter. It never decrypts or
 //! interprets sealed message bytes.
 use async_trait::async_trait;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use links_gateway::{ForwardedEnvelope, ForwardedWebRtcSignal, GatewayError, RegionBus};
 use links_protocol::{self as protocol, v1};
 use prost::Message;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use thiserror::Error;
 
 pub const DELIVERY_SUBJECT_PREFIX: &str = "links.v1.gateway";
 pub const BROADCAST_SUBJECT_PREFIX: &str = "links.v1.broadcast";
 pub const SIGNAL_SUBJECT_PREFIX: &str = "links.v1.webrtc";
+pub const FEDERATION_RELAY_SUBJECT_PREFIX: &str = "links.v1.federation";
+pub const DEFAULT_RELAY_DEDUP_ENTRIES: usize = 10_000;
+const FEDERATION_SIGNATURE_DOMAIN: &[u8] = b"links/federation-relay/signature/v1\0";
+const FEDERATION_BODY_DOMAIN: &[u8] = b"links/federation-relay/body/v1\0";
 
 #[derive(Debug, Error)]
 pub enum QueueError {
@@ -26,6 +33,10 @@ pub enum QueueError {
     Unavailable,
     #[error("queue message targets another gateway")]
     WrongDestination,
+    #[error("federation relay signature invalid")]
+    SignatureInvalid,
+    #[error("federation relay batch expired")]
+    Expired,
 }
 
 impl From<QueueError> for GatewayError {
@@ -39,7 +50,9 @@ impl From<QueueError> for GatewayError {
             | QueueError::Protocol(protocol::ProtocolError::TooLarge)
             | QueueError::Protocol(protocol::ProtocolError::InvalidRetention)
             | QueueError::Invalid(_)
-            | QueueError::WrongDestination => Self::Invalid,
+            | QueueError::WrongDestination
+            | QueueError::SignatureInvalid
+            | QueueError::Expired => Self::Invalid,
             QueueError::Unavailable => Self::Unavailable,
         }
     }
@@ -96,12 +109,314 @@ pub fn signal_subject(gateway_id: &str) -> Result<String, QueueError> {
     ))
 }
 
+/// Exact subject for a federated node relay. Node identifiers are encoded so
+/// broker subjects cannot be used to smuggle wildcards or hierarchy.
+pub fn federation_relay_subject(node_id: &str) -> Result<String, QueueError> {
+    protocol::validate_gateway_locator(node_id)
+        .map_err(|_| QueueError::Invalid("federation relay subject"))?;
+    Ok(format!(
+        "{FEDERATION_RELAY_SUBJECT_PREFIX}.{}.relay",
+        subject_token(node_id)
+    ))
+}
+
 /// Queue representation of a cross-region delivery. The serialized envelope
 /// is carried byte-for-byte and is not made available as application fields.
 pub struct QueueDelivery {
     source_gateway_id: String,
     destination_gateway_id: String,
     delivery: ForwardedEnvelope,
+}
+
+/// Signing boundary for a federated node identity. Production adapters should
+/// keep the private key in a node HSM or another protected key service.
+pub trait FederationNodeSigner: Send + Sync {
+    fn sign(&self, transcript: &[u8]) -> Result<[u8; protocol::FEDERATION_SIGNATURE_BYTES], QueueError>;
+}
+
+/// A signed, bounded, opaque batch for one destination federation node.
+/// Envelope bytes are validated and routed, but sealed_payload is never
+/// decrypted or interpreted here.
+pub struct FederationRelayBatch {
+    source_node_id: String,
+    destination_node_id: String,
+    batch_id: String,
+    expires_at_ms: u64,
+    envelopes: Vec<v1::Envelope>,
+    body_sha256: [u8; protocol::FEDERATION_BODY_DIGEST_BYTES],
+    signature: [u8; protocol::FEDERATION_SIGNATURE_BYTES],
+}
+
+impl FederationRelayBatch {
+    pub fn sign<S: FederationNodeSigner + ?Sized>(
+        source_node_id: String,
+        destination_node_id: String,
+        batch_id: String,
+        expires_at_ms: u64,
+        envelopes: Vec<v1::Envelope>,
+        signer: &S,
+        now_ms: u64,
+    ) -> Result<Self, QueueError> {
+        validate_relay_window(expires_at_ms, now_ms)?;
+        validate_relay_fields(&source_node_id, &destination_node_id, &batch_id)?;
+        let serialized_envelopes = serialize_relay_envelopes(&envelopes, now_ms)?;
+        let body_sha256 = relay_body_digest(&serialized_envelopes);
+        let signature = signer.sign(&relay_signature_transcript(
+            &source_node_id,
+            &destination_node_id,
+            &batch_id,
+            expires_at_ms,
+            &body_sha256,
+        ))?;
+        let batch = Self {
+            source_node_id,
+            destination_node_id,
+            batch_id,
+            expires_at_ms,
+            envelopes,
+            body_sha256,
+            signature,
+        };
+        batch.message()?;
+        Ok(batch)
+    }
+
+    pub fn decode_and_verify(
+        bytes: &[u8],
+        expected_source_node_id: &str,
+        expected_destination_node_id: &str,
+        source_public_key: &[u8; 32],
+        now_ms: u64,
+    ) -> Result<Self, QueueError> {
+        let message = protocol::decode_federated_envelope_batch(bytes)?;
+        if message.source_node_id != expected_source_node_id {
+            return Err(QueueError::Invalid("federation source"));
+        }
+        if message.destination_node_id != expected_destination_node_id {
+            return Err(QueueError::WrongDestination);
+        }
+        validate_relay_window(message.expires_at_ms, now_ms)?;
+        let envelopes = message
+            .serialized_envelopes
+            .iter()
+            .map(|serialized| protocol::decode_envelope(serialized))
+            .collect::<Result<Vec<_>, _>>()?;
+        let body_sha256 = array_from_slice::<{ protocol::FEDERATION_BODY_DIGEST_BYTES }>(
+            &message.body_sha256,
+        )
+        .ok_or(QueueError::SignatureInvalid)?;
+        if relay_body_digest(&message.serialized_envelopes) != body_sha256 {
+            return Err(QueueError::SignatureInvalid);
+        }
+        let signature = array_from_slice::<{ protocol::FEDERATION_SIGNATURE_BYTES }>(
+            &message.signature,
+        )
+        .ok_or(QueueError::SignatureInvalid)?;
+        let verifying_key =
+            VerifyingKey::from_bytes(source_public_key).map_err(|_| QueueError::SignatureInvalid)?;
+        let signature = Signature::from_bytes(&signature);
+        verifying_key
+            .verify_strict(
+                &relay_signature_transcript(
+                    &message.source_node_id,
+                    &message.destination_node_id,
+                    &message.batch_id,
+                    message.expires_at_ms,
+                    &body_sha256,
+                ),
+                &signature,
+            )
+            .map_err(|_| QueueError::SignatureInvalid)?;
+        Ok(Self {
+            source_node_id: message.source_node_id,
+            destination_node_id: message.destination_node_id,
+            batch_id: message.batch_id,
+            expires_at_ms: message.expires_at_ms,
+            envelopes,
+            body_sha256,
+            signature,
+        })
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, QueueError> {
+        Ok(self.message()?.encode_to_vec())
+    }
+
+    pub fn source_node_id(&self) -> &str {
+        &self.source_node_id
+    }
+
+    pub fn destination_node_id(&self) -> &str {
+        &self.destination_node_id
+    }
+
+    pub fn batch_id(&self) -> &str {
+        &self.batch_id
+    }
+
+    pub fn expires_at_ms(&self) -> u64 {
+        self.expires_at_ms
+    }
+
+    pub fn envelopes(&self) -> &[v1::Envelope] {
+        &self.envelopes
+    }
+
+    fn message(&self) -> Result<v1::FederatedEnvelopeBatch, QueueError> {
+        let serialized_envelopes = self
+            .envelopes
+            .iter()
+            .map(|envelope| envelope.encode_to_vec())
+            .collect();
+        let message = v1::FederatedEnvelopeBatch {
+            protocol_version: protocol::VERSION,
+            source_node_id: self.source_node_id.clone(),
+            destination_node_id: self.destination_node_id.clone(),
+            batch_id: self.batch_id.clone(),
+            expires_at_ms: self.expires_at_ms,
+            serialized_envelopes,
+            body_sha256: self.body_sha256.to_vec(),
+            signature: self.signature.to_vec(),
+        };
+        protocol::validate_federated_envelope_batch(&message)?;
+        Ok(message)
+    }
+}
+
+fn validate_relay_fields(
+    source_node_id: &str,
+    destination_node_id: &str,
+    batch_id: &str,
+) -> Result<(), QueueError> {
+    protocol::validate_gateway_locator(source_node_id)
+        .map_err(|_| QueueError::Invalid("federation source"))?;
+    protocol::validate_gateway_locator(destination_node_id)
+        .map_err(|_| QueueError::Invalid("federation destination"))?;
+    if source_node_id == destination_node_id {
+        return Err(QueueError::Invalid("same federation node"));
+    }
+    protocol::validate_id(batch_id).map_err(|_| QueueError::Invalid("federation batch id"))?;
+    Ok(())
+}
+
+fn validate_relay_window(expires_at_ms: u64, now_ms: u64) -> Result<(), QueueError> {
+    if expires_at_ms <= now_ms
+        || expires_at_ms - now_ms > protocol::MAX_RETENTION_MS
+    {
+        return Err(QueueError::Expired);
+    }
+    Ok(())
+}
+
+fn serialize_relay_envelopes(
+    envelopes: &[v1::Envelope],
+    now_ms: u64,
+) -> Result<Vec<Vec<u8>>, QueueError> {
+    if envelopes.is_empty() || envelopes.len() > protocol::MAX_FEDERATION_BATCH_ITEMS {
+        return Err(QueueError::Invalid("federation batch items"));
+    }
+    let mut serialized = Vec::with_capacity(envelopes.len());
+    let mut total = 0usize;
+    for envelope in envelopes {
+        protocol::validate_enqueue(envelope, now_ms)?;
+        let bytes = envelope.encode_to_vec();
+        total = total
+            .checked_add(bytes.len())
+            .ok_or(QueueError::Invalid("federation batch size"))?;
+        if total > protocol::MAX_QUEUE_MESSAGE_BYTES {
+            return Err(QueueError::Protocol(protocol::ProtocolError::TooLarge));
+        }
+        serialized.push(bytes);
+    }
+    Ok(serialized)
+}
+
+fn relay_body_digest(serialized_envelopes: &[Vec<u8>]) -> [u8; protocol::FEDERATION_BODY_DIGEST_BYTES] {
+    let mut hasher = Sha256::new();
+    hasher.update(FEDERATION_BODY_DOMAIN);
+    for serialized in serialized_envelopes {
+        hasher.update((serialized.len() as u32).to_be_bytes());
+        hasher.update(serialized);
+    }
+    let digest = hasher.finalize();
+    let mut output = [0u8; protocol::FEDERATION_BODY_DIGEST_BYTES];
+    output.copy_from_slice(&digest);
+    output
+}
+
+fn relay_signature_transcript(
+    source_node_id: &str,
+    destination_node_id: &str,
+    batch_id: &str,
+    expires_at_ms: u64,
+    body_sha256: &[u8; protocol::FEDERATION_BODY_DIGEST_BYTES],
+) -> Vec<u8> {
+    let mut transcript = FEDERATION_SIGNATURE_DOMAIN.to_vec();
+    append_transcript_field(&mut transcript, source_node_id.as_bytes());
+    append_transcript_field(&mut transcript, destination_node_id.as_bytes());
+    append_transcript_field(&mut transcript, batch_id.as_bytes());
+    transcript.extend_from_slice(&expires_at_ms.to_be_bytes());
+    transcript.extend_from_slice(body_sha256);
+    transcript
+}
+
+fn append_transcript_field(transcript: &mut Vec<u8>, value: &[u8]) {
+    transcript.extend_from_slice(&(value.len() as u32).to_be_bytes());
+    transcript.extend_from_slice(value);
+}
+
+fn array_from_slice<const N: usize>(value: &[u8]) -> Option<[u8; N]> {
+    value.try_into().ok()
+}
+
+/// Bounded in-memory replay protection for a relay consumer. Production
+/// deployments should back this claim operation with durable shared state if
+/// multiple consumers can receive the same node's relay stream.
+pub struct RelayDeduplicator {
+    seen: Mutex<HashMap<String, u64>>,
+    max_entries: usize,
+}
+
+impl RelayDeduplicator {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            seen: Mutex::new(HashMap::new()),
+            max_entries: max_entries.max(1),
+        }
+    }
+
+    pub fn default_capacity() -> Self {
+        Self::new(DEFAULT_RELAY_DEDUP_ENTRIES)
+    }
+
+    /// Claim the complete batch before routing any envelope. Returns false
+    /// when this batch or one of its envelopes was already accepted.
+    pub fn claim(&self, batch: &FederationRelayBatch, now_ms: u64) -> Result<bool, QueueError> {
+        validate_relay_window(batch.expires_at_ms, now_ms)?;
+        let mut seen = self.seen.lock().map_err(|_| QueueError::Unavailable)?;
+        seen.retain(|_, expires_at_ms| *expires_at_ms > now_ms);
+        let mut keys = Vec::with_capacity(batch.envelopes.len() + 1);
+        keys.push(format!(
+            "batch:{}:{}:{}",
+            batch.source_node_id, batch.destination_node_id, batch.batch_id
+        ));
+        keys.extend(batch.envelopes.iter().map(|envelope| {
+            format!(
+                "envelope:{}:{}:{}",
+                batch.source_node_id, batch.destination_node_id, envelope.envelope_id
+            )
+        }));
+        if keys.iter().any(|key| seen.contains_key(key)) {
+            return Ok(false);
+        }
+        if seen.len().saturating_add(keys.len()) > self.max_entries {
+            return Err(QueueError::Unavailable);
+        }
+        for key in keys {
+            seen.insert(key, batch.expires_at_ms);
+        }
+        Ok(true)
+    }
 }
 
 /// Cross-region WebRTC signaling wrapper. It carries SDP/ICE only while the

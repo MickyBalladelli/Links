@@ -27,6 +27,10 @@ pub const MAX_WEBRTC_SDP_MID_BYTES: usize = 128;
 pub const SFRAME_CIPHER_SUITE_AES_128_GCM_SHA256_128: u32 = 1;
 pub const SFRAME_AES_128_KEY_BYTES: usize = 16;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
+pub const MAX_FEDERATION_BATCH_ITEMS: usize = 100;
+pub const MAX_FEDERATION_RELAY_FANOUT: usize = 8;
+pub const FEDERATION_SIGNATURE_BYTES: usize = 64;
+pub const FEDERATION_BODY_DIGEST_BYTES: usize = 32;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_ONE_TIME_PREKEYS: usize = 100;
 pub const OPUS_MIN_BITRATE_KBPS: u32 = 16;
@@ -515,6 +519,73 @@ pub fn decode_gateway_delivery(bytes: &[u8]) -> Result<v1::GatewayDelivery, Prot
     let delivery = v1::GatewayDelivery::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
     validate_gateway_delivery(&delivery)?;
     Ok(delivery)
+}
+
+/// Validate a signed federated relay batch without verifying its node
+/// signature. Signature verification needs the source node key from the
+/// federation trust directory and is performed by the queue adapter.
+pub fn validate_federated_envelope_batch(
+    batch: &v1::FederatedEnvelopeBatch,
+) -> Result<(), ProtocolError> {
+    if batch.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_gateway_locator(&batch.source_node_id)?;
+    validate_gateway_locator(&batch.destination_node_id)?;
+    if batch.source_node_id == batch.destination_node_id {
+        return Err(ProtocolError::Invalid("same federation node"));
+    }
+    validate_id(&batch.batch_id)?;
+    if batch.expires_at_ms == 0 {
+        return Err(ProtocolError::Invalid("relay expiry"));
+    }
+    if batch.serialized_envelopes.is_empty()
+        || batch.serialized_envelopes.len() > MAX_FEDERATION_BATCH_ITEMS
+    {
+        return Err(ProtocolError::Invalid("relay batch items"));
+    }
+    if batch.body_sha256.len() != FEDERATION_BODY_DIGEST_BYTES {
+        return Err(ProtocolError::Invalid("relay body digest"));
+    }
+    if batch.signature.len() != FEDERATION_SIGNATURE_BYTES {
+        return Err(ProtocolError::Invalid("relay signature"));
+    }
+    let mut serialized_bytes = 0usize;
+    for serialized_envelope in &batch.serialized_envelopes {
+        if serialized_envelope.is_empty() {
+            return Err(ProtocolError::Invalid("relay envelope"));
+        }
+        serialized_bytes = serialized_bytes
+            .checked_add(serialized_envelope.len())
+            .ok_or(ProtocolError::TooLarge)?;
+        if serialized_bytes > MAX_QUEUE_MESSAGE_BYTES {
+            return Err(ProtocolError::TooLarge);
+        }
+        let envelope = decode_envelope(serialized_envelope)?;
+        if envelope.expires_at_ms > batch.expires_at_ms {
+            return Err(ProtocolError::Invalid("relay envelope expiry"));
+        }
+    }
+    if batch.encoded_len() > MAX_QUEUE_MESSAGE_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    Ok(())
+}
+
+pub fn decode_federated_envelope_batch(
+    bytes: &[u8],
+) -> Result<v1::FederatedEnvelopeBatch, ProtocolError> {
+    if bytes.is_empty() || bytes.len() > MAX_QUEUE_MESSAGE_BYTES {
+        return Err(if bytes.len() > MAX_QUEUE_MESSAGE_BYTES {
+            ProtocolError::TooLarge
+        } else {
+            ProtocolError::Malformed
+        });
+    }
+    let batch = v1::FederatedEnvelopeBatch::decode(bytes)
+        .map_err(|_| ProtocolError::Malformed)?;
+    validate_federated_envelope_batch(&batch)?;
+    Ok(batch)
 }
 
 pub fn decode_message(bytes: &[u8]) -> Result<v1::Message, ProtocolError> {
