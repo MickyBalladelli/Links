@@ -519,7 +519,10 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
   HKDF-derived per-conversation/epoch ChaCha20-Poly1305 key, and hands only
   the opaque BroadcastDispatch to the broker. The NATS adapter routes using a
   hashed conversation subject and never opens the ciphertext.
-- [ ] Implement the receive flow: subscriber fetches signed payload, verifies the admin signature, decrypts, and renders.
+- [x] Implement the receive flow: subscriber fetches signed payload, verifies the admin signature, decrypts, and renders.
+  `receive_broadcast_dispatches` fetches bounded broker batches, decrypts the
+  master-key wrapper, verifies the Ed25519 signature and current admin RBAC,
+  renders only valid posts, and acknowledges after rendering.
 
 ### Organization accounts
 

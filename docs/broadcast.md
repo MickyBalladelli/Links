@@ -35,3 +35,10 @@ Invalid, unsigned, revoked, or non-admin posts fail before storage or rendering.
 Read-only is an application policy around MLS, not a wire-level MLS capability.
 Master keys must be provisioned to authorized publisher/subscriber devices
 through the existing secure device setup; they are never stored in the broker.
+
+Subscribers implement `BroadcastDispatchTransport` and call
+`receive_broadcast_dispatches()`. The client fetches a bounded batch for one
+conversation, validates and decrypts each wrapper, verifies the Ed25519
+signature plus current admin role, renders the message, and only then sends
+the broker acknowledgement. Failed verification, decryption, rendering, or
+acknowledgement leaves the dispatch unacknowledged for safe retry.

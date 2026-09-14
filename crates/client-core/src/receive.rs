@@ -6,7 +6,7 @@
 
 use crate::{
     background::DecryptedSyncItem,
-    broadcast::{verify_post, BroadcastAdminVerifier, BroadcastSubscriber},
+    broadcast::{verify_post, BroadcastAdminVerifier, BroadcastMasterKey, BroadcastSubscriber},
     crypto::EnvelopeCrypto,
     envelopes::ClientCore,
     mls::MlsEngine,
@@ -241,6 +241,23 @@ pub trait BroadcastReceiveTransport: DirectReceiveTransport {
 }
 
 impl<T> BroadcastReceiveTransport for T where T: DirectReceiveTransport + ?Sized {}
+
+/// Broker consumer boundary for broadcast dispatches. The adapter must fetch
+/// only the requested conversation and acknowledge only after the caller has
+/// rendered the verified message. Re-delivery after a failed ack is expected.
+#[async_trait]
+pub trait BroadcastDispatchTransport: Send {
+    async fn fetch_broadcast(
+        &mut self,
+        conversation_id: &str,
+        limit: u32,
+    ) -> Result<Vec<v1::BroadcastDispatch>, CoreError>;
+
+    async fn acknowledge_broadcast(
+        &mut self,
+        dispatch: &v1::BroadcastDispatch,
+    ) -> Result<(), CoreError>;
+}
 
 #[async_trait]
 pub trait MessageRenderer: Send {
@@ -489,6 +506,54 @@ where
         next = transport.replay(sync.cursor(), replay_limit).await?;
         transport.validate_broadcast_batch(&next)?;
     }
+}
+
+/// Fetch broker dispatches, decrypt each signed Message with the channel
+/// master key, verify the admin signature and current role, render it, then
+/// acknowledge it. The broker never sees the plaintext post.
+pub async fn receive_broadcast_dispatches<B, V, R>(
+    conversation_id: &str,
+    master_key: &BroadcastMasterKey,
+    admins: &V,
+    transport: &mut B,
+    renderer: &mut R,
+    fetch_limit: u32,
+) -> Result<Vec<v1::Message>, CoreError>
+where
+    B: BroadcastDispatchTransport,
+    V: BroadcastAdminVerifier,
+    R: MessageRenderer,
+{
+    protocol::validate_id(conversation_id)?;
+    if fetch_limit == 0 || fetch_limit as usize > protocol::MAX_BATCH_ITEMS {
+        return Err(CoreError::InvalidSync);
+    }
+    let dispatches = transport
+        .fetch_broadcast(conversation_id, fetch_limit)
+        .await?;
+    if dispatches.len() > fetch_limit as usize {
+        return Err(CoreError::InvalidSync);
+    }
+
+    let mut seen_posts = HashSet::with_capacity(dispatches.len());
+    let mut messages = Vec::with_capacity(dispatches.len());
+    for dispatch in dispatches {
+        protocol::validate_broadcast_dispatch(&dispatch)?;
+        if dispatch.conversation_id != conversation_id
+            || !seen_posts.insert(dispatch.post_id.clone())
+        {
+            return Err(CoreError::Authentication);
+        }
+        let message = master_key.decrypt_dispatch(&dispatch)?;
+        let Some(v1::message::Content::BroadcastPost(post)) = message.content.as_ref() else {
+            return Err(CoreError::Authentication);
+        };
+        verify_post(&message, post, admins)?;
+        renderer.render(&message).await?;
+        transport.acknowledge_broadcast(&dispatch).await?;
+        messages.push(message);
+    }
+    Ok(messages)
 }
 
 struct ReceivedPage {
