@@ -11,8 +11,9 @@ Build the centralized product first. Make one shared protocol and crypto core, t
 3. iOS consumer client
 4. Web companion client
 5. Desktop client
-6. Channels, business, and bot clients
-7. Decentralized clients and network support
+6. macOS native client and local two-client validation
+7. Channels, business, and bot clients
+8. Decentralized clients and network support
 
 Ship in small gates: reliable 1-to-1 text first, then media, groups, calls, channels, and finally decentralized infrastructure.
 
@@ -352,6 +353,81 @@ These clients join an existing account as additional MLS device nodes. They do n
   bounded full-jitter backoff and heartbeats, and forces replay from the latest
   durable cursor during recovery. The desktop host supplies the native TLS
   WebSocket, durable core providers, and UI event loop.
+
+---
+
+## Phase 5A — macOS native client and local two-client validation
+
+Turn the platform-neutral desktop foundation into a real macOS application. The
+exit gate is two isolated macOS clients running at the same time on one Mac and
+exchanging encrypted one-to-one text through the same local development stack.
+
+### macOS application host
+
+- [ ] Add a macOS 13+ SwiftUI or AppKit application target that embeds the existing `LinksClient` and `LinksKeyStore` Swift package products.
+- [ ] Add Debug and Release schemes, application lifecycle handling, and a clean dependency on the Rust `links-identity-ffi` library for arm64 macOS; add x86_64 support if Intel Macs remain in scope.
+- [ ] Implement the macOS client shell: onboarding, account state, device state, connection state, conversation list, message list, composer, send action, and receive rendering.
+- [ ] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
+- [ ] Add crash-safe shutdown and restart behavior so pending outbox data and the durable cursor are not lost.
+
+### Identity, account, and device enrollment
+
+- [ ] Implement a macOS Keychain-backed seed provider using the existing Apple wrapping boundary; never store the seed in UserDefaults, plaintext files, logs, URLs, or analytics.
+- [ ] Namespace Keychain records by an explicit client profile so two local clients cannot open or overwrite each other's identity.
+- [ ] Support first-run username registration/login for local development and authenticated device pairing through the existing `links://connect` flow.
+- [ ] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.
+- [ ] Persist only public account/device metadata, MLS credentials, and encrypted local state; keep the bearer token memory-only.
+- [ ] Generate a fresh non-nil `user_id`, `device_id`, and `mls_node_id` for every new local profile; reject accidental identity reuse.
+- [ ] Generate and upload the initial pre-key inventory, claim and verify recipient pre-keys, and initialize the first two-user MLS conversation through the shared client core.
+
+### Native networking and encrypted messaging
+
+- [ ] Implement the macOS TLS WebSocket adapter for `wss://<host>/v1/connect` using the `links.v1` subprotocol and binary-only frames.
+- [ ] Bind the adapter to `DesktopTextSession` and a concrete `DesktopMessagingCore` implementation backed by the shared Rust core.
+- [ ] Implement durable macOS providers for MLS state, inbox, outbox, message IDs, conversation sequences, and replay cursor under the profile's Application Support directory.
+- [ ] Implement directory lookup, pre-key claim, message fan-out, Sealed Sender envelope creation, decrypt, durable commit, and QueueAck in the host integration.
+- [ ] Render a message only after the shared core has committed the decrypted message and cursor transaction.
+- [ ] Add reconnect, offline outbox retry, stale-cursor recovery, send failure, authentication expiry, and dependency outage states to the UI.
+- [ ] Keep message text, decrypted metadata, seeds, bearer tokens, and sealed payloads out of application and server logs.
+
+### Local development backend and two-client runner
+
+- [ ] Add an explicit loopback-only username development mode that can create disposable test accounts without Twilio; keep OTP disabled in this mode and prevent the mode from binding outside loopback or being enabled in Release builds.
+- [ ] Add a runnable local WebSocket adapter around `links-gateway` that wires `decode_client_frame`, `Gateway::open`, `Gateway::handle`, and `encode_server_frame` to a real socket.
+- [ ] Add a local development composition for PostgreSQL, account auth, encrypted mailbox storage, ephemeral session state, and the WebSocket gateway using one documented endpoint shared by both clients.
+- [ ] Add a client launch option such as `--profile <name>` and an explicit profile root. Each profile must have separate Application Support data, Keychain namespace, logs, bearer token, and device/node IDs.
+- [ ] Ensure the app supports two independent processes launched with macOS `open -n`; do not use a process-global singleton, shared lock, or shared database that prevents the second client from starting.
+- [ ] Add readiness/status output for each profile so the runner can wait for both clients to authenticate and connect before sending a message.
+- [ ] Add a documented two-client launcher, for example:
+
+  ```sh
+  open -n "/path/to/Links.app" --args --profile alice
+  open -n "/path/to/Links.app" --args --profile bob
+  ```
+
+- [ ] Add a disposable two-client smoke harness that creates `@alice-test` and `@bob-test`, waits for two live `links.v1` sessions, sends a message in both directions, and records only pass/fail and timing metadata.
+- [ ] Verify that two profiles can use the same gateway endpoint concurrently without session fencing; a reused `device_id` must fail clearly instead of silently replacing another client.
+
+### macOS two-client acceptance gate
+
+- [ ] Launch Alice and Bob as separate macOS processes with separate profiles on one machine.
+- [ ] Verify both accounts have distinct identity public keys, device IDs, MLS node IDs, local stores, Keychain records, and bearer tokens.
+- [ ] Verify both clients reach `ready` concurrently and remain connected for at least one heartbeat interval.
+- [ ] Send Alice → Bob and Bob → Alice text; verify ordered delivery, exactly one render per message, and successful private delivery receipts.
+- [ ] Stop Bob, send Alice → Bob while Bob is offline, restart Bob, and verify replay decrypts and renders the message exactly once.
+- [ ] Restart both clients and verify identities, MLS state, outbox state, inbox state, and cursors survive without key regeneration.
+- [ ] Drop and restore the network; verify reconnect resumes from the durable cursor and never acknowledges an uncommitted message.
+- [ ] Tamper with a local envelope, MLS state record, or cursor; verify the client fails closed without rendering plaintext or advancing the cursor.
+- [ ] Verify no plaintext message content, private key material, bearer token, or sealed payload bytes appear in local logs.
+- [ ] Add a repeatable manual runbook and CI/build documentation for the exact macOS version, architecture, app build, profile names, backend revision, and acceptance result.
+- [ ] Produce a signed/notarized macOS build only after the two-client acceptance gate and key-custody review pass.
+
+Current repository blockers covered by this phase: `native/apple` is a Swift
+package rather than an app target, `links-desktop-client` still needs concrete
+OS storage/UI/socket hosts, `links-gateway` is transport-neutral without a
+runnable socket adapter, and the Web host has no complete message UI/core
+adapter. See [desktop client](docs/desktop-client.md), [gateway](docs/gateway.md),
+and [consumer account setup](docs/consumer-account.md).
 
 ---
 

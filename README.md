@@ -1,165 +1,179 @@
 # Links
 
-Centralized-first encrypted messaging. The foundation includes phone OTP account
-authentication, Ed25519 device enrollment, hardware-backed identity custody,
-WebAuthn/Passkey PRF-encrypted identity backup, the
-Links X25519 + ML-KEM-768 PQXDH profile, authenticated offline pre-key
-provisioning, and an OpenMLS RFC 9420 TreeKEM core. **This is not yet a working
-messenger or a production post-quantum security claim.** One-to-one client
-lifecycle wiring, production gateway rollout and remaining client applications
-remain in later phases. Native hardware acceptance and the cryptographic audit
-remain open.
+Links is an end-to-end encrypted messaging platform in active development. It
+is built around a shared Rust protocol and client core, native hardware-backed
+identity custody, and encrypted routing that does not need to read message
+content.
 
-## Workspace
+> **Status:** Links is an implementation baseline, not a released messenger.
+> The cryptographic designs and service boundaries are being built and checked,
+> but a complete end-to-end client, production gateway, physical-device
+> acceptance, and independent cryptographic audit are still open.
 
-| Path | Responsibility |
+## What is here
+
+- Versioned protobuf contracts for identity, pre-keys, messages, sync,
+  transport, WebRTC, media, queues, and relays.
+- Ed25519 identities and device certificates, BIP-39 local recovery, and
+  hardware-backed seed wrapping for Apple Secure Enclave and Android Keystore.
+- A Links PQXDH profile using X25519 and ML-KEM-768, plus OpenMLS RFC 9420
+  TreeKEM for one-to-one and group sessions.
+- Sealed Sender envelopes, per-device mailbox cursors, replay, acknowledgements,
+  encrypted payload storage, and background recovery contracts.
+- Account authentication with SMS/WhatsApp Verify, username-only accounts,
+  passkey PRF backup, contact PSI, Privacy Pass, and chat-request proof of work.
+- Client foundations for Android, iOS, Web/WASM, and desktop, with media,
+  WebRTC, channels, business, bot, mini-app, and decentralized transport
+  boundaries.
+
+## What is not ready
+
+The repository does not yet provide a runnable production chat app. In
+particular:
+
+- `native/apple` is a Swift package, not a macOS application target.
+- `web` contains a WASM host library, not a complete browser chat UI.
+- `links-gateway` is a transport-neutral library; a runnable WebSocket adapter
+  is still needed for local two-client messaging.
+- Durable host providers, UI integration, message TTL cleanup, physical-device
+  acceptance, deployment, and the external crypto audit remain release work.
+
+## Repository map
+
+| Path | Purpose |
 | --- | --- |
-| `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
-| `crates/protocol` | Generated common types, descriptors, boundary validation, W3C `did:key` Ed25519 encoding and binding validation, signed broadcast-post and verification-badge schema validation, bounded Zstd dictionary sync compression, content-addressed CID derivation/verification, signed SFU and media-relay DHT record validation, relay token and usage-receipt validation, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, WebRTC SDP/ICE signal validation, MLS-encrypted SFrame control validation, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, Ed25519-signed and broadcast-master-key-encrypted admin posts, broker publish/receive contracts, signed verification-badge issuance/verification, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, shared video profiles, chunked client-side CID encryption/retrieval, decentralized opaque transport/storage/media adapters, bounded SFrame epoch-key schedules, MLS-encrypted SFrame key send/receive control, validated channel/business/bot surface roles, WebRTC SDP/ICE frame helpers, and native wasmi mini-app sandbox execution with host-mediated network and opaque-key permissions. |
-| `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, shared decentralized transport/storage/media contract, and shared-core surface contracts. |
-| `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, decentralized transport/storage/media contract, call/live-stream session, native mini-app sandbox and permission facade, and channel/business/bot surface adapter. |
-| `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
-| `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, organization Mini-App/bot feature controls, append-only encrypted payload store, S3-compatible encrypted blob boundary, provider-neutral IPFS/Arweave/Filecoin CID block boundary, Redis Lua state adapter and memory reference adapter. |
-| `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, W3C `did:key` derivation, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
-| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, organization Mini-App/bot controls, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
-| `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud and DHT SFU discovery/placement, open and token-incentivized media relay routing, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
-| `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
-| `crates/queue` | Opaque NATS JetStream delivery wire contract, signed federated relay batches, independent store-and-forward relay pooling, broadcast dispatch, transient WebRTC signaling, and durable publish adapters. |
-| `native/apple`, `native/android` | Hardware-backed seed-wrapping adapters, acceptance tests, iOS/Android client foundations, identity/OTP onboarding, APNs/FCM recovery, decentralized transport/storage/media adapters, encrypted voice/video/live-stream sessions, native WASM mini-app sandbox hosts, internal text shells, and channel/business/bot surface hosts. |
-| `web` | TypeScript Web host for the shared Rust/WASM client core. |
-| `docs/consumer-account.md` | Account setup, API, security boundaries and remaining hardware gates. |
-| `crates/server-store/migrations/0007_pseudonymous_accounts.sql` | Allows username-only accounts to omit phone-derived authentication subjects. |
-| `crates/server-store/migrations/0008_contact_psi.sql` | Stores opaque phone-directory OPRF tokens and challenge state without raw phone numbers. |
-| `crates/server-store/migrations/0009_privacy_pass.sql` | Stores only one-time Privacy Pass token digests and expiry timestamps for anonymous replay prevention. |
-| `crates/server-store/migrations/0010_chat_proof_of_work.sql` | Stores short-lived account/device-bound proof-of-work challenge state without source addresses. |
-| `crates/server-store/migrations/0012_verification_badges.sql` | Stores only the current authority-signed public verification badge. |
-| `docs/phase-0.md` | Product scope, threat model, metadata budget, platforms and release gates. |
-| `docs/contracts.md` | WebSocket choice, wire compatibility, transport and sync semantics. |
-| `docs/storage.md` | PostgreSQL, payload-store and ephemeral-state guarantees and limits. |
-| `docs/blob-storage.md` | S3-compatible encrypted attachment storage and Cloudflare/CloudFront edge deployment contract. |
-| `docs/pqxdh.md` | Links PQXDH profile, key schedule, custody requirements and security limits. |
-| `docs/crypto-audit-scope.md` | Independent PQXDH, MLS, SFrame, identity, envelope, and media-routing audit scope and sign-off record. |
-| `docs/zero-knowledge-routing.md` | Centralized/decentralized routing verification matrix, code evidence, metadata limits, and release checks. |
-| `docs/centralized-websocket-benchmark.md` | One-million-connection WebSocket workload, latency pass gate, privacy checks, and report template. |
-| `docs/decentralized-gossip-benchmark.md` | Fifty-node multi-hop federation workload, propagation measurements, correctness gates, and report template. |
-| `docs/release-readiness-review.md` | Public-release battery, reconnect, offline, recovery, and multi-device removal evidence matrix. |
-| `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
-| `docs/directory.md` | Global `@username` lookup, active-device W3C `did:key` and public keys, revocation visibility and pre-key handoff. |
-| `docs/contact-discovery.md` | Local E.164 address-book hashing with Argon2id and a persistent client salt. |
-| `docs/chat-proof-of-work.md` | Client-side Hashcash admission proof for pseudonymous one-to-one connection starts. |
-| `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
-| `docs/broadcast.md` | Passive/read-only MLS broadcast subscriber profile and authenticated update boundary. |
-| `docs/group-rbac.md` | Authenticated group membership/RBAC API, device revocation, MLS leaf changes, and epoch checkpoint flow. |
-| `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
-| `docs/pairing.md` | Canonical device-pairing QR URI, signature verification and client flow. |
-| `docs/device-delegation.md` | Signed multi-device and multi-admin sub-certificates, delegated registration, and authority rules. |
-| `docs/verification-badges.md` | Authority-signed verification claims, pinned-key validation, expiry, and revocation. |
-| `docs/client-surfaces.md` | Channel, business, and bot surface roles, shared-core routing, and platform adapter contract. |
-| `docs/gateway.md` | Multi-region WebSocket gateway flow, routing, push fallback and deployment gates. |
-| `docs/sfu.md` | Managed LiveKit Cloud regional SFU placement, SFrame confidentiality, failover, and deployment gates. |
-| `docs/sfu-discovery.md` | Signed DHT SFU records, trust binding, expiry/health filtering, and discovery adapter boundary. |
-| `docs/media-relays.md` | Open and token-incentivized WebRTC relay records, admission tokens, usage receipts, SFrame-only routing, and deployment boundary. |
-| `docs/decentralized-clients.md` | Android, iOS, Web, and desktop decentralized transport, CID storage, and SFrame media adapter contract. |
-| `docs/message-queue.md` | NATS JetStream subjects, opaque delivery rules and regional deployment contract. |
-| `deploy/livekit/regions.example.yaml` | Managed LiveKit Cloud regional endpoint and SFrame policy contract. |
-| `deploy/sfu-dht/regions.example.yaml` | Authenticated regional DHT, signed SFU node records, health probes, and key configuration boundary. |
-| `deploy/media-relays/regions.example.yaml` | Authenticated relay DHT, open/token relay policy, key names, health probes, and SFrame-only forwarding boundary. |
-| `deploy/benchmarks/centralized-websocket-1m.yaml` | Centralized one-million-WebSocket benchmark target, workload split, acceptance gate, and report inputs. |
-| `deploy/benchmarks/decentralized-gossip-50.yaml` | Decentralized fifty-node gossip benchmark topology, workload, correctness gate, and report inputs. |
-| `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |
-| `docs/ios-client.md` | iOS client foundation, shared-core boundary and release limits. |
-| `docs/ios-text-milestone.md` | Internal iOS one-to-one text build scope and two-device acceptance gate. |
-| `docs/web-client.md` | Web/WASM client bootstrap, key custody boundary and current release limits. |
-| `web/src/WebConnectionManager.ts` | Browser `wss://` connection lifecycle for binary `links.v1`. |
-| `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
-| `web/src/WebImages.ts` | Web image normalization, encrypted transfer, ciphertext cache, and render boundary. |
-| `web/src/WebRtcFileTransfer.ts` | Browser WebRTC DataChannel ciphertext streaming, resume, backpressure, and integrity boundary. |
-| `web/src/WebRtcSession.ts` | Browser WebRTC offer/answer and ICE exchange over authenticated `links.v1` signaling. |
-| `web/src/WebRtcSFrame.ts` | Native WebRTC Encoded Transform SFrame binding with non-extractable AES-128-GCM key rotation. |
-| `web/src/WebRtcCallFlow.ts` | Browser MLS-keyed, SFrame-encrypted WebRTC call orchestration against a managed SFU signaling adapter. |
-| `web/src/WebCallSurface.ts` | Web voice/video/live-stream mode and publisher/subscriber facade over the encrypted call flow. |
-| `web/src/WebTransportConnectionManager.ts` | HTTP/3 WebTransport signaling fallback with reliable length-prefixed protobuf frames and QUIC loss recovery. |
-| `web/src/WebDecentralizedClient.ts` | Browser opaque relay transport retries, CID-verified provider storage, and trusted SFrame media relay selection. |
-| `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
-| `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
-| `crates/desktop-client/src/session.rs` | Desktop image encryption, transfer, ciphertext cache, and render boundary. |
-| `docs/voice-notes.md` | Opus profile, Ogg container, encryption boundary and platform codec contract. |
-| `docs/video-transcoding.md` | Native VideoToolbox/MediaCodec profiles and hardware-only transcode boundary. |
-| `docs/p2p-file-transfer.md` | WebRTC DataChannel ciphertext-only transfer, resume, backpressure, and integrity contract. |
-| `docs/webrtc-signaling.md` | Authenticated live-device SDP/ICE exchange, gateway routing, and browser session contract. |
-| `docs/sframe.md` | Native WebRTC SFrame transform contract, key custody, rotation, and browser capability gate. |
-| `docs/call-flow.md` | End-to-end SFU call sequence, MLS key exchange, SDP/ICE, SFrame, and teardown contract. |
-| `docs/platform-calls.md` | Mobile-first call/live-stream adapters and Web/desktop rollout contract. |
-| `docs/mini-app-sandbox.md` | Native wasmi runtime, fixed guest ABI, resource limits, and capability boundary for mini-apps. |
-| `docs/mini-app-permissions.md` | Fine-grained HTTPS host/method grants, mediated network calls, and opaque hardware-key operation grants for Mini-Apps. |
-| `docs/organization-controls.md` | Authenticated organization gates for exposing Mini-Apps and bots, with owner/admin update rules and revisioning. |
-| `crates/server-store/migrations/0013_organization_controls.sql` | Default-off organization feature gates for Mini-Apps and bots. |
-| `docs/federation.md` | Selected Matrix-style federated server-node layer, encrypted envelope contract, and rollout boundary. |
-| `docs/relay-gossip.md` | Signed opaque federated envelope batches, bounded peer fan-out, JetStream relay subjects, and replay claims. |
-| `deploy/relays/regions.example.yaml` | Three independent encrypted JetStream relay clusters with bounded store-and-forward retention. |
-| `deploy/relays/README.md` | Relay deployment, consumer acknowledgement, failure, and retention runbook. |
-| `docs/content-addressed-storage.md` | Client-encrypted CID chunks, provider adapters, verification, and retention contract. |
-| `deploy/content-addressed/regions.example.yaml` | IPFS, Arweave, and Filecoin provider configuration boundary with client-only keys. |
-| `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
-| `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
-| `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |
-| `native/apple/Sources/LinksClient/IOSLargeFileTransfer.swift` | iOS bounded ChaCha20-Poly1305 staging for video/files. |
-| `native/apple/Sources/LinksClient/IOSLargeFileSession.swift` | iOS upload receipt, private MLS send, and decrypt orchestration. |
-| `native/apple/Sources/LinksClient/IOSCallSession.swift` | iOS voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
-| `native/apple/Sources/LinksClient/IOSDecentralizedClient.swift` | iOS opaque relay transport retries, CID-verified provider storage, and trusted SFrame media relay selection. |
-| `native/apple/Sources/LinksClient/IOSMiniAppSandbox.swift` | iOS facade for the opaque native WASM sandbox runtime. |
-| `native/android/client/src/main/java/ai/links/app/AndroidVideoTranscoder.java` | Android MediaCodec surface transcode, MP4 mux, and faststart boundary. |
-| `native/android/client/src/main/java/ai/links/app/Mp4FastStart.java` | Android MP4 `moov` relocation and `stco`/`co64` offset repair. |
-| `native/android/client/src/main/java/ai/links/app/AndroidLargeFileTransfer.java` | Android bounded ChaCha20-Poly1305 staging for video/files. |
-| `native/android/client/src/main/java/ai/links/app/AndroidLargeFileSession.java` | Android upload receipt, private MLS send, and decrypt orchestration. |
-| `native/android/client/src/main/java/ai/links/app/AndroidCallSession.java` | Android voice/video/live-stream state machine with MLS key, SFrame, SFU, SDP, ICE, and teardown boundaries. |
-| `native/android/client/src/main/java/ai/links/app/AndroidDecentralizedClient.java` | Android opaque relay transport retries, CID-verified provider storage, and trusted SFrame media relay selection. |
-| `native/android/client/src/main/java/ai/links/app/AndroidMiniAppSandbox.java` | Android facade for the opaque native WASM sandbox runtime. |
+| [`proto/links/v1`](proto/links/v1) | Versioned wire contracts. |
+| [`crates/protocol`](crates/protocol) | Generated protobuf types and boundary validation. |
+| [`crates/identity`](crates/identity) | Self-sovereign identity, recovery, device certificates, and MLS credentials. |
+| [`crates/client-core`](crates/client-core) | Shared crypto, PQXDH, MLS, messaging, sync, media, and sandbox logic. |
+| [`crates/account-auth`](crates/account-auth) | Account, device, directory, passkey, and anti-spam HTTP services. |
+| [`crates/server-store`](crates/server-store) | PostgreSQL migrations, encrypted mailbox, and storage adapters. |
+| [`crates/gateway`](crates/gateway) and [`crates/queue`](crates/queue) | Gateway, push, routing, queue, relay, and delivery contracts. |
+| [`native/android`](native/android) and [`native/apple`](native/apple) | Native identity custody and mobile client foundations. |
+| [`crates/web-client`](crates/web-client), [`crates/desktop-client`](crates/desktop-client), and [`web`](web) | Web/WASM and desktop client foundations. |
+| [`docs`](docs) and [`deploy`](deploy) | Design contracts, runbooks, and deployment manifests. |
 
-## Build and test
+## Quickstart
 
-Install a current stable Rust toolchain with rustfmt and clippy. Cargo downloads
-locked dependencies and a vendored protoc; a system protoc is not required.
+### Prerequisites
+
+- Stable Rust with Cargo
+- Docker Desktop for local PostgreSQL
+- Node.js and npm for the Web/WASM package
+- Xcode and Swift 5.9+ for Apple targets
+- JDK, Android SDK, and Gradle for Android builds
+- Twilio Verify credentials when running phone OTP authentication
+
+### Start PostgreSQL and account auth
+
+Compose starts PostgreSQL only. Account auth is a separate loopback service and
+has no development OTP bypass.
+
+```sh
+cp .env.example .env
+# Edit .env. Set AUTH_LOOKUP_KEY to a random 32-byte base64url secret.
+# Set all TWILIO_* values before using phone OTP routes.
+docker compose up -d --wait postgres
+set -a
+. ./.env
+set +a
+cargo run -p links-server-store --example migrate --locked
+cargo run -p links-account-auth --locked
+```
+
+The auth service listens at `http://127.0.0.1:8080`. The migration command and
+auth service must use the same `DATABASE_URL`. Never use the example credentials
+outside local development.
+
+### Build the libraries
+
+```sh
+cargo build --workspace --locked
+
+# The Apple Swift package links this Rust library.
+cargo build -p links-identity-ffi --locked
+swift build --package-path native/apple
+
+# Web/WASM client
+rustup target add wasm32-unknown-unknown
+cd web
+npm run build:wasm
+```
+
+Build the Android modules with an installed Android SDK and Gradle:
+
+```sh
+gradle -p native/android assembleDebug
+```
+
+These commands build libraries and native modules. They do not launch a
+complete chat client.
+
+## Security model
+
+Links keeps plaintext and long-term private key material on the client. The
+server is intended to handle account control, opaque ciphertext, routing,
+mailbox cursors, and delivery state.
+
+- Identity keys use Ed25519. Device enrollment is bound by signed,
+  nonce-specific transcripts and device sub-certificates.
+- Session setup uses X25519 plus ML-KEM-768 in the Links PQXDH profile. OpenMLS
+  provides the TreeKEM ratchet and encrypted application messages.
+- Each recipient device receives its own sealed envelope. Routing services see
+  only the metadata required to deliver it; conversation and message content
+  stay inside the encrypted payload.
+- Passkey backup encrypts the identity seed locally with a WebAuthn PRF output.
+  The server stores only the opaque backup envelope and ceremony data.
+- Defaults fail closed where a platform-backed key or provider is required.
+  Implemented interfaces and passing compile checks are not a production
+  security claim; interoperability testing and independent review are still
+  required.
+
+Read the detailed boundaries in [`docs/pqxdh.md`](docs/pqxdh.md),
+[`docs/mls.md`](docs/mls.md),
+[`docs/consumer-account.md`](docs/consumer-account.md), and
+[`docs/hardware-identity.md`](docs/hardware-identity.md).
+
+## Validation
+
+The CI workflow runs formatting, warning-free Clippy, Rust unit and doc tests,
+PostgreSQL integration tests, WASM checks, and Apple/Android native builds.
+The PostgreSQL integration tests use `LINKS_TEST_DATABASE_URL` and a disposable
+database. Hardware-backed round trips and the two-client macOS flow are separate
+release gates.
+
+Useful local checks:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo test --workspace --doc --locked
-rustup target add wasm32-unknown-unknown
 cargo check -p links-client-core --target wasm32-unknown-unknown --locked
 cargo check -p links-web-client --target wasm32-unknown-unknown --locked
 ```
 
-The ordinary test command explicitly reports PostgreSQL integration tests as
-ignored. Run them separately against a disposable development database; they do
-not silently pass when the database is unavailable.
-
-## Local PostgreSQL
-
-Docker Compose is optional; an existing disposable PostgreSQL 18 instance also
-works. These example credentials and the loopback binding are for development.
+For PostgreSQL integration tests, point `LINKS_TEST_DATABASE_URL` at a
+disposable database and run:
 
 ```sh
-cp .env.example .env
-# Review .env before loading it. Change both password and URLs together if needed.
-set -a; . ./.env; set +a
-docker compose up -d --wait postgres
-cargo run -p links-server-store --example migrate --locked
 cargo test --workspace --all-targets --locked -- --ignored
 ```
 
-The migration command targets `DATABASE_URL`. Integration tests use
-`LINKS_TEST_DATABASE_URL`, create a random isolated schema for each test, and drop
-only those schemas afterward. The test role needs CREATE SCHEMA permission. Never
-point these development commands at production. `docker compose down` stops the
-local service while retaining its named data volume.
+## Roadmap
 
-CI is configured for formatting, warning-free lint, unit/doc tests, PostgreSQL
-integration tests, WASM compilation and native-source builds. Hardware custody
-tests require signed physical-device harnesses; compile checks do not prove TEE
-protection. Mobile FFI bindings, Redis and ScyllaDB/DynamoDB network adapters remain
-future work. The default outer envelope provider still fails closed; install the
-platform-backed Sealed Sender resolver before sending. See [account setup](docs/consumer-account.md),
-[MLS](docs/mls.md), and [the roadmap](TODO.md).
+The intended delivery order is:
+
+1. Shared protocol and cryptographic core
+2. Reliable centralized one-to-one text
+3. Android and iOS consumer clients
+4. Web and desktop companions
+5. Groups, media, calls, channels, business, and bot surfaces
+6. Mini-app runtime and decentralized/federated transport
+7. Performance, security review, hardware acceptance, and release gates
+
+See [`TODO.md`](TODO.md) for the checked implementation plan. Start with
+[`docs/phase-0.md`](docs/phase-0.md) for product scope and threat model,
+[`docs/contracts.md`](docs/contracts.md) for protocol and transport semantics,
+and [`docs/release-readiness-review.md`](docs/release-readiness-review.md) for
+the public-release checklist.
