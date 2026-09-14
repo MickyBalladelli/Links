@@ -162,12 +162,14 @@ export class WebRtcSession implements WebCoreTransport {
     requireCanonicalUUID(delivery.senderDeviceID, 'sender device ID')
     requireCanonicalUUID(delivery.sessionID, 'WebRTC session ID')
     requireCanonicalUUID(delivery.targetDeviceID, 'target device ID')
+    if (delivery.senderDeviceID !== this.targetDeviceID ||
+        delivery.targetDeviceID !== this.core.deviceID) {
+      throw new Error('WebRTC signal peer mismatch')
+    }
     if (this.sessionIDValue === null && delivery.kind === 1) {
       this.sessionIDValue = delivery.sessionID
     }
     if (this.sessionIDValue === null || delivery.sessionID !== this.sessionIDValue ||
-        delivery.senderDeviceID !== this.targetDeviceID ||
-        delivery.targetDeviceID !== this.core.deviceID ||
         delivery.sdp.length === 0 ||
         new TextEncoder().encode(delivery.sdp).byteLength > WebRtcSession.maximumSdpBytes) {
       throw new Error('WebRTC signal does not match this session')

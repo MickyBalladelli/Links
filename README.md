@@ -60,6 +60,7 @@ remain open.
 | `web/src/WebTextMessaging.ts` | Shared-core encrypted one-to-one Web text sync host. |
 | `web/src/WebImages.ts` | Web image normalization, encrypted transfer, ciphertext cache, and render boundary. |
 | `web/src/WebRtcFileTransfer.ts` | Browser WebRTC DataChannel ciphertext streaming, resume, backpressure, and integrity boundary. |
+| `web/src/WebRtcSession.ts` | Browser WebRTC offer/answer and ICE exchange over authenticated `links.v1` signaling. |
 | `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
 | `crates/desktop-client/src/session.rs` | Desktop image encryption, transfer, ciphertext cache, and render boundary. |
