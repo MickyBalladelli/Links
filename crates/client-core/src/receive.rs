@@ -6,7 +6,7 @@
 
 use crate::{
     background::DecryptedSyncItem,
-    broadcast::BroadcastSubscriber,
+    broadcast::{verify_post, BroadcastAdminVerifier, BroadcastSubscriber},
     crypto::EnvelopeCrypto,
     envelopes::ClientCore,
     mls::MlsEngine,
@@ -336,8 +336,18 @@ where
 
     loop {
         let high_watermark = next.batch.high_watermark;
-        let page =
-            receive_batch(core, sync, transport, store, renderer, next, now_ms, true).await?;
+        let page = receive_batch(
+            core,
+            sync,
+            transport,
+            store,
+            renderer,
+            next,
+            now_ms,
+            true,
+            |_| Ok(()),
+        )
+        .await?;
         result.messages.extend(page.messages);
         result.delivery_receipts.extend(page.delivery_receipts);
         result.queue_acks.push(page.queue_ack);
@@ -387,8 +397,18 @@ where
 
     loop {
         let high_watermark = next.batch.high_watermark;
-        let page =
-            receive_batch(core, sync, transport, store, renderer, next, now_ms, true).await?;
+        let page = receive_batch(
+            core,
+            sync,
+            transport,
+            store,
+            renderer,
+            next,
+            now_ms,
+            true,
+            |_| Ok(()),
+        )
+        .await?;
         result.messages.extend(page.messages);
         result.delivery_receipts.extend(page.delivery_receipts);
         result.queue_acks.push(page.queue_ack);
@@ -411,6 +431,7 @@ pub async fn receive_broadcast_available<C, M, T, S, R>(
     transport: &mut T,
     store: &mut S,
     renderer: &mut R,
+    admins: &impl BroadcastAdminVerifier,
     replay_limit: u32,
     now_ms: u64,
 ) -> Result<BroadcastReceiveResult, CoreError>
@@ -439,8 +460,24 @@ where
 
     loop {
         let high_watermark = next.batch.high_watermark;
-        let page =
-            receive_batch(core, sync, transport, store, renderer, next, now_ms, false).await?;
+        let page = receive_batch(
+            core,
+            sync,
+            transport,
+            store,
+            renderer,
+            next,
+            now_ms,
+            false,
+            |message| {
+                let Some(v1::message::Content::BroadcastPost(post)) = message.content.as_ref()
+                else {
+                    return Err(CoreError::Authentication);
+                };
+                verify_post(message, post, admins).map(|_| ())
+            },
+        )
+        .await?;
         result.messages.extend(page.messages);
         result.delivery_receipts.extend(page.delivery_receipts);
         result.queue_acks.push(page.queue_ack);
@@ -462,7 +499,7 @@ struct ReceivedPage {
     idle: bool,
 }
 
-async fn receive_batch<C, M, T, S, R>(
+async fn receive_batch<C, M, T, S, R, F>(
     core: &mut ClientCore<C, M>,
     sync: &mut SyncState,
     transport: &mut T,
@@ -471,6 +508,7 @@ async fn receive_batch<C, M, T, S, R>(
     incoming: DirectReceiveBatch,
     now_ms: u64,
     collect_delivery_receipts: bool,
+    validate_message: F,
 ) -> Result<ReceivedPage, CoreError>
 where
     C: EnvelopeCrypto,
@@ -478,6 +516,7 @@ where
     T: DirectReceiveTransport,
     S: DirectReceiveStore,
     R: MessageRenderer,
+    F: Fn(&v1::Message) -> Result<(), CoreError>,
 {
     let advance = sync.prepare(&incoming.batch)?;
     for update in &incoming.mls_updates {
@@ -492,6 +531,7 @@ where
         match item.entry.ok_or(CoreError::InvalidSync)? {
             v1::queue_item::Entry::Envelope(envelope) => {
                 let message = core.open_envelope(&envelope, now_ms)?;
+                validate_message(&message)?;
                 if collect_delivery_receipts {
                     add_receipt(&mut receipts, &message, now_ms)?;
                 }
