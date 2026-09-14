@@ -24,6 +24,8 @@ pub const MAX_FANOUT_DEVICES: usize = 100;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_WEBRTC_SDP_BYTES: usize = 256 * 1024;
 pub const MAX_WEBRTC_SDP_MID_BYTES: usize = 128;
+pub const SFRAME_CIPHER_SUITE_AES_128_GCM_SHA256_128: u32 = 1;
+pub const SFRAME_AES_128_KEY_BYTES: usize = 16;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_ONE_TIME_PREKEYS: usize = 100;
@@ -222,7 +224,35 @@ pub fn validate_message(message: &v1::Message) -> Result<(), ProtocolError> {
             Ok(())
         }
         v1::message::Content::BroadcastPost(post) => validate_broadcast_post(post),
+        v1::message::Content::MlsControl(control) => validate_mls_control(control),
     }
+}
+
+pub fn validate_mls_control(control: &v1::MlsControl) -> Result<(), ProtocolError> {
+    if control.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    match control.body.as_ref() {
+        Some(v1::mls_control::Body::SframeEpochKey(update)) => {
+            validate_sframe_epoch_key_update(update)
+        }
+        None => Err(ProtocolError::Invalid("MLS control")),
+    }
+}
+
+pub fn validate_sframe_epoch_key_update(
+    update: &v1::SFrameEpochKeyUpdate,
+) -> Result<(), ProtocolError> {
+    validate_id(&update.media_session_id)?;
+    if update.epoch > MAX_CURSOR
+        || update.key_id > MAX_CURSOR
+        || update.cipher_suite != SFRAME_CIPHER_SUITE_AES_128_GCM_SHA256_128
+        || update.key.len() != SFRAME_AES_128_KEY_BYTES
+        || update.key.iter().all(|byte| *byte == 0)
+    {
+        return Err(ProtocolError::Invalid("SFrame epoch key"));
+    }
+    Ok(())
 }
 
 pub fn validate_broadcast_post(post: &v1::BroadcastPost) -> Result<(), ProtocolError> {

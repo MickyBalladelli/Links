@@ -11,6 +11,7 @@ use crate::{
     envelopes::ClientCore,
     mls::MlsEngine,
     protocol::{self, v1},
+    sframe::SFrameEpochKeyUpdate,
     sync::{SyncAdvance, SyncState},
     CoreError,
 };
@@ -264,6 +265,34 @@ pub trait MessageRenderer: Send {
     async fn render(&mut self, message: &v1::Message) -> Result<(), CoreError>;
 }
 
+/// Receives MLS-authenticated SFrame keys. Implementations must authorize the
+/// sender for the media session and durably install the key before returning.
+/// Replaying the same update must be idempotent because cursor commit follows
+/// this callback.
+#[async_trait]
+pub trait SFrameKeyHandler: Send {
+    async fn handle_sframe_epoch_key(
+        &mut self,
+        conversation_id: &str,
+        sender_device_id: &str,
+        update: &SFrameEpochKeyUpdate,
+    ) -> Result<(), CoreError>;
+}
+
+struct RejectSFrameKeyHandler;
+
+#[async_trait]
+impl SFrameKeyHandler for RejectSFrameKeyHandler {
+    async fn handle_sframe_epoch_key(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: &SFrameEpochKeyUpdate,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::Authentication)
+    }
+}
+
 /// Private, in-conversation delivery receipt request. The host must pass its
 /// content through the normal MLS send coordinator; this type is never sent
 /// as plaintext to the gateway.
@@ -336,6 +365,39 @@ where
     S: DirectReceiveStore,
     R: MessageRenderer,
 {
+    let mut handler = RejectSFrameKeyHandler;
+    receive_available_with_sframe(
+        core,
+        sync,
+        transport,
+        store,
+        renderer,
+        &mut handler,
+        replay_limit,
+        now_ms,
+    )
+    .await
+}
+
+/// Direct receive path with an authenticated MLS SFrame control sink.
+pub async fn receive_available_with_sframe<C, M, T, S, R, H>(
+    core: &mut ClientCore<C, M>,
+    sync: &mut SyncState,
+    transport: &mut T,
+    store: &mut S,
+    renderer: &mut R,
+    handler: &mut H,
+    replay_limit: u32,
+    now_ms: u64,
+) -> Result<DirectReceiveResult, CoreError>
+where
+    C: EnvelopeCrypto,
+    M: MlsEngine,
+    T: DirectReceiveTransport,
+    S: DirectReceiveStore,
+    R: MessageRenderer,
+    H: SFrameKeyHandler,
+{
     if replay_limit == 0 || replay_limit as usize > protocol::MAX_BATCH_ITEMS || now_ms == 0 {
         return Err(CoreError::InvalidSync);
     }
@@ -362,6 +424,7 @@ where
             next,
             now_ms,
             true,
+            handler,
             |_| Ok(()),
         )
         .await?;
@@ -396,6 +459,39 @@ where
     S: GroupReceiveStore,
     R: MessageRenderer,
 {
+    let mut handler = RejectSFrameKeyHandler;
+    receive_group_available_with_sframe(
+        core,
+        sync,
+        transport,
+        store,
+        renderer,
+        &mut handler,
+        replay_limit,
+        now_ms,
+    )
+    .await
+}
+
+/// Group receive path with an authenticated MLS SFrame control sink.
+pub async fn receive_group_available_with_sframe<C, M, T, S, R, H>(
+    core: &mut ClientCore<C, M>,
+    sync: &mut SyncState,
+    transport: &mut T,
+    store: &mut S,
+    renderer: &mut R,
+    handler: &mut H,
+    replay_limit: u32,
+    now_ms: u64,
+) -> Result<GroupReceiveResult, CoreError>
+where
+    C: EnvelopeCrypto,
+    M: MlsEngine,
+    T: GroupReceiveTransport,
+    S: GroupReceiveStore,
+    R: MessageRenderer,
+    H: SFrameKeyHandler,
+{
     if replay_limit == 0 || replay_limit as usize > protocol::MAX_BATCH_ITEMS || now_ms == 0 {
         return Err(CoreError::InvalidSync);
     }
@@ -423,6 +519,7 @@ where
             next,
             now_ms,
             true,
+            handler,
             |_| Ok(()),
         )
         .await?;
@@ -467,6 +564,7 @@ where
         .connect(&device_id, sync.cursor(), replay_limit)
         .await?;
     transport.validate_broadcast_batch(&next)?;
+    let mut handler = RejectSFrameKeyHandler;
     let mut result = DirectReceiveResult {
         messages: Vec::new(),
         delivery_receipts: Vec::new(),
@@ -486,6 +584,7 @@ where
             next,
             now_ms,
             false,
+            &mut handler,
             |message| {
                 let Some(v1::message::Content::BroadcastPost(post)) = message.content.as_ref()
                 else {
@@ -573,6 +672,7 @@ async fn receive_batch<C, M, T, S, R, F>(
     incoming: DirectReceiveBatch,
     now_ms: u64,
     collect_delivery_receipts: bool,
+    handler: &mut impl SFrameKeyHandler,
     validate_message: F,
 ) -> Result<ReceivedPage, CoreError>
 where
@@ -588,6 +688,7 @@ where
         update.apply(core.mls_mut())?;
     }
 
+    let had_items = !incoming.batch.items.is_empty();
     let mut items = Vec::with_capacity(incoming.batch.items.len());
     let mut messages = Vec::new();
     let mut receipts = Vec::new();
@@ -596,6 +697,16 @@ where
         match item.entry.ok_or(CoreError::InvalidSync)? {
             v1::queue_item::Entry::Envelope(envelope) => {
                 let message = core.open_envelope(&envelope, now_ms)?;
+                if let Some(update) = SFrameEpochKeyUpdate::from_message(&message)? {
+                    handler
+                        .handle_sframe_epoch_key(
+                            &message.conversation_id,
+                            &message.sender_device_id,
+                            &update,
+                        )
+                        .await?;
+                    continue;
+                }
                 validate_message(&message)?;
                 if collect_delivery_receipts {
                     add_receipt(&mut receipts, &message, now_ms)?;
@@ -625,7 +736,7 @@ where
     let queue_ack = sync.commit(advance)?;
     transport.acknowledge(queue_ack.clone()).await?;
     Ok(ReceivedPage {
-        idle: items.is_empty(),
+        idle: !had_items,
         messages,
         delivery_receipts: receipts,
         queue_ack,

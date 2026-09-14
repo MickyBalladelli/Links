@@ -15,7 +15,27 @@ message Message {
     MediaMetadata media = 6;
     Receipts receipts = 7;
     BroadcastPost broadcast_post = 9;
+    MlsControl mls_control = 10;
   }
+}
+
+// PRIVATE: only inside an MLS application message. Never expose this type to
+// routing, signaling, SFU, queue, or blob-storage services.
+message MlsControl {
+  uint32 protocol_version = 1;
+  oneof body {
+    SFrameEpochKeyUpdate sframe_epoch_key = 2;
+  }
+}
+
+// An MLS-authenticated media key handoff. The key is protected by the outer
+// MLS application ciphertext and is never a server-readable field.
+message SFrameEpochKeyUpdate {
+  string media_session_id = 1;
+  uint64 epoch = 2;
+  uint64 key_id = 3;
+  uint32 cipher_suite = 4; // 1=AES_128_GCM_SHA256_128.
+  bytes key = 5; // 128-bit SFrame key, only inside MLS ciphertext.
 }
 
 // PRIVATE: only inside an encrypted broadcast Message. The signature binds

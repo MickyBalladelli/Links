@@ -14,6 +14,7 @@ use crate::{
     prekeys::claimed_bundle,
     protocol::{self, v1},
     sequences::ConversationSequence,
+    sframe::{SFrameEpochKeyUpdate, SFRAME_KEY_BYTES},
     CoreError,
 };
 use async_trait::async_trait;
@@ -439,6 +440,89 @@ where
         recipient_user_id,
         message_id,
         v1::message::Content::Text(text),
+        sent_at_ms,
+        expires_at_ms,
+    )
+    .await
+}
+
+/// Send one SFrame epoch key as an MLS-authenticated control message. The
+/// key is serialized only into the MLS plaintext and is then fanned out in
+/// the normal Sealed Sender envelopes.
+pub async fn send_sframe_epoch_key<C, M, D, T, O>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    recipient_user_id: String,
+    message_id: String,
+    media_session_id: String,
+    key_id: u64,
+    epoch: u64,
+    key: [u8; SFRAME_KEY_BYTES],
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<DirectSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: DirectChatDirectory,
+    T: DirectChatTransport,
+    O: DirectChatStore,
+{
+    let update = SFrameEpochKeyUpdate::new(media_session_id, key_id, epoch, key)?;
+    send_message(
+        core,
+        sequence,
+        directory,
+        transport,
+        store,
+        conversation_id,
+        recipient_user_id,
+        message_id,
+        update.message_content(),
+        sent_at_ms,
+        expires_at_ms,
+    )
+    .await
+}
+
+/// Group variant of `send_sframe_epoch_key`. Every active device in the
+/// authenticated group receives the same MLS-protected key update.
+pub async fn send_group_sframe_epoch_key<C, M, D, T, O>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    message_id: String,
+    media_session_id: String,
+    key_id: u64,
+    epoch: u64,
+    key: [u8; SFRAME_KEY_BYTES],
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<GroupSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: GroupChatDirectory,
+    T: GroupChatTransport,
+    O: GroupChatStore,
+{
+    let update = SFrameEpochKeyUpdate::new(media_session_id, key_id, epoch, key)?;
+    send_group_message(
+        core,
+        sequence,
+        directory,
+        transport,
+        store,
+        conversation_id,
+        message_id,
+        update.message_content(),
         sent_at_ms,
         expires_at_ms,
     )
