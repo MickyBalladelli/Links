@@ -258,6 +258,9 @@ export class WebRtcSession implements WebCoreTransport {
     sdpMid = '',
     sdpMLineIndex = 0
   ): void {
+    if (sdp.length === 0 || new TextEncoder().encode(sdp).byteLength > WebRtcSession.maximumSdpBytes) {
+      throw new Error('WebRTC signal is too large')
+    }
     const kindNumber = kind === 'offer' ? 1 : kind === 'answer' ? 2 : 3
     const frame = this.signaling.encodeWebRtcSignal(
       crypto.randomUUID(),
