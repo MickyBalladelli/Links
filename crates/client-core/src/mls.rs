@@ -10,6 +10,8 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 const DIRECT_MAX_USERS: usize = 2;
+pub const MAX_GROUP_USERS: usize = 100;
+pub const MAX_GROUP_DEVICES: usize = protocol::MAX_FANOUT_DEVICES;
 
 /// OpenMLS's hybrid draft suite: ML-KEM-768 + X25519 for TreeKEM, with
 /// AES-128-GCM, SHA-256, and Ed25519 authentication.
@@ -49,6 +51,23 @@ pub trait MlsEngine {
     ) -> Result<Vec<u8>, CoreError>;
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedApplication, CoreError>;
 
+    /// Direct-chat control updates retain the exact two-user invariant.
+    fn join_direct_group(
+        &mut self,
+        conversation_id: &str,
+        welcome: &[u8],
+    ) -> Result<(), CoreError> {
+        self.join_group(conversation_id, welcome)
+    }
+
+    fn process_direct_commit(
+        &mut self,
+        conversation_id: &str,
+        commit: &[u8],
+    ) -> Result<(), CoreError> {
+        self.process_commit(conversation_id, commit)
+    }
+
     /// Ensure a direct group contains the supplied recipient device leaves.
     /// The returned commit must be delivered before it is merged locally.
     fn ensure_direct_group(
@@ -61,6 +80,20 @@ pub trait MlsEngine {
 
     /// Merge the local commit after the bootstrap delivery is accepted.
     fn merge_pending_direct_commit(&mut self, _: &str) -> Result<(), CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
+    /// Ensure a many-to-many group contains the supplied recipient device
+    /// leaves. The returned commit must be delivered before it is merged.
+    fn ensure_group(
+        &mut self,
+        _: &str,
+        _: &[&[u8]],
+    ) -> Result<Option<PendingCommit>, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
+    fn merge_pending_group_commit(&mut self, _: &str) -> Result<(), CoreError> {
         Err(CoreError::CryptoUnavailable)
     }
 }
@@ -189,9 +222,10 @@ where
     }
 }
 
-/// OpenMLS-backed direct-chat engine. OpenMLS owns the RFC 9420 TreeKEM tree
-/// and epoch ratchets; the host owns durable storage and credential trust
-/// checks. Current client conversations are restricted to two user identities.
+/// OpenMLS-backed MLS engine. OpenMLS owns the RFC 9420 TreeKEM tree and epoch
+/// ratchets; the host owns durable storage and credential trust checks. Direct
+/// conversations use the two-user path, while group conversations allow a
+/// bounded many-to-many membership set.
 pub struct OpenMlsEngine<P, S, V> {
     provider: P,
     signer: OpenMlsSigner<S>,
@@ -266,6 +300,20 @@ where
         Ok(users.len() == DIRECT_MAX_USERS && users.contains_key(&self.local_binding.user_id))
     }
 
+    /// Return whether a many-to-many group can carry application messages.
+    /// Groups need at least two verified users and may contain several device
+    /// leaves for each user.
+    pub fn group_ready(&self, conversation_id: &str) -> Result<bool, CoreError> {
+        let group_id = group_id(conversation_id)?;
+        let group = self.load_group(&group_id)?;
+        let users = verified_group_user_counts(&self.verifier, &group)?;
+        Ok(group_shape_is_ready(
+            &users,
+            &self.local_binding.user_id,
+            MAX_GROUP_USERS,
+        ))
+    }
+
     /// Stage a TreeKEM member-add commit. Keep the returned bytes until the
     /// delivery service accepts the commit, then call `process_commit`.
     pub fn add_members(
@@ -273,7 +321,30 @@ where
         conversation_id: &str,
         key_packages: &[&[u8]],
     ) -> Result<PendingCommit, CoreError> {
+        self.add_members_with_user_limit(conversation_id, key_packages, DIRECT_MAX_USERS)
+    }
+
+    /// Stage a TreeKEM member-add commit for a many-to-many group. Each
+    /// physical device is one leaf; all added leaves must have verified
+    /// credentials and the resulting group stays within the bounded limits.
+    pub fn add_group_members(
+        &mut self,
+        conversation_id: &str,
+        key_packages: &[&[u8]],
+    ) -> Result<PendingCommit, CoreError> {
+        self.add_members_with_user_limit(conversation_id, key_packages, MAX_GROUP_USERS)
+    }
+
+    fn add_members_with_user_limit(
+        &mut self,
+        conversation_id: &str,
+        key_packages: &[&[u8]],
+        max_users: usize,
+    ) -> Result<PendingCommit, CoreError> {
         if key_packages.is_empty() {
+            return Err(CoreError::Authentication);
+        }
+        if key_packages.len() > MAX_GROUP_DEVICES {
             return Err(CoreError::Authentication);
         }
         let group_id = group_id(conversation_id)?;
@@ -283,19 +354,22 @@ where
             .collect::<Result<Vec<_>, _>>()?;
         let mut group = self.load_group(&group_id)?;
         let mut users = verified_group_user_counts(&self.verifier, &group)?;
-        ensure_direct_user_limit(&users)?;
+        ensure_group_user_limit(&users, max_users)?;
+        if group.members().count().saturating_add(key_packages.len()) > MAX_GROUP_DEVICES {
+            return Err(CoreError::Authentication);
+        }
         let mut allowed_users = users.keys().copied().collect::<Vec<_>>();
         for key_package in &key_packages {
             let binding = verify_leaf(&self.verifier, key_package.leaf_node())?;
             if !allowed_users.contains(&binding.user_id) {
-                if allowed_users.len() == DIRECT_MAX_USERS {
+                if allowed_users.len() == max_users {
                     return Err(CoreError::Authentication);
                 }
                 allowed_users.push(binding.user_id);
             }
             increment_user(&mut users, binding.user_id);
         }
-        ensure_direct_user_limit(&users)?;
+        ensure_group_user_limit(&users, max_users)?;
         let (commit, welcome, _) = group
             .add_members(&self.provider, &self.signer, &key_packages)
             .map_err(|_| CoreError::Provider)?;
@@ -393,6 +467,7 @@ where
         &self,
         expected_group_id: GroupId,
         bytes: &[u8],
+        max_users: usize,
     ) -> Result<(), CoreError> {
         let input =
             MlsMessageIn::tls_deserialize_exact(bytes).map_err(|_| CoreError::Authentication)?;
@@ -418,13 +493,12 @@ where
                     .map(|binding| binding.user_id)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        if users
-            .iter()
-            .copied()
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-            != DIRECT_MAX_USERS
-            || !users.contains(&self.local_binding.user_id)
+        let user_counts = users.into_iter().fold(HashMap::new(), |mut counts, user_id| {
+            increment_user(&mut counts, user_id);
+            counts
+        });
+        if !group_shape_is_ready(&user_counts, &self.local_binding.user_id, max_users)
+            || staged.members().count() > MAX_GROUP_DEVICES
         {
             return Err(CoreError::Authentication);
         }
