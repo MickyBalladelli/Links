@@ -675,18 +675,25 @@ where
         now_ms: u64,
     ) -> Result<String, QueueError> {
         let batch_id = Uuid::new_v4().hyphenated().to_string();
-        let result = self
-            .publish_batch_to_peers(
+        self.validate_publish_request(
             destination_node_ids,
             &batch_id,
-            envelopes,
+            &envelopes,
             expires_at_ms,
             now_ms,
-        )
-        .await;
-        result.map(|_| batch_id.clone()).map_err(|_| {
-            QueueError::RelayPublishFailed { batch_id }
-        })
+        )?;
+        let result = self
+            .publish_batch_to_peers(
+                destination_node_ids,
+                &batch_id,
+                envelopes,
+                expires_at_ms,
+                now_ms,
+            )
+            .await;
+        result
+            .map(|_| batch_id.clone())
+            .map_err(|_| QueueError::RelayPublishFailed { batch_id })
     }
 
     pub async fn publish_batch_to_peers(
@@ -694,6 +701,39 @@ where
         destination_node_ids: &[String],
         batch_id: &str,
         envelopes: Vec<v1::Envelope>,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(), QueueError> {
+        self.validate_publish_request(
+            destination_node_ids,
+            batch_id,
+            &envelopes,
+            expires_at_ms,
+            now_ms,
+        )?;
+        for destination_node_id in destination_node_ids {
+            let batch = FederationRelayBatch::sign(
+                self.source_node_id.clone(),
+                destination_node_id.clone(),
+                batch_id.to_owned(),
+                expires_at_ms,
+                envelopes.clone(),
+                self.signer.as_ref(),
+                now_ms,
+            )?;
+            let subject = federation_relay_subject(destination_node_id)?;
+            self.publisher
+                .publish_durable(&subject, batch.encode()?)
+                .await?;
+        }
+        Ok(())
+    }
+
+    fn validate_publish_request(
+        &self,
+        destination_node_ids: &[String],
+        batch_id: &str,
+        envelopes: &[v1::Envelope],
         expires_at_ms: u64,
         now_ms: u64,
     ) -> Result<(), QueueError> {
@@ -712,21 +752,13 @@ where
         for destination_node_id in destination_node_ids {
             validate_relay_fields(&self.source_node_id, destination_node_id, batch_id)?;
         }
+        validate_relay_window(expires_at_ms, now_ms)?;
         serialize_relay_envelopes(&envelopes, now_ms)?;
-        for destination_node_id in destination_node_ids {
-            let batch = FederationRelayBatch::sign(
-                self.source_node_id.clone(),
-                destination_node_id.clone(),
-                batch_id.to_owned(),
-                expires_at_ms,
-                envelopes.clone(),
-                self.signer.as_ref(),
-                now_ms,
-            )?;
-            let subject = federation_relay_subject(destination_node_id)?;
-            self.publisher
-                .publish_durable(&subject, batch.encode()?)
-                .await?;
+        if envelopes
+            .iter()
+            .any(|envelope| envelope.expires_at_ms > expires_at_ms)
+        {
+            return Err(QueueError::Invalid("federation envelope expiry"));
         }
         Ok(())
     }

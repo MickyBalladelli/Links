@@ -1,6 +1,7 @@
 //! Shared wire types. Generated types deliberately have no Debug implementation.
 //! Message, media, receipt, and authentication bytes must never be logged.
 use prost::Message as ProstMessage;
+use std::collections::HashSet;
 use thiserror::Error;
 
 pub mod v1 {
@@ -551,6 +552,7 @@ pub fn validate_federated_envelope_batch(
         return Err(ProtocolError::Invalid("relay signature"));
     }
     let mut serialized_bytes = 0usize;
+    let mut envelope_ids = HashSet::with_capacity(batch.serialized_envelopes.len());
     for serialized_envelope in &batch.serialized_envelopes {
         if serialized_envelope.is_empty() {
             return Err(ProtocolError::Invalid("relay envelope"));
@@ -562,6 +564,9 @@ pub fn validate_federated_envelope_batch(
             return Err(ProtocolError::TooLarge);
         }
         let envelope = decode_envelope(serialized_envelope)?;
+        if !envelope_ids.insert(envelope.envelope_id) {
+            return Err(ProtocolError::Invalid("duplicate relay envelope"));
+        }
         if envelope.expires_at_ms > batch.expires_at_ms {
             return Err(ProtocolError::Invalid("relay envelope expiry"));
         }
