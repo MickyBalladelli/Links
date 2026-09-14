@@ -381,7 +381,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   onboarding screen, conversation list, message list, composer, send action,
   and receive rendering. The UI stays fail-closed until a concrete shared-core
   and durable host is installed.
-- [ ] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
+- [x] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
+  The macOS target uses Automatic signing with Apple Development for Debug and
+  Developer ID Application for Release, enables the hardened runtime, and
+  embeds `Links/Links.entitlements` for sandbox networking and Keychain access.
+  `native/macos/README.md` documents the unsigned Debug command and explains
+  that Secure Enclave storage requires a signed build.
 - [ ] Add crash-safe shutdown and restart behavior so pending outbox data and the durable cursor are not lost.
 
 ### Identity, account, and device enrollment

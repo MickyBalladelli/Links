@@ -17,7 +17,8 @@ connection state, and only sends through an installed `IOSDirectMessaging`
 host. Without concrete Rust-core and durable providers it remains in a safe
 "Core not configured" state.
 
-Build the Rust library first, then build the app from the repository root:
+Build the Rust library first, then build a signed Debug app after choosing an
+Apple Development team in Xcode:
 
 ```sh
 cargo build -p links-identity-ffi --locked
@@ -26,12 +27,39 @@ xcodebuild \
   -scheme Links-Debug \
   -configuration Debug \
   -sdk macosx \
-  CODE_SIGNING_ALLOWED=NO
+  build
 ```
 
 Use the `Links-Release` scheme and `-configuration Release` for a release
-build. The SwiftUI app observes `scenePhase` so future transport and durable
-store hosts have explicit active, inactive, and background lifecycle hooks.
+build. The target enables Automatic signing, the hardened runtime, and
+`Links/Links.entitlements`. Choose an Apple Development team in Xcode for
+Debug builds. Use a Developer ID Application identity and the same team for
+release distribution.
+
+## Local unsigned debug
+
+Use this path when no Apple signing team or certificate is available:
+
+```sh
+cargo build -p links-identity-ffi --locked
+xcodebuild \
+  -project native/macos/Links.xcodeproj \
+  -scheme Links-Debug \
+  -configuration Debug \
+  -sdk macosx \
+  -derivedDataPath /private/tmp/links-debug-derived-data \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
+  build
+```
+
+The unsigned app is useful for UI and package-link checks. It has no signed
+Keychain entitlements, so hardware identity creation can fail with a missing
+Keychain entitlement. Use a signed Debug build to exercise Secure Enclave and
+Keychain storage.
+
+The SwiftUI app observes `scenePhase` so future transport and durable store
+hosts have explicit active, inactive, and background lifecycle hooks.
 
 The package's `LINKS_IDENTITY_LIB_DIR` environment variable can point at a
 matching Rust target/profile directory when the default `target/debug` path is

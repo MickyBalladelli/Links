@@ -19,6 +19,7 @@
 		A10000020000000000000002 /* Links.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Links.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000020000000000000003 /* MacOSClientModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientModel.swift; sourceTree = "<group>"; };
 		A10000020000000000000004 /* MacOSClientShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientShell.swift; sourceTree = "<group>"; };
+		A10000020000000000000005 /* Links.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Links.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +49,7 @@
 				A10000020000000000000001 /* LinksMacOSApp.swift */,
 				A10000020000000000000003 /* MacOSClientModel.swift */,
 				A10000020000000000000004 /* MacOSClientShell.swift */,
+				A10000020000000000000005 /* Links.entitlements */,
 			);
 			path = Links;
 			sourceTree = "<group>";
@@ -145,10 +147,12 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = Links/Links.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Links contributors";
@@ -172,10 +176,12 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = Links/Links.entitlements;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
