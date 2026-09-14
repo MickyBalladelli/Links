@@ -514,7 +514,11 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
   Ed25519 transcript. The publisher helper signs it with the admin device key;
   subscribers verify the signature, sender-device binding, and current admin
   RBAC policy before storing or rendering the post.
-- [ ] Implement the publish flow: admin signs post, encrypts with broadcast master key, and dispatches to the broker.
+- [x] Implement the publish flow: admin signs post, encrypts with broadcast master key, and dispatches to the broker.
+  publish_broadcast_post signs the serialized BroadcastPost, seals it with an
+  HKDF-derived per-conversation/epoch ChaCha20-Poly1305 key, and hands only
+  the opaque BroadcastDispatch to the broker. The NATS adapter routes using a
+  hashed conversation subject and never opens the ciphertext.
 - [ ] Implement the receive flow: subscriber fetches signed payload, verifies the admin signature, decrypts, and renders.
 
 ### Organization accounts

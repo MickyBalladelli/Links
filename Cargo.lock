@@ -1866,7 +1866,9 @@ dependencies = [
  "links-gateway",
  "links-protocol",
  "prost",
+ "sha2 0.10.9",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
