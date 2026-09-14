@@ -1864,6 +1864,7 @@ name = "links-queue"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ed25519-dalek",
  "links-gateway",
  "links-protocol",
  "prost",

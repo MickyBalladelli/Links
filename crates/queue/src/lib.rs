@@ -5,15 +5,16 @@
 //! the chosen NATS client stay in the deployment adapter. It never decrypts or
 //! interprets sealed message bytes.
 use async_trait::async_trait;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use links_gateway::{ForwardedEnvelope, ForwardedWebRtcSignal, GatewayError, RegionBus};
 use links_protocol::{self as protocol, v1};
 use prost::Message;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use thiserror::Error;
+use uuid::Uuid;
 
 pub const DELIVERY_SUBJECT_PREFIX: &str = "links.v1.gateway";
 pub const BROADCAST_SUBJECT_PREFIX: &str = "links.v1.broadcast";
@@ -199,7 +200,11 @@ impl FederationRelayBatch {
         let envelopes = message
             .serialized_envelopes
             .iter()
-            .map(|serialized| protocol::decode_envelope(serialized))
+            .map(|serialized| {
+                let envelope = protocol::decode_envelope(serialized)?;
+                protocol::validate_enqueue(&envelope, now_ms)?;
+                Ok::<v1::Envelope, QueueError>(envelope)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let body_sha256 = array_from_slice::<{ protocol::FEDERATION_BODY_DIGEST_BYTES }>(
             &message.body_sha256,
@@ -214,7 +219,7 @@ impl FederationRelayBatch {
         .ok_or(QueueError::SignatureInvalid)?;
         let verifying_key =
             VerifyingKey::from_bytes(source_public_key).map_err(|_| QueueError::SignatureInvalid)?;
-        let signature = Signature::from_bytes(&signature);
+        let verifying_signature = Signature::from_bytes(&signature);
         verifying_key
             .verify_strict(
                 &relay_signature_transcript(
@@ -224,7 +229,7 @@ impl FederationRelayBatch {
                     message.expires_at_ms,
                     &body_sha256,
                 ),
-                &signature,
+                &verifying_signature,
             )
             .map_err(|_| QueueError::SignatureInvalid)?;
         Ok(Self {
@@ -317,8 +322,12 @@ fn serialize_relay_envelopes(
     }
     let mut serialized = Vec::with_capacity(envelopes.len());
     let mut total = 0usize;
+    let mut envelope_ids = HashSet::with_capacity(envelopes.len());
     for envelope in envelopes {
         protocol::validate_enqueue(envelope, now_ms)?;
+        if !envelope_ids.insert(envelope.envelope_id.as_str()) {
+            return Err(QueueError::Invalid("duplicate relay envelope"));
+        }
         let bytes = envelope.encode_to_vec();
         total = total
             .checked_add(bytes.len())
@@ -416,6 +425,30 @@ impl RelayDeduplicator {
             seen.insert(key, batch.expires_at_ms);
         }
         Ok(true)
+    }
+}
+
+/// Verify and atomically claim a relay batch before handing its envelopes to
+/// the local gateway/mailbox router. A false result is an idempotent replay.
+pub fn decode_and_claim_relay_for_node(
+    payload: &[u8],
+    expected_source_node_id: &str,
+    expected_destination_node_id: &str,
+    source_public_key: &[u8; 32],
+    now_ms: u64,
+    deduplicator: &RelayDeduplicator,
+) -> Result<Option<FederationRelayBatch>, QueueError> {
+    let batch = FederationRelayBatch::decode_and_verify(
+        payload,
+        expected_source_node_id,
+        expected_destination_node_id,
+        source_public_key,
+        now_ms,
+    )?;
+    if deduplicator.claim(&batch, now_ms)? {
+        Ok(Some(batch))
+    } else {
+        Ok(None)
     }
 }
 
@@ -594,6 +627,101 @@ where
         self.publisher
             .publish_durable(&subject, dispatch.encode_to_vec())
             .await
+    }
+}
+
+/// Federated relay gossip adapter. Each peer gets its own signed batch and
+/// exact broker subject, so retries are safe with the same batch ID and a
+/// relay worker never needs to inspect sealed payload contents.
+pub struct NatsFederationRelay<P, S> {
+    source_node_id: String,
+    publisher: Arc<P>,
+    signer: Arc<S>,
+}
+
+impl<P, S> NatsFederationRelay<P, S>
+where
+    P: NatsPublisher + 'static,
+    S: FederationNodeSigner + 'static,
+{
+    pub fn new(
+        source_node_id: String,
+        publisher: Arc<P>,
+        signer: Arc<S>,
+    ) -> Result<Self, QueueError> {
+        protocol::validate_gateway_locator(&source_node_id)
+            .map_err(|_| QueueError::Invalid("federation source"))?;
+        Ok(Self {
+            source_node_id,
+            publisher,
+            signer,
+        })
+    }
+
+    pub fn source_node_id(&self) -> &str {
+        &self.source_node_id
+    }
+
+    /// Publish one batch per destination. A failed publish leaves earlier
+    /// peers committed; retry with `publish_batch_to_peers` and the returned
+    /// batch ID so receivers deduplicate already accepted envelopes.
+    pub async fn publish_to_peers(
+        &self,
+        destination_node_ids: &[String],
+        envelopes: Vec<v1::Envelope>,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<String, QueueError> {
+        let batch_id = Uuid::new_v4().hyphenated().to_string();
+        self.publish_batch_to_peers(
+            destination_node_ids,
+            &batch_id,
+            envelopes,
+            expires_at_ms,
+            now_ms,
+        )
+        .await?;
+        Ok(batch_id)
+    }
+
+    pub async fn publish_batch_to_peers(
+        &self,
+        destination_node_ids: &[String],
+        batch_id: &str,
+        envelopes: Vec<v1::Envelope>,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(), QueueError> {
+        if destination_node_ids.is_empty()
+            || destination_node_ids.len() > protocol::MAX_FEDERATION_RELAY_FANOUT
+        {
+            return Err(QueueError::Invalid("federation relay fanout"));
+        }
+        let mut destinations = HashSet::with_capacity(destination_node_ids.len());
+        if destination_node_ids
+            .iter()
+            .any(|destination| !destinations.insert(destination.as_str()))
+        {
+            return Err(QueueError::Invalid("duplicate federation destination"));
+        }
+        validate_relay_fields(&self.source_node_id, &destination_node_ids[0], batch_id)?;
+        serialize_relay_envelopes(&envelopes, now_ms)?;
+        for destination_node_id in destination_node_ids {
+            let batch = FederationRelayBatch::sign(
+                self.source_node_id.clone(),
+                destination_node_id.clone(),
+                batch_id.to_owned(),
+                expires_at_ms,
+                envelopes.clone(),
+                self.signer.as_ref(),
+                now_ms,
+            )?;
+            let subject = federation_relay_subject(destination_node_id)?;
+            self.publisher
+                .publish_durable(&subject, batch.encode()?)
+                .await?;
+        }
+        Ok(())
     }
 }
 
