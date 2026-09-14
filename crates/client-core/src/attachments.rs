@@ -397,6 +397,7 @@ fn chunked_media_metadata(
         opus: None,
         original_size_bytes: Some(plaintext_size),
         encryption_chunk_bytes: Some(LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32),
+        chunk_cids: Vec::new(),
     };
     validate_large_file_metadata(&media)?;
     Ok(media)
@@ -605,6 +606,7 @@ pub fn encrypt_image(
         opus: None,
         original_size_bytes: None,
         encryption_chunk_bytes: None,
+        chunk_cids: Vec::new(),
     };
     EncryptedImage::new(media, ciphertext)
 }

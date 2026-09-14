@@ -154,6 +154,7 @@ impl OpusVoiceProfile {
             opus: Some(self.to_proto()),
             original_size_bytes: None,
             encryption_chunk_bytes: None,
+            chunk_cids: Vec::new(),
         };
         protocol::validate_media_metadata(&media)?;
         Ok(media)

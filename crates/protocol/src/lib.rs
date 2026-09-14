@@ -8,6 +8,7 @@ pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/links.v1.rs"));
 }
 pub mod contact_psi;
+pub mod content_addressed;
 pub mod privacy_pass;
 pub mod proof_of_work;
 pub mod sync_compression;
@@ -428,6 +429,32 @@ pub fn validate_media_metadata(media: &v1::MediaMetadata) -> Result<(), Protocol
     if let Some(blur_hash) = media.blur_hash.as_deref() {
         validate_blur_hash(blur_hash)?;
     }
+    if media.chunk_cids.len() > content_addressed::MAX_CONTENT_ADDRESSED_CHUNKS {
+        return Err(ProtocolError::TooLarge);
+    }
+    if !media.chunk_cids.is_empty() {
+        let (Some(original_size), Some(chunk_size)) =
+            (media.original_size_bytes, media.encryption_chunk_bytes)
+        else {
+            return Err(ProtocolError::Invalid("content-addressed media"));
+        };
+        let plaintext_chunk_size = u64::from(chunk_size)
+            .checked_sub(16)
+            .ok_or(ProtocolError::Invalid("content-addressed chunk"))?;
+        if plaintext_chunk_size == 0 {
+            return Err(ProtocolError::Invalid("content-addressed chunk"));
+        }
+        let expected_chunks = original_size
+            .checked_add(plaintext_chunk_size - 1)
+            .and_then(|size| size.checked_div(plaintext_chunk_size))
+            .ok_or(ProtocolError::Invalid("content-addressed media"))?;
+        if usize::try_from(expected_chunks).ok() != Some(media.chunk_cids.len()) {
+            return Err(ProtocolError::Invalid("content-addressed media"));
+        }
+        for cid in &media.chunk_cids {
+            content_addressed::validate_content_cid(cid)?;
+        }
+    }
     match (media.original_size_bytes, media.encryption_chunk_bytes) {
         (None, None) => {}
         (Some(original_size), Some(chunk_size))
@@ -448,6 +475,9 @@ pub fn validate_media_metadata(media: &v1::MediaMetadata) -> Result<(), Protocol
         }
     }
     // Algorithm-specific key and nonce sizes are the crypto provider's responsibility.
+    if media.encoded_len() > MAX_MESSAGE_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
     Ok(())
 }
 
