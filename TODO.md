@@ -396,7 +396,11 @@ exchanging encrypted one-to-one text through the same local development stack.
 
 ### Identity, account, and device enrollment
 
-- [ ] Implement a macOS Keychain-backed seed provider using the existing Apple wrapping boundary; never store the seed in UserDefaults, plaintext files, logs, URLs, or analytics.
+- [x] Implement a macOS Keychain-backed seed provider using the existing Apple wrapping boundary; never store the seed in UserDefaults, plaintext files, logs, URLs, or analytics.
+  `MacOSKeychainSeedProvider` delegates to `HardwareSeedVault` and is wired
+  into the macOS `IOSClient`. Only the wrapped seed record is stored in
+  Keychain; `IOSClient` persists public metadata only, and seed buffers are
+  wiped after each Rust operation.
 - [ ] Namespace Keychain records by an explicit client profile so two local clients cannot open or overwrite each other's identity.
 - [ ] Support first-run username registration/login for local development and authenticated device pairing through the existing `links://connect` flow.
 - [ ] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.

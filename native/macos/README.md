@@ -72,3 +72,13 @@ inbox operation before it returns.
 The package's `LINKS_IDENTITY_LIB_DIR` environment variable can point at a
 matching Rust target/profile directory when the default `target/debug` path is
 not appropriate.
+
+## Identity seed custody
+
+The macOS client passes `MacOSKeychainSeedProvider` into
+`HardwareIdentityStore`. That provider delegates to `HardwareSeedVault`, which
+creates a Secure Enclave wrapping key and stores only the wrapped seed record
+in Keychain. Seed bytes are exposed only for the synchronous Rust operation and
+are wiped immediately after use. `IOSClient` persists public identity metadata
+only; the seed is never written to UserDefaults, files, logs, URLs, or
+analytics.

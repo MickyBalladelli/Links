@@ -27,7 +27,19 @@ public final class HardwareIdentityStore {
     public enum IdentityError: Error { case invalidInput, hardwareUnavailable, authenticationFailed, providerFailure }
     private let vault: SeedVault
     private static let workerLock = NSLock()
-    public init() { vault = HardwareSeedVault() }
+    public init() {
+#if os(macOS)
+        vault = MacOSKeychainSeedProvider()
+#else
+        vault = HardwareSeedVault()
+#endif
+    }
+#if os(macOS)
+    /// Use the explicit macOS Keychain provider at the host boundary.
+    public init(seedProvider: MacOSKeychainSeedProvider) {
+        vault = seedProvider
+    }
+#endif
     internal init(vault: SeedVault) { self.vault = vault }
 
     private func withVault<T>(_ operation: (UnsafePointer<LinksVaultCallbacks>) throws -> T) rethrows -> T {

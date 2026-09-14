@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import SwiftUI
 import LinksClient
+import LinksKeyStore
 
 struct LinksMacOSMessage: Identifiable, Equatable {
     let id: UUID
@@ -40,6 +41,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published var actionError: String?
     @Published private(set) var isEnrolling = false
 
+    private let identityStore = MacOSKeychainSeedProvider()
     private let client: IOSClient?
     private var messaging: IOSDirectMessaging?
     private let identityQueue = DispatchQueue(
@@ -49,7 +51,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     init() {
         do {
-            let loadedClient = try IOSClient()
+            let loadedClient = try IOSClient(identityStore: HardwareIdentityStore(
+                seedProvider: identityStore))
             client = loadedClient
             refreshClientState()
         } catch {
