@@ -147,7 +147,7 @@ impl RelationalStore {
             .await
     }
 
-    pub async fn create_account_with_kind(
+    async fn create_account_with_kind(
         &self,
         user_id: Uuid,
         auth_subject_hash: &[u8],
@@ -1013,7 +1013,7 @@ impl RelationalStore {
     ) -> Result<OrganizationControls, StoreError> {
         let mut tx = self.pool.begin().await?;
         let account = sqlx::query(
-            "SELECT a.account_kind,d.delegation_role FROM accounts a JOIN devices d ON d.user_id=a.user_id WHERE a.user_id=$1 AND d.device_id=$2 AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR UPDATE OF a",
+            "SELECT a.account_kind,d.delegation_role FROM accounts a JOIN devices d ON d.user_id=a.user_id WHERE a.user_id=$1 AND d.device_id=$2 AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR UPDATE OF a,d",
         )
         .bind(organization_id)
         .bind(device_id)

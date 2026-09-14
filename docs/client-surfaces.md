@@ -31,3 +31,8 @@ The default surface send hook routes through the existing encrypted text
 coordinator. A channel-capable core overrides that hook to call the existing
 signed broadcast publish flow. Receive callbacks remain post-commit, so the
 host renders only messages whose MLS state and cursor are durable.
+
+Organization-owned Mini-App and bot surfaces must also pass the current
+`/v1/organization/controls` gate before they are shown. A disabled flag hides
+the surface and blocks its actions locally; the Mini-App sandbox permission
+policy remains a separate, stricter gate.

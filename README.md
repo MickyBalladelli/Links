@@ -20,9 +20,9 @@ remain open.
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, paired-device bootstrap facade, and shared-core surface contracts. |
 | `crates/desktop-client` | Platform-neutral desktop identity, shared-core binding facade, call/live-stream session, native mini-app sandbox and permission facade, and channel/business/bot surface adapter. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
-| `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
+| `crates/server-store` | PostgreSQL repository/migrations, authenticated group RBAC and membership snapshots, delegated device certificates, public verification badges, organization Mini-App/bot feature controls, append-only encrypted payload store, S3-compatible encrypted blob boundary, Redis Lua state adapter and memory reference adapter. |
 | `crates/identity` | Self-sovereign mnemonic/passkey Ed25519 keys, signed phone/username/enrollment transcripts, device sub-certificate signing/verification, and MLS basic credentials. |
-| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
+| `crates/account-auth` | SMS/WhatsApp Verify adapter, username-only signed registration/login, global public-key directory lookup, authenticated verifiable-OPRF contact PSI, Privacy Pass issuance and anonymous replay-safe redemption, pseudonymous chat-request proof-of-work challenges, durable account enrollment/login, authenticated additional-device registration and revocation, signed verification-badge issue/revoke hooks, group membership/RBAC HTTP API, organization Mini-App/bot controls, WebAuthn passkeys, opaque key-backup HTTP API and sessions. |
 | `crates/gateway` | Multi-region WebSocket session fencing, durable encrypted routing, transient WebRTC signaling, managed LiveKit Cloud SFU region/health/room placement, header-only SFrame media policy, and configured APNs/FCM silent wakeup contracts. |
 | `crates/gateway/src/webtransport.rs` | Bounded length-prefixed WebTransport stream framing for the HTTP/3 gateway adapter. |
 | `crates/queue` | Opaque NATS JetStream delivery wire contract, broadcast dispatch contract, transient cross-region WebRTC signaling, and durable publish adapters for cross-region gateway and channel routing. |
@@ -80,6 +80,8 @@ remain open.
 | `docs/platform-calls.md` | Mobile-first call/live-stream adapters and Web/desktop rollout contract. |
 | `docs/mini-app-sandbox.md` | Native wasmi runtime, fixed guest ABI, resource limits, and capability boundary for mini-apps. |
 | `docs/mini-app-permissions.md` | Fine-grained HTTPS host/method grants, mediated network calls, and opaque hardware-key operation grants for Mini-Apps. |
+| `docs/organization-controls.md` | Authenticated organization gates for exposing Mini-Apps and bots, with owner/admin update rules and revisioning. |
+| `crates/server-store/migrations/0013_organization_controls.sql` | Default-off organization feature gates for Mini-Apps and bots. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |

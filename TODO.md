@@ -613,7 +613,12 @@ Add programmable features only after the account, permission, and messaging boun
   limits, while `SandboxCryptoGrant` exposes only opaque operation handles.
   `SandboxHost` mediates every call; `SandboxRuntime::run` remains deny-all.
   See `docs/mini-app-permissions.md`.
-- [ ] Expose Mini-Apps and bots through organization account controls.
+- [x] Expose Mini-Apps and bots through organization account controls.
+  Organization accounts now have default-off Mini-App and bot gates in
+  `organization_controls`. `GET/PUT /v1/organization/controls` exposes the
+  policy; any active organization device can read it, while only owner/admin
+  devices can update it. Changes use an atomic revision counter. See
+  `docs/organization-controls.md`.
 
 ---
 
