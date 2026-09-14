@@ -574,7 +574,13 @@ Add real-time media after messaging and file media are stable.
   deployment and room placement. The provider manifest disables recording;
   provider-side settings and encrypted-media acceptance checks remain release
   gates in `deploy/livekit/`.
-- [ ] Add WebTransport (QUIC) as a fallback channel for low-latency media signaling in high-packet-loss environments.
+- [x] Add WebTransport (QUIC) as a fallback channel for low-latency media signaling in high-packet-loss environments.
+  `WebTransportConnectionManager` provides authenticated HTTP/3 signaling
+  with reliable length-prefixed `links.v1` protobuf frames, low-latency QUIC
+  congestion control, bounded parsing, liveness checks, and reconnect. The
+  browser WebRTC session fences WebSocket before falling back; the server
+  HTTP/3 adapter uses the shared bounded Rust stream framer and remains a
+  deployment gate. See `docs/webtransport-signaling.md`.
 - [ ] Implement the complete call flow: SDP exchange, MLS key exchange, client-side frame encryption, and SFU streaming.
 - [ ] Add voice/video calls and live streams to mobile first, then Web and desktop.
 

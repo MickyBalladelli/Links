@@ -18,6 +18,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub mod sfu;
+pub mod webtransport;
 
 pub const HELLO_DEADLINE_MS: u64 = 5_000;
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30_000;

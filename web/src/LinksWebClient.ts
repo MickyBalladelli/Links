@@ -76,6 +76,8 @@ export type {
   WebConnectionManagerOptions,
   WebConnectionState
 } from './WebConnectionManager'
+export { WebTransportConnectionManager } from './WebTransportConnectionManager'
+export type { WebConnectionTransport } from './WebConnectionManager'
 
 const MAX_CREDENTIAL_BYTES = 1024
 

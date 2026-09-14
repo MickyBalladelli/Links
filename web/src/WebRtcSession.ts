@@ -2,7 +2,14 @@ import {
   WebConnectionManager,
   WEB_MAX_FRAME_BYTES
 } from './WebConnectionManager'
-import type { WebConnectionState } from './WebConnectionManager'
+import type {
+  WebConnectionState,
+  WebConnectionTransport
+} from './WebConnectionManager'
+import {
+  WebTransportConnectionManager,
+  validateWebTransportEndpoint
+} from './WebTransportConnectionManager'
 import { requireCanonicalUUID } from './LinksWebClient'
 import type { WebRtcSignalDelivery } from './LinksWebClient'
 import type {
@@ -41,6 +48,8 @@ export interface WebRtcSignalingCodec {
 
 export interface WebRtcSessionOptions {
   endpoint: string
+  /** Optional HTTPS/HTTP3 signaling endpoint used after WebSocket failure. */
+  webTransportEndpoint?: string
   core: WebMessagingCore
   signaling: WebRtcSignalingCodec
   accessToken: () => string
@@ -61,6 +70,7 @@ export class WebRtcSession implements WebCoreTransport {
   private sessionIDValue: string | null
   readonly targetDeviceID: string
   private readonly endpoint: string
+  private readonly webTransportEndpoint: string | null
   private readonly core: WebMessagingCore
   private readonly signaling: WebRtcSignalingCodec
   private readonly accessToken: () => string
@@ -69,7 +79,8 @@ export class WebRtcSession implements WebCoreTransport {
   private readonly onDataChannelCallback: (channel: RTCDataChannel) => void
   private readonly onTextMessageCallback: (message: WebReceivedTextMessage) => void
   private readonly onFailureCallback: () => void
-  private manager: WebConnectionManager | null = null
+  private manager: WebConnectionTransport | null = null
+  private usingWebTransport = false
   private peer: RTCPeerConnection | null = null
   private pendingCandidates: RTCIceCandidateInit[] = []
   private currentState: WebRtcSessionState = 'stopped'
@@ -94,6 +105,10 @@ export class WebRtcSession implements WebCoreTransport {
     this.sessionIDValue = sessionID
     this.targetDeviceID = options.targetDeviceID
     this.endpoint = options.endpoint
+    this.webTransportEndpoint = options.webTransportEndpoint ?? null
+    if (this.webTransportEndpoint !== null) {
+      validateWebTransportEndpoint(this.webTransportEndpoint)
+    }
     this.core = options.core
     this.signaling = options.signaling
     this.accessToken = options.accessToken
@@ -183,6 +198,7 @@ export class WebRtcSession implements WebCoreTransport {
       onFailure: () => this.handleFailure(manager)
     })
     this.manager = manager
+    this.usingWebTransport = false
     this.coreFailed = false
     this.setState('connecting')
     manager.start()
@@ -210,7 +226,7 @@ export class WebRtcSession implements WebCoreTransport {
     return this.manager?.send(frame) === true
   }
 
-  /** Call after the signaling WebSocket reaches its ready state. */
+  /** Call after the WebSocket or WebTransport signaling path reaches ready. */
   async startOffer(dataChannelLabel?: string): Promise<RTCDataChannel | null> {
     if (!this.isSignalingReady()) throw new Error('WebRTC signaling is not connected')
     if (this.sessionIDValue === null) this.sessionIDValue = crypto.randomUUID()
@@ -359,7 +375,7 @@ export class WebRtcSession implements WebCoreTransport {
     }
   }
 
-  private handleFrame(manager: WebConnectionManager, frame: Uint8Array): void {
+  private handleFrame(manager: WebConnectionTransport, frame: Uint8Array): void {
     if (this.manager !== manager || this.coreFailed) return
     if (this.signaling.isWebRtcSignalFrame(frame)) {
       try {
@@ -395,15 +411,53 @@ export class WebRtcSession implements WebCoreTransport {
     return this.manager?.isConnected === true && this.currentState !== 'failed'
   }
 
-  private handleManagerState(manager: WebConnectionManager, state: WebConnectionState): void {
+  private handleManagerState(manager: WebConnectionTransport, state: WebConnectionState): void {
     if (this.manager !== manager) return
-    if (state === 'failed') this.setState('failed')
+    if (state === 'failed') {
+      if (!this.usingWebTransport && this.webTransportEndpoint !== null) {
+        this.setState('connecting')
+      } else {
+        this.setState('failed')
+      }
+    }
     else if (state === 'connecting') this.setState('connecting')
   }
 
-  private handleFailure(manager: WebConnectionManager): void {
+  private handleFailure(manager: WebConnectionTransport): void {
     if (this.manager !== manager || this.coreFailed) return
+    if (!this.usingWebTransport && this.webTransportEndpoint !== null) {
+      this.startWebTransportFallback(manager)
+      return
+    }
     this.fail()
+  }
+
+  private startWebTransportFallback(primary: WebConnectionTransport): void {
+    const endpoint = this.webTransportEndpoint
+    if (endpoint === null || this.manager !== primary || this.usingWebTransport) {
+      this.fail()
+      return
+    }
+    this.usingWebTransport = true
+    let fallback: WebTransportConnectionManager
+    try {
+      let manager: WebTransportConnectionManager
+      manager = new WebTransportConnectionManager({
+        endpoint,
+        helloProvider: () => this.createHello(),
+        onFrame: frame => this.handleFrame(manager, frame),
+        onState: state => this.handleManagerState(manager, state),
+        onFailure: () => this.handleFailure(manager)
+      })
+      fallback = manager
+    } catch {
+      this.fail()
+      return
+    }
+    this.manager = fallback
+    primary.stop()
+    this.setState('connecting')
+    fallback.start()
   }
 
   private fail(): void {

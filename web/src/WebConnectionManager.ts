@@ -1,5 +1,14 @@
 export type WebConnectionState = 'stopped' | 'connecting' | 'ready' | 'failed'
 
+export interface WebConnectionTransport {
+  readonly state: WebConnectionState
+  readonly isConnected: boolean
+  start(): void
+  stop(): void
+  shutdown(): void
+  send(frame: Uint8Array): boolean
+}
+
 export interface WebConnectionManagerOptions {
   endpoint: string
   /** Return one complete protobuf ClientFrame containing Hello. */
@@ -40,7 +49,7 @@ function validateEndpoint(endpoint: string): string {
 }
 
 /** Browser WebSocket lifecycle for the binary links.v1 transport. */
-export class WebConnectionManager {
+export class WebConnectionManager implements WebConnectionTransport {
   private readonly endpoint: string
   private readonly helloProvider: () => Uint8Array
   private readonly onFrame: (frame: Uint8Array) => void
