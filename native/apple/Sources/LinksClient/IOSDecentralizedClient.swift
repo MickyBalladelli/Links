@@ -32,7 +32,7 @@ public struct IOSDecentralizedMediaRelay: Sendable {
     public init(nodeID: String, region: String, endpoint: URL, turnURL: String? = nil,
                 mode: IOSDecentralizedRelayMode, priceUnitsPerMinute: UInt64,
                 maxBitrateKbps: UInt32, expiresAtMs: UInt64,
-                supportsSFrame: Bool = true, verified: Bool = true) throws {
+                supportsSFrame: Bool, verified: Bool) throws {
         guard validDecentralizedLocator(nodeID), validDecentralizedLocator(region),
               endpoint.scheme?.lowercased() == "wss", endpoint.host?.isEmpty == false,
               endpoint.user == nil, endpoint.password == nil, endpoint.query == nil,
