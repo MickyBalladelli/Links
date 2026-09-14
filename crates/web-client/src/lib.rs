@@ -9,7 +9,10 @@ use links_client_core::{
     identity::IdentitySeed,
     pairing::{PairingPayload, PairingRegistrationResponse},
     protocol, CoreError,
-    webrtc::{decode_server_signal, encode_client_signal, WebRtcSignal, WebRtcSignalKind},
+    webrtc::{
+        decode_server_signal, encode_client_signal, is_server_signal, WebRtcSignal,
+        WebRtcSignalKind,
+    },
 };
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -495,5 +498,9 @@ impl WebClientIdentity {
         decode_server_signal(frame)
             .map(|inner| WebRtcSignalDelivery { inner })
             .map_err(js_error)
+    }
+
+    pub fn is_webrtc_signal_frame(&self, frame: &[u8]) -> bool {
+        is_server_signal(frame)
     }
 }

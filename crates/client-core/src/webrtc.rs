@@ -188,3 +188,16 @@ pub fn decode_server_signal(bytes: &[u8]) -> Result<WebRtcSignalDelivery, CoreEr
     };
     WebRtcSignalDelivery::from_proto(delivery)
 }
+
+pub fn is_server_signal(bytes: &[u8]) -> bool {
+    if bytes.is_empty() || bytes.len() > protocol::MAX_FRAME_BYTES {
+        return false;
+    }
+    let Ok(frame) = protocol::v1::ServerFrame::decode(bytes) else {
+        return false;
+    };
+    matches!(
+        frame.body,
+        Some(protocol::v1::server_frame::Body::WebRtcSignal(_))
+    )
+}

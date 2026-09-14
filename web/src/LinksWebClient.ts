@@ -17,6 +17,28 @@ export interface WebClientIdentity {
   user_id(): string
   device_id(): string
   mls_node_id(): string
+  encode_webrtc_signal(
+    requestID: string,
+    sessionID: string,
+    targetDeviceID: string,
+    kind: number,
+    sdp: string,
+    sdpMid: string,
+    sdpMLineIndex: number
+  ): Uint8Array
+  decode_webrtc_signal(frame: Uint8Array): WebWasmRtcSignalDelivery
+  is_webrtc_signal_frame(frame: Uint8Array): boolean
+}
+
+export interface WebWasmRtcSignalDelivery {
+  request_id(): string
+  sender_device_id(): string
+  session_id(): string
+  target_device_id(): string
+  kind(): number
+  sdp(): string
+  sdp_mid(): string
+  sdp_mline_index(): number
 }
 
 export interface WebClientWasmModule {
@@ -142,5 +164,33 @@ export class LinksWebClient {
       mlsNodeID: this.core.mls_node_id(),
       registered: this.core.is_registered()
     }
+  }
+
+  encodeWebRtcSignal(
+    requestID: string,
+    sessionID: string,
+    targetDeviceID: string,
+    kind: number,
+    sdp: string,
+    sdpMid = '',
+    sdpMLineIndex = 0
+  ): Uint8Array {
+    return this.core.encode_webrtc_signal(
+      requestID,
+      sessionID,
+      targetDeviceID,
+      kind,
+      sdp,
+      sdpMid,
+      sdpMLineIndex
+    )
+  }
+
+  isWebRtcSignalFrame(frame: Uint8Array): boolean {
+    return this.core.is_webrtc_signal_frame(frame)
+  }
+
+  decodeWebRtcSignal(frame: Uint8Array): WebWasmRtcSignalDelivery {
+    return this.core.decode_webrtc_signal(frame)
   }
 }
