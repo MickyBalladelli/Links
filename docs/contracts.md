@@ -270,11 +270,13 @@ that ciphertext independently for each recipient device, persists the exact
 outbox envelopes, and sends those bytes. A partial transport failure retries
 from the durable outbox; it never re-encrypts.
 
-The current public transport protobuf has no MLS control-message type and the
-pre-key bundle has no MLS KeyPackage field. `DirectChatDirectory` and
-`DirectChatTransport::deliver_mls_bootstrap` are therefore explicit adapter
-boundaries. A deployment must add an authenticated, versioned KeyPackage and
-commit/Welcome exchange before claiming end-to-end Android send readiness.
+The public transport does not expose MLS application control content. SFrame
+key updates use `Message.mls_control`, which is encrypted by `MlsEngine` and
+then sent through the same Sealed Sender fan-out as other private messages.
+`send_sframe_epoch_key()` and `send_group_sframe_epoch_key()` construct this
+content only after validating the media session, cipher suite, key ID and
+epoch. Commit/Welcome bootstrap delivery remains an explicit authenticated
+`DirectChatTransport` adapter boundary.
 
 ## One-to-one receive order
 
@@ -290,6 +292,13 @@ by conversation. Hosts pass each request's `content()` to the normal MLS send
 coordinator, with a fresh message ID and sender-local sequence. They must never
 send the receipt protobuf as a plaintext gateway payload. A failed render or
 ack leaves replay safe; durable stores must deduplicate message IDs.
+
+`receive_available_with_sframe()` and
+`receive_group_available_with_sframe()` recognize authenticated
+`Message.mls_control` content before rendering. Their `SFrameKeyHandler` must
+authorize the authenticated sender for the media session and install the key
+durably or idempotently before returning. The normal receive functions reject
+SFrame controls so a host cannot silently discard key updates.
 
 ## Many-to-many group send and receive
 

@@ -31,9 +31,23 @@ media session without encryption. The W3C Encoded Transform API is still a
 Working Draft, so each client must capability-gate it and retain a compatible
 platform implementation before release.
 
+## MLS control channel
+
+`SFrameEpochKeyUpdate` is carried as private `Message.mls_control` content.
+`send_sframe_epoch_key()` and `send_group_sframe_epoch_key()` put the update
+inside the normal MLS application ciphertext and fan it out through Sealed
+Sender envelopes. The gateway, queue, signaling path, SFU, and blob store see
+only the outer opaque envelope.
+
+On receive, `receive_available_with_sframe()` or
+`receive_group_available_with_sframe()` authenticates the MLS message first,
+then calls `SFrameKeyHandler` with the authenticated conversation and sender.
+The handler must authorize the sender, install the key in the local media
+controller, and make repeated delivery idempotent before the queue cursor is
+acknowledged.
+
 ## Key custody
 
 MLS remains the source of epoch key material. This task only adds the local
-browser binding and bounded key schedule. The next MLS control-channel task
-must deliver epoch keys to each authorized device without placing key material
-in signaling, SFU, queue, or blob-storage paths.
+browser binding and bounded key schedule. MLS control delivery keeps key
+material out of signaling, SFU, queue, and blob-storage paths.

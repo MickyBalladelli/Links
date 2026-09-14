@@ -87,8 +87,8 @@ pub trait GroupChatDirectory: Send + Sync {
 }
 
 /// Adapter for the MLS bootstrap control path and opaque envelope delivery.
-/// The existing transport protobuf has no MLS commit/Welcome message yet, so
-/// this boundary must be backed by an authenticated versioned adapter.
+/// SFrame key updates use the encrypted application-message path below; this
+/// boundary remains for authenticated commit/Welcome bootstrap bytes.
 #[async_trait]
 pub trait DirectChatTransport: Send {
     async fn deliver_mls_bootstrap(

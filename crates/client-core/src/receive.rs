@@ -1,8 +1,9 @@
 //! Authenticated MLS receive orchestration.
 //!
 //! The normal queue contains opaque envelopes. MLS Welcome/Commit messages
-//! arrive through an authenticated client transport adapter because the v1
-//! public transport schema does not yet define MLS control frames.
+//! arrive through an authenticated client transport adapter. SFrame key
+//! updates use private `MlsControl` content inside an MLS application message
+//! and never become transport-visible control frames.
 
 use crate::{
     background::DecryptedSyncItem,

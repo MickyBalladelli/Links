@@ -557,7 +557,10 @@ Add real-time media after messaging and file media are stable.
   `WebRtcSFrameController` binds the browser's native per-frame SFrame
   encryptor/decryptor to RTP senders and receivers, keeps only current and
   previous non-extractable AES-128-GCM keys, and fails closed when unsupported.
-- [ ] Transmit SFrame epoch keys through the MLS control channel.
+- [x] Transmit SFrame epoch keys through the MLS control channel.
+  Private `MlsControl` payloads carry validated SFrame epoch keys inside MLS
+  application ciphertext; direct and group send helpers fan them out through
+  Sealed Sender, and receive handlers install them before cursor acknowledgement.
 - [ ] Deploy managed global SFU clusters using LiveKit or Mediasoup.
 - [ ] Configure SFUs to route encrypted media frames using unencrypted RTP headers without decrypting media.
 - [ ] Add WebTransport (QUIC) as a fallback channel for low-latency media signaling in high-packet-loss environments.
