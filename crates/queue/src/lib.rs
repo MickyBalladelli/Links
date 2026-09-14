@@ -8,10 +8,12 @@ use async_trait::async_trait;
 use links_gateway::{ForwardedEnvelope, GatewayError, RegionBus};
 use links_protocol::{self as protocol, v1};
 use prost::Message;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use thiserror::Error;
 
 pub const DELIVERY_SUBJECT_PREFIX: &str = "links.v1.gateway";
+pub const BROADCAST_SUBJECT_PREFIX: &str = "links.v1.broadcast";
 
 #[derive(Debug, Error)]
 pub enum QueueError {
@@ -63,6 +65,25 @@ fn subject_token(gateway_id: &str) -> String {
             b => format!("~{b:02X}"),
         })
         .collect()
+}
+
+/// Exact subject for one broadcast conversation. The conversation ID is
+/// hashed before it reaches NATS, so the broker sees only an opaque routing
+/// token.
+pub fn broadcast_subject(conversation_id: &str) -> Result<String, QueueError> {
+    protocol::validate_id(conversation_id)
+        .map_err(|_| QueueError::Invalid("broadcast subject"))?;
+    let uuid = uuid::Uuid::parse_str(conversation_id)
+        .map_err(|_| QueueError::Invalid("broadcast subject"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"links/broadcast/subject/v1\0");
+    hasher.update(uuid.as_bytes());
+    let token: String = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(format!("{BROADCAST_SUBJECT_PREFIX}.{token}.publish"))
 }
 
 /// Queue representation of a cross-region delivery. The serialized envelope
@@ -149,6 +170,29 @@ impl QueueDelivery {
 #[async_trait]
 pub trait NatsPublisher: Send + Sync {
     async fn publish_durable(&self, subject: &str, payload: Vec<u8>) -> Result<(), QueueError>;
+}
+
+/// NATS JetStream adapter for broadcast posts. It validates only the public
+/// dispatch envelope and publishes its master-key ciphertext unchanged.
+pub struct NatsBroadcastPublisher<P> {
+    publisher: Arc<P>,
+}
+
+impl<P> NatsBroadcastPublisher<P>
+where
+    P: NatsPublisher + 'static,
+{
+    pub fn new(publisher: Arc<P>) -> Self {
+        Self { publisher }
+    }
+
+    pub async fn dispatch(&self, dispatch: v1::BroadcastDispatch) -> Result<(), QueueError> {
+        protocol::validate_broadcast_dispatch(&dispatch)?;
+        let subject = broadcast_subject(&dispatch.conversation_id)?;
+        self.publisher
+            .publish_durable(&subject, dispatch.encode_to_vec())
+            .await
+    }
 }
 
 /// RegionBus implementation for NATS JetStream. A real adapter supplies the
