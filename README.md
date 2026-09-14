@@ -83,6 +83,7 @@ remain open.
 | `docs/organization-controls.md` | Authenticated organization gates for exposing Mini-Apps and bots, with owner/admin update rules and revisioning. |
 | `crates/server-store/migrations/0013_organization_controls.sql` | Default-off organization feature gates for Mini-Apps and bots. |
 | `docs/federation.md` | Selected Matrix-style federated server-node layer, encrypted envelope contract, and rollout boundary. |
+| `docs/relay-gossip.md` | Signed opaque federated envelope batches, bounded peer fan-out, JetStream relay subjects, and replay claims. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |

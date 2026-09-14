@@ -642,7 +642,11 @@ This is a separate expansion track. Do not block the centralized release on it.
 
 ### Routing and storage
 
-- [ ] Implement Libp2p / PubSub or relay gossip for cross-node envelope propagation.
+- [x] Implement Libp2p / PubSub or relay gossip for cross-node envelope propagation.
+  Links uses relay gossip in the selected Matrix-style federation layer. Signed
+  `FederatedEnvelopeBatch` messages, bounded peer fan-out, exact NATS subjects,
+  expiry checks, opaque payload forwarding, and atomic batch/envelope replay
+  claims are implemented in `links-queue`. See `docs/relay-gossip.md`.
 - [ ] Deploy store-and-forward offline buffering nodes across independent relays.
 - [ ] Integrate IPFS / Arweave / Filecoin for client-side encrypted chunk storage and content-addressed retrieval (`ipfs://CID`).
 

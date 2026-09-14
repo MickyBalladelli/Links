@@ -38,9 +38,19 @@ must be authenticated before federation is enabled. The global directory now
 provides deterministic W3C `did:key` bindings for device keys, but those user
 DIDs do not authenticate a server node or replace node-level federation trust.
 
+## Relay gossip implementation
+
+Cross-node propagation is implemented by `NatsFederationRelay` in
+`links-queue`. It signs one bounded `FederatedEnvelopeBatch` per destination
+peer and publishes to an exact relay subject. Consumers use
+`decode_and_claim_relay_for_node` and `RelayDeduplicator` before passing the
+opaque envelopes to the local gateway. See [relay gossip](relay-gossip.md) for
+the wire contract, limits, retry behavior, and deployment boundary.
+
 ## Rollout boundary
 
-The first implementation gate is the node-to-node delivery adapter and its
-replay/idempotency storage. It must be deployed only after the centralized
-gateway passes its existing encrypted-routing checks. Client P2P media and
-decentralized storage are not prerequisites for this federation choice.
+The relay implementation is an adapter boundary. It must be deployed only
+after the centralized gateway passes its existing encrypted-routing checks and
+with durable claim storage when relay consumers are scaled horizontally. Client
+P2P media and decentralized storage are not prerequisites for this federation
+choice.
