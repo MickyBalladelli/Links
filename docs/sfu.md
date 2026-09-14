@@ -43,10 +43,13 @@ The call service gives each client a short-lived room token. API keys and
 signing secrets remain server-side in a secret manager. LiveKit is not trusted
 with Links account recovery, message delivery, or key-directory state.
 
-`web/src/WebRtcCallFlow.ts` runs the client sequence: obtain and publish the
+`web/src/WebRtcCallFlow.ts` runs the browser sequence: obtain and publish the
 initial MLS media key, install SFrame before SDP creation, join the regional
 room, exchange SDP/ICE through the provider adapter, attach receiver
-decryptors, and leave cleanly. See [the complete call flow](call-flow.md).
+decryptors, and leave cleanly. Mobile uses the equivalent native state
+machines in `native/apple` and `native/android`; desktop uses the typed
+adapter in `crates/desktop-client/src/call.rs`. See [the complete call flow](call-flow.md)
+and [platform call surfaces](platform-calls.md).
 
 ## Global operations
 

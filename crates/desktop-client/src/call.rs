@@ -452,10 +452,13 @@ fn valid_endpoint(value: &str) -> bool {
     let Some(authority) = value.strip_prefix("wss://") else {
         return false;
     };
+    if value.contains('?') || value.contains('#') {
+        return false;
+    }
     let authority = authority.split('/').next().unwrap_or_default();
     !authority.is_empty()
         && authority
             .as_bytes()
             .iter()
-            .all(|byte| !matches!(byte, b'@' | b'?' | b'#' | b' '))
+            .all(|byte| !byte.is_ascii_control() && !byte.is_ascii_whitespace() && *byte != b'@')
 }
