@@ -581,7 +581,12 @@ Add real-time media after messaging and file media are stable.
   browser WebRTC session fences WebSocket before falling back; the server
   HTTP/3 adapter uses the shared bounded Rust stream framer and remains a
   deployment gate. See `docs/webtransport-signaling.md`.
-- [ ] Implement the complete call flow: SDP exchange, MLS key exchange, client-side frame encryption, and SFU streaming.
+- [x] Implement the complete call flow: SDP exchange, MLS key exchange, client-side frame encryption, and SFU streaming.
+  `WebRtcCallFlow` sequences MLS media-key publication, native SFrame setup,
+  local/remote track negotiation, SDP/ICE exchange, encrypted SFU streaming,
+  key rotation, and teardown through a LiveKit/Mediasoup adapter. Provider SDK
+  binding and mobile host adapters remain platform release work. See
+  `docs/call-flow.md`.
 - [ ] Add voice/video calls and live streams to mobile first, then Web and desktop.
 
 ---

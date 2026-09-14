@@ -65,6 +65,7 @@ remain open.
 | `web/src/WebRtcFileTransfer.ts` | Browser WebRTC DataChannel ciphertext streaming, resume, backpressure, and integrity boundary. |
 | `web/src/WebRtcSession.ts` | Browser WebRTC offer/answer and ICE exchange over authenticated `links.v1` signaling. |
 | `web/src/WebRtcSFrame.ts` | Native WebRTC Encoded Transform SFrame binding with non-extractable AES-128-GCM key rotation. |
+| `web/src/WebRtcCallFlow.ts` | Browser MLS-keyed, SFrame-encrypted WebRTC call orchestration against a managed SFU signaling adapter. |
 | `web/src/WebTransportConnectionManager.ts` | HTTP/3 WebTransport signaling fallback with reliable length-prefixed protobuf frames and QUIC loss recovery. |
 | `web/src/WebLargeFiles.ts` | Web/WASM chunked video/file encryption, staging, upload receipt, and decrypting source boundary. |
 | `docs/desktop-client.md` | Desktop client foundation and shared-core integration boundary. |
@@ -74,6 +75,7 @@ remain open.
 | `docs/p2p-file-transfer.md` | WebRTC DataChannel ciphertext-only transfer, resume, backpressure, and integrity contract. |
 | `docs/webrtc-signaling.md` | Authenticated live-device SDP/ICE exchange, gateway routing, and browser session contract. |
 | `docs/sframe.md` | Native WebRTC SFrame transform contract, key custody, rotation, and browser capability gate. |
+| `docs/call-flow.md` | End-to-end SFU call sequence, MLS key exchange, SDP/ICE, SFrame, and teardown contract. |
 | `docs/webtransport-signaling.md` | WebTransport/QUIC fallback framing, authentication, reconnect, and deployment boundary. |
 | `docs/large-file-encryption.md` | Chunked AEAD format and cross-client video/file transfer contract. |
 | `native/apple/Sources/LinksClient/IOSVideoTranscoder.swift` | iOS hardware video decode, scale, encode, MP4 mux, and faststart boundary. |

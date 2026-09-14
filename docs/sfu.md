@@ -43,6 +43,11 @@ The call service gives each client a short-lived room token. API keys and
 signing secrets remain server-side in a secret manager. LiveKit is not trusted
 with Links account recovery, message delivery, or key-directory state.
 
+`web/src/WebRtcCallFlow.ts` runs the client sequence: obtain and publish the
+initial MLS media key, install SFrame before SDP creation, join the regional
+room, exchange SDP/ICE through the provider adapter, attach receiver
+decryptors, and leave cleanly. See [the complete call flow](call-flow.md).
+
 ## Global operations
 
 Start with EU, US, and Asia region groups. Use latency-aware placement for
