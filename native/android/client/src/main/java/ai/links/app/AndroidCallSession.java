@@ -418,11 +418,13 @@ public final class AndroidCallSession {
 
     private static boolean validEndpoint(String value) {
         if (value == null || !value.startsWith("wss://")) return false;
+        if (value.indexOf('?') >= 0 || value.indexOf('#') >= 0) return false;
         String remainder = value.substring("wss://".length());
         String authority = remainder.split("/", 2)[0];
         return !authority.isEmpty() && authority.indexOf('@') < 0
                 && authority.indexOf('?') < 0 && authority.indexOf('#') < 0
-                && authority.indexOf(' ') < 0;
+                && authority.indexOf(' ') < 0 && authority.indexOf('\t') < 0
+                && authority.indexOf('\n') < 0 && authority.indexOf('\r') < 0;
     }
 
     private static void requireUuid(String value, String field) throws IOException {
