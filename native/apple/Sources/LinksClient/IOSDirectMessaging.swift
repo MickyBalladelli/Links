@@ -381,10 +381,17 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         let failed = coreFailed
         lock.unlock()
         guard let sharedCore, active === manager, !failed else { return }
+        var committedMessages = [IOSReceivedTextMessage]()
         do {
             _ = try sharedCore.handleServerFrame(
-                frame, transport: manager, fullSync: false) { [weak self] message in
-                self?.notifyMessage(message)
+                frame, transport: manager, fullSync: false) { message in
+                    committedMessages.append(message)
+                }
+            // The shared core returns only after its inbox/MLS/cursor commit
+            // and QueueAck path have completed. Buffering here prevents a
+            // callback queue from rendering during core processing.
+            for message in committedMessages {
+                notifyMessage(message)
             }
         } catch {
             lock.lock()

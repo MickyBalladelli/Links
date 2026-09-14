@@ -449,7 +449,10 @@ exchanging encrypted one-to-one text through the same local development stack.
   encrypted durable storage, while the adapter verifies claims, fans out one
   MLS-sealed ciphertext per device, commits replay items and the cursor, then
   sends QueueAck.
-- [ ] Render a message only after the shared core has committed the decrypted message and cursor transaction.
+- [x] Render a message only after the shared core has committed the decrypted message and cursor transaction.
+  `IOSDirectMessaging` and background replay buffer core callbacks until the
+  shared-core call returns, after its durable inbox/cursor commit and QueueAck
+  path. The macOS model renders only from that post-commit callback.
 - [ ] Add reconnect, offline outbox retry, stale-cursor recovery, send failure, authentication expiry, and dependency outage states to the UI.
 - [ ] Keep message text, decrypted metadata, seeds, bearer tokens, and sealed payloads out of application and server logs.
 

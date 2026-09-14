@@ -189,11 +189,18 @@ public final class IOSMissingMessageRecovery: IOSConnectionManagerDelegate {
         let fullSync = activeFullSync
         runLock.unlock()
         guard let run, let sharedCore, active === manager else { return }
+        var committedMessages = [IOSReceivedTextMessage]()
         do {
             let result = try sharedCore.handleServerFrame(
-                frame, transport: manager, fullSync: fullSync) { [weak self] message in
-                    self?.onTextMessage?(message)
+                frame, transport: manager, fullSync: fullSync) { message in
+                    committedMessages.append(message)
                 }
+            // Do not render from the core callback. The core method has now
+            // returned, so its durable inbox/cursor transaction and QueueAck
+            // ordering are complete.
+            for message in committedMessages {
+                onTextMessage?(message)
+            }
             if result == .recoveryComplete, run.finish(.complete) {
                 manager.stop()
             }

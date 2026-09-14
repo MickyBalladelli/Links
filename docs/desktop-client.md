@@ -31,7 +31,9 @@ The same adapter validates replay batches, decrypts each envelope through
 call, sends QueueAck only after that commit, and invokes the UI callback last.
 `DesktopCoreHost` remains the small protocol seam; `DesktopCoreHostAdapter`
 is the reference implementation. Its service must encrypt message data before
-local persistence and must never persist the bearer token.
+local persistence and must never persist the bearer token. The Apple wrapper
+also buffers callbacks until `handleServerFrame` returns, so a UI queue cannot
+render while the shared-core transaction is still running.
 The adapter validates every binary protobuf server frame, creates a fresh
 protocol-v1 Hello, and keeps the bearer token memory-only through the supplied
 token closure.

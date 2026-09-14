@@ -37,7 +37,7 @@ public protocol SharedClientCore: AnyObject {
     @discardableResult
     func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
                            fullSync: Bool,
-                           onTextMessage: @escaping (IOSReceivedTextMessage) -> Void)
+                           onTextMessage: (IOSReceivedTextMessage) -> Void)
         throws -> IOSCoreFrameResult
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
