@@ -85,11 +85,7 @@ pub trait MlsEngine {
 
     /// Ensure a many-to-many group contains the supplied recipient device
     /// leaves. The returned commit must be delivered before it is merged.
-    fn ensure_group(
-        &mut self,
-        _: &str,
-        _: &[&[u8]],
-    ) -> Result<Option<PendingCommit>, CoreError> {
+    fn ensure_group(&mut self, _: &str, _: &[&[u8]]) -> Result<Option<PendingCommit>, CoreError> {
         Err(CoreError::CryptoUnavailable)
     }
 
@@ -493,10 +489,12 @@ where
                     .map(|binding| binding.user_id)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let user_counts = users.into_iter().fold(HashMap::new(), |mut counts, user_id| {
-            increment_user(&mut counts, user_id);
-            counts
-        });
+        let user_counts = users
+            .into_iter()
+            .fold(HashMap::new(), |mut counts, user_id| {
+                increment_user(&mut counts, user_id);
+                counts
+            });
         if !group_shape_is_ready(&user_counts, &self.local_binding.user_id, max_users)
             || staged.members().count() > MAX_GROUP_DEVICES
         {
@@ -530,13 +528,7 @@ where
         };
         match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
-                validate_staged_commit(
-                    &self.verifier,
-                    &group,
-                    sender_index,
-                    &staged,
-                    max_users,
-                )?;
+                validate_staged_commit(&self.verifier, &group, sender_index, &staged, max_users)?;
                 group
                     .merge_staged_commit(&self.provider, *staged)
                     .map_err(|_| CoreError::Provider)
@@ -768,7 +760,7 @@ where
         };
 
         let users = verified_group_user_counts(&self.verifier, &group)?;
-        ensure_direct_user_limit(&users)?;
+        ensure_group_user_limit(&users, DIRECT_MAX_USERS)?;
         if !users.contains_key(&self.local_binding.user_id)
             || matches!(target_user, Some(user_id) if
                 users.len() == DIRECT_MAX_USERS && !users.contains_key(&user_id))

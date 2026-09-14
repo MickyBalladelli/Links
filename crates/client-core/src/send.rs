@@ -73,6 +73,17 @@ pub trait DirectChatDirectory: Send + Sync {
     ) -> Result<Vec<RecipientDevice>, CoreError>;
 }
 
+/// Authenticated directory view for every active physical device in a group.
+/// The host must verify group membership and return only current members other
+/// than the local device.
+#[async_trait]
+pub trait GroupChatDirectory: Send + Sync {
+    async fn query_group_recipient_devices(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<RecipientDevice>, CoreError>;
+}
+
 /// Adapter for the MLS bootstrap control path and opaque envelope delivery.
 /// The existing transport protobuf has no MLS commit/Welcome message yet, so
 /// this boundary must be backed by an authenticated versioned adapter.
@@ -116,6 +127,8 @@ pub struct DirectSendResult {
     pub message: v1::Message,
     pub envelopes: Vec<v1::Envelope>,
 }
+
+pub type GroupSendResult = DirectSendResult;
 
 /// Query recipient prekeys, establish or resume the direct MLS group, encrypt
 /// one application message, and persist/send one Sealed Sender envelope per
@@ -203,6 +216,126 @@ where
         transport.send_envelope(envelope).await?;
     }
     Ok(DirectSendResult { message, envelopes })
+}
+
+/// Query all active group member devices, add missing MLS leaves, encrypt one
+/// application message once, and persist/send one Sealed Sender envelope per
+/// active device. Group membership changes use the same pending-commit
+/// durability boundary as direct chats.
+pub async fn send_group_message<C, M, D, T, O>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    message_id: String,
+    content: v1::message::Content,
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<GroupSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: GroupChatDirectory,
+    T: DirectChatTransport,
+    O: DirectChatStore,
+{
+    protocol::validate_id(&conversation_id)?;
+    protocol::validate_id(&message_id)?;
+    if conversation_id != sequence.conversation_id()
+        || sequence.sender_device_id() != core.device_id()
+    {
+        return Err(CoreError::Authentication);
+    }
+
+    let recipients = directory
+        .query_group_recipient_devices(&conversation_id)
+        .await?;
+    if recipients.is_empty() || recipients.len() > crate::mls::MAX_GROUP_DEVICES {
+        return Err(CoreError::Authentication);
+    }
+
+    let mut device_ids = HashSet::with_capacity(recipients.len());
+    let mut fanout = Vec::with_capacity(recipients.len());
+    let mut key_packages = Vec::with_capacity(recipients.len());
+    for recipient in &recipients {
+        if recipient.user_id == core.user_id() || !device_ids.insert(&recipient.device_id) {
+            return Err(CoreError::Authentication);
+        }
+        let sealed_sender_key = recipient.verify()?;
+        core.crypto_mut()
+            .install_recipient_public_key(&recipient.device_id, sealed_sender_key)?;
+        fanout.push(FanoutRecipient::new(recipient.device_id.clone())?);
+        key_packages.push(recipient.mls_key_package.as_slice());
+    }
+
+    let pending = core
+        .mls_mut()
+        .ensure_group(&conversation_id, &key_packages)?;
+    if let Some(pending) = pending {
+        store
+            .persist_pending_commit(&conversation_id, &pending)
+            .await?;
+        transport
+            .deliver_mls_bootstrap(&conversation_id, &pending)
+            .await?;
+        core.mls_mut()
+            .merge_pending_group_commit(&conversation_id)?;
+        store.mark_pending_commit_accepted(&conversation_id).await?;
+    }
+
+    let message = v1::Message {
+        message_id,
+        conversation_id,
+        sender_device_id: core.device_id().to_owned(),
+        sent_at_ms,
+        sequence_id: 0,
+        content: Some(content),
+    };
+    let (message, envelopes) =
+        core.seal_next_message_for_devices(message, sequence, &fanout, expires_at_ms, sent_at_ms)?;
+    store
+        .persist_send(&message, &envelopes, sequence.last_sequence_id())
+        .await?;
+    for envelope in &envelopes {
+        transport.send_envelope(envelope).await?;
+    }
+    Ok(GroupSendResult { message, envelopes })
+}
+
+pub async fn send_group_text<C, M, D, T, O>(
+    core: &mut ClientCore<C, M>,
+    sequence: &mut ConversationSequence,
+    directory: &D,
+    transport: &mut T,
+    store: &mut O,
+    conversation_id: String,
+    message_id: String,
+    text: String,
+    sent_at_ms: u64,
+    expires_at_ms: u64,
+) -> Result<GroupSendResult, CoreError>
+where
+    C: EnvelopeCrypto + RecipientKeyDirectory,
+    M: MlsEngine,
+    D: GroupChatDirectory,
+    T: DirectChatTransport,
+    O: DirectChatStore,
+{
+    send_group_message(
+        core,
+        sequence,
+        directory,
+        transport,
+        store,
+        conversation_id,
+        message_id,
+        v1::message::Content::Text(text),
+        sent_at_ms,
+        expires_at_ms,
+    )
+    .await
 }
 
 pub async fn send_text<C, M, D, T, O>(
