@@ -512,6 +512,7 @@ where
         &self,
         expected_group_id: GroupId,
         bytes: &[u8],
+        max_users: usize,
     ) -> Result<(), CoreError> {
         let message = parse_protocol_message(bytes)?;
         if message.group_id() != &expected_group_id || message.content_type() != ContentType::Commit
@@ -529,7 +530,13 @@ where
         };
         match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
-                validate_direct_staged_commit(&self.verifier, &group, sender_index, &staged)?;
+                validate_staged_commit(
+                    &self.verifier,
+                    &group,
+                    sender_index,
+                    &staged,
+                    max_users,
+                )?;
                 group
                     .merge_staged_commit(&self.provider, *staged)
                     .map_err(|_| CoreError::Provider)
@@ -553,7 +560,7 @@ where
         }
         let group_id = group_id(conversation_id)?;
         let mut group = self.load_group(&group_id)?;
-        ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
+        ensure_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
         group
             .create_message(&self.provider, &self.signer, plaintext)
             .map_err(|_| CoreError::Provider)
@@ -567,7 +574,7 @@ where
         }
         let group_id = message.group_id().clone();
         let mut group = self.load_group(&group_id)?;
-        ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
+        ensure_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
         let processed = group
             .process_message(&self.provider, message)
             .map_err(|_| CoreError::Authentication)?;
@@ -599,11 +606,27 @@ where
     }
 
     fn join_group(&mut self, conversation_id: &str, welcome: &[u8]) -> Result<(), CoreError> {
-        self.join_group_with_id(group_id(conversation_id)?, welcome)
+        self.join_group_with_id(group_id(conversation_id)?, welcome, MAX_GROUP_USERS)
+    }
+
+    fn join_direct_group(
+        &mut self,
+        conversation_id: &str,
+        welcome: &[u8],
+    ) -> Result<(), CoreError> {
+        self.join_group_with_id(group_id(conversation_id)?, welcome, DIRECT_MAX_USERS)
     }
 
     fn process_commit(&mut self, conversation_id: &str, commit: &[u8]) -> Result<(), CoreError> {
-        self.process_commit_for_group(group_id(conversation_id)?, commit)
+        self.process_commit_for_group(group_id(conversation_id)?, commit, MAX_GROUP_USERS)
+    }
+
+    fn process_direct_commit(
+        &mut self,
+        conversation_id: &str,
+        commit: &[u8],
+    ) -> Result<(), CoreError> {
+        self.process_commit_for_group(group_id(conversation_id)?, commit, DIRECT_MAX_USERS)
     }
 
     fn encrypt(
@@ -627,7 +650,19 @@ where
         self.ensure_direct_group_members(conversation_id, key_packages)
     }
 
+    fn ensure_group(
+        &mut self,
+        conversation_id: &str,
+        key_packages: &[&[u8]],
+    ) -> Result<Option<PendingCommit>, CoreError> {
+        self.ensure_group_members(conversation_id, key_packages)
+    }
+
     fn merge_pending_direct_commit(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        self.merge_pending_commit(conversation_id)
+    }
+
+    fn merge_pending_group_commit(&mut self, conversation_id: &str) -> Result<(), CoreError> {
         self.merge_pending_commit(conversation_id)
     }
 }
