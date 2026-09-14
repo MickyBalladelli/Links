@@ -195,6 +195,9 @@ where
     V: BroadcastAdminVerifier,
     B: BroadcastBroker,
 {
+    if message_id != post_id {
+        return Err(CoreError::Authentication);
+    }
     let admin_public_key = signer.public_key()?;
     admins.verify_admin_device(conversation_id, sender_device_id, &admin_public_key)?;
     let post = sign_post(
