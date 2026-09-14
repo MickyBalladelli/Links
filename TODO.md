@@ -690,6 +690,9 @@ This is a separate expansion track. Do not block the centralized release on it.
 Run these checks continuously at the relevant phase boundary, with the full audit before public launch.
 
 - [ ] Conduct a third-party cryptographic code audit of PQXDH, MLS ratcheting, and SFrame integration.
+  Audit scope and evidence checklist are prepared in
+  `docs/crypto-audit-scope.md`; leave this item open until an independent
+  auditor reviews a pinned commit and signs the final report.
 - [ ] Verify the zero-knowledge routing stance for centralized and decentralized deployments.
 - [ ] Centralized benchmark: verify less than 50ms delivery latency for 1M concurrent WebSocket connections.
 - [ ] Decentralized benchmark: measure multi-hop gossip propagation across 50 international nodes.
