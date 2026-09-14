@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import SwiftUI
+import AppKit
 import LinksClient
 import LinksKeyStore
 
@@ -17,6 +18,14 @@ struct LinksMacOSConversation: Identifiable, Equatable {
     var title: String
     let recipientUserID: String
     var messages: [LinksMacOSMessage]
+}
+
+enum LinksMacOSAuthMode: String, CaseIterable, Identifiable {
+    case register
+    case login
+
+    var id: String { rawValue }
+    var title: String { rawValue == "register" ? "Register" : "Log in" }
 }
 
 private final class IOSClientBox: @unchecked Sendable {
@@ -41,8 +50,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published var actionError: String?
     @Published private(set) var isEnrolling = false
     @Published private(set) var profileName = ClientProfile.default.name
+    @Published var usernameInput = ""
+    @Published var authMode: LinksMacOSAuthMode = .register
+    @Published private(set) var authEndpointText = "http://127.0.0.1:8080"
+    @Published private(set) var isAuthenticating = false
+    @Published var pairingTarget = ""
+    @Published var pairingInput = ""
+    @Published private(set) var pairingURI: String?
+    @Published private(set) var pairingStatus = "No pairing activity"
+    @Published private(set) var isPairing = false
 
     private let client: IOSClient?
+    private let authClient: IOSUsernameAuthClient?
     private var messaging: IOSDirectMessaging?
     private let identityQueue = DispatchQueue(
         label: "ai.links.macos.identity", qos: .userInitiated)
@@ -59,9 +78,19 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 profile: profile)
             profileName = profile.name
             client = loadedClient
+            usernameInput = loadedClient.accountHandle ?? ""
+            if let endpoint = try? Self.authEndpointFromArguments(),
+               let loadedAuthClient = try? IOSUsernameAuthClient(baseURL: endpoint) {
+                authClient = loadedAuthClient
+                authEndpointText = endpoint.absoluteString
+            } else {
+                authClient = nil
+                authEndpointText = "Invalid local auth endpoint"
+            }
             refreshClientState()
         } catch {
             client = nil
+            authClient = nil
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
@@ -73,6 +102,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     var packageStatus: String { "LinksClient + LinksKeyStore" }
 
     var requiresOnboarding: Bool { client?.isEnrolled != true }
+
+    var requiresAccountAuthentication: Bool {
+        client?.isEnrolled == true && client?.isAuthenticated != true
+    }
 
     var selectedConversation: LinksMacOSConversation? {
         guard let selectedConversationID else { return nil }
@@ -122,6 +155,113 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 }
             }
         }
+    }
+
+    func authenticateUsername() {
+        guard let client, let authClient, client.isEnrolled, !isAuthenticating else {
+            onboardingError = "Local username auth is unavailable."
+            return
+        }
+        let handle = usernameInput
+        let mode = authMode
+        isAuthenticating = true
+        onboardingError = nil
+        Task { @MainActor [weak self] in
+            do {
+                switch mode {
+                case .register:
+                    _ = try await client.registerUsername(using: authClient, handle: handle)
+                case .login:
+                    _ = try await client.loginUsername(using: authClient, handle: handle)
+                }
+                guard let self else { return }
+                self.isAuthenticating = false
+                self.usernameInput = client.accountHandle ?? handle
+                self.refreshClientState()
+            } catch {
+                guard let self else { return }
+                self.isAuthenticating = false
+                self.onboardingError = "Username auth failed. Check the handle and local auth service."
+            }
+        }
+    }
+
+    func createPairingLink() {
+        guard let client, client.isEnrolled, !isPairing else { return }
+        guard let authClient else {
+            pairingStatus = "Local auth service is unavailable"
+            return
+        }
+        let target = pairingTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else {
+            pairingStatus = "Enter an account username or user ID"
+            return
+        }
+        isPairing = true
+        pairingStatus = "Finding account"
+        Task { @MainActor [weak self] in
+            do {
+                let userID: String
+                let cleanTarget = target.lowercased()
+                if IOSClient.isCanonicalUUID(cleanTarget) {
+                    userID = cleanTarget
+                } else {
+                    userID = try await authClient.lookup(handle: cleanTarget).userID
+                }
+                let uri = try client.makePairingURI(for: userID)
+                guard let self else { return }
+                self.pairingURI = uri
+                self.isPairing = false
+                self.pairingStatus = "Pairing link ready. Scan it on the authenticated device."
+            } catch {
+                guard let self else { return }
+                self.isPairing = false
+                self.pairingStatus = "Could not create pairing link"
+            }
+        }
+    }
+
+    func copyPairingLink() {
+        guard let pairingURI else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pairingURI, forType: .string)
+        pairingStatus = "Pairing link copied"
+    }
+
+    func approvePairing() {
+        guard let client, let authClient, client.isAuthenticated, !isPairing else { return }
+        let uri = pairingInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uri.isEmpty else {
+            pairingStatus = "Paste a links://connect pairing link"
+            return
+        }
+        isPairing = true
+        pairingStatus = "Checking pairing link"
+        Task { @MainActor [weak self] in
+            do {
+                let response = try await client.approvePairing(using: authClient, uri: uri)
+                guard let self else { return }
+                self.isPairing = false
+                self.pairingInput = ""
+                self.pairingStatus = "Device approved: \(self.shortID(response.deviceID))"
+            } catch {
+                guard let self else { return }
+                self.isPairing = false
+                self.pairingStatus = "Pairing approval failed"
+            }
+        }
+    }
+
+    func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "links",
+              url.host?.lowercased() == "connect",
+              url.path.isEmpty || url.path == "/",
+              url.query?.isEmpty == false else {
+            actionError = "Invalid Links pairing link."
+            return
+        }
+        pairingInput = url.absoluteString
+        pairingStatus = "Pairing link received. Review before approval."
     }
 
     /// Install the concrete shared-core host when Rust core and durable providers exist.
@@ -310,5 +450,21 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             throw ClientProfileError.invalidName
         }
         return try ClientProfile(name: arguments[arguments.index(after: marker)])
+    }
+
+    private static func authEndpointFromArguments() throws -> URL {
+        let arguments = CommandLine.arguments
+        let raw: String
+        if let marker = arguments.firstIndex(of: "--auth-url"),
+           arguments.index(after: marker) < arguments.endIndex {
+            raw = arguments[arguments.index(after: marker)]
+        } else {
+            raw = ProcessInfo.processInfo.environment["LINKS_AUTH_URL"]
+                ?? "http://127.0.0.1:8080"
+        }
+        guard let endpoint = URL(string: raw) else {
+            throw IOSUsernameAuthError.invalidEndpoint
+        }
+        return endpoint
     }
 }

@@ -8,9 +8,10 @@ public struct SharedCoreIdentity: Equatable {
     public let deviceID: String
     public let mlsNodeID: String
     public let identity: IdentityKeyReference
+    public let mlsCredential: Data?
 
     public init(userID: String, deviceID: String, mlsNodeID: String,
-                identity: IdentityKeyReference) throws {
+                identity: IdentityKeyReference, mlsCredential: Data? = nil) throws {
         guard IOSClient.isCanonicalUUID(userID),
               IOSClient.isCanonicalUUID(deviceID),
               IOSClient.isCanonicalUUID(mlsNodeID) else {
@@ -20,6 +21,7 @@ public struct SharedCoreIdentity: Equatable {
         self.deviceID = deviceID
         self.mlsNodeID = mlsNodeID
         self.identity = identity
+        self.mlsCredential = mlsCredential
     }
 }
 
@@ -106,6 +108,34 @@ public final class IOSClient: SharedCoreIdentitySigner {
         let deviceID: String
         let mlsNodeID: String
         let userID: String?
+        let accountHandle: String?
+        let mlsCredential: Data?
+
+        init(handle: String, publicKey: Data, deviceID: String, mlsNodeID: String,
+             userID: String?, accountHandle: String? = nil, mlsCredential: Data? = nil) {
+            self.handle = handle
+            self.publicKey = publicKey
+            self.deviceID = deviceID
+            self.mlsNodeID = mlsNodeID
+            self.userID = userID
+            self.accountHandle = accountHandle
+            self.mlsCredential = mlsCredential
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case handle, publicKey, deviceID, mlsNodeID, userID, accountHandle, mlsCredential
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            handle = try values.decode(String.self, forKey: .handle)
+            publicKey = try values.decode(Data.self, forKey: .publicKey)
+            deviceID = try values.decode(String.self, forKey: .deviceID)
+            mlsNodeID = try values.decode(String.self, forKey: .mlsNodeID)
+            userID = try values.decodeIfPresent(String.self, forKey: .userID)
+            accountHandle = try values.decodeIfPresent(String.self, forKey: .accountHandle)
+            mlsCredential = try values.decodeIfPresent(Data.self, forKey: .mlsCredential)
+        }
     }
 
     private struct AuthenticatedSession {
@@ -127,6 +157,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
     public private(set) var deviceID: String?
     public private(set) var mlsNodeID: String?
     public private(set) var userID: String?
+    public private(set) var accountHandle: String?
+    public private(set) var mlsCredential: Data?
 
     public init(identityStore: HardwareIdentityStore = HardwareIdentityStore(),
                 defaults: UserDefaults = .standard,
@@ -198,6 +230,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
         deviceID = createdDeviceID
         mlsNodeID = createdMLSNodeID
         userID = nil
+        accountHandle = nil
+        mlsCredential = nil
         authenticated = nil
         return created
     }
@@ -211,10 +245,13 @@ public final class IOSClient: SharedCoreIdentitySigner {
     /// OTP onboarding calls this after the server returns a device-bound
     /// session. The bearer stays in memory and is never written to disk.
     public func setAuthenticatedSession(userID: String, accessToken: String,
-                                        expiresAtMs: UInt64) throws {
+                                        expiresAtMs: UInt64,
+                                        accountHandle: String? = nil,
+                                        mlsCredential: Data? = nil) throws {
         guard let currentDeviceID = deviceID, let currentMLSNodeID = mlsNodeID,
               let identity, Self.isCanonicalUUID(userID), !accessToken.isEmpty,
-              expiresAtMs > Self.nowMs() else {
+              expiresAtMs > Self.nowMs(),
+              mlsCredential.map({ !$0.isEmpty && $0.count <= 1024 }) ?? true else {
             throw IOSClientError.invalidMetadata
         }
         let metadata = StoredMetadata(
@@ -222,9 +259,13 @@ public final class IOSClient: SharedCoreIdentitySigner {
             publicKey: identity.publicKey,
             deviceID: currentDeviceID,
             mlsNodeID: currentMLSNodeID,
-            userID: userID)
+            userID: userID,
+            accountHandle: accountHandle ?? self.accountHandle,
+            mlsCredential: mlsCredential ?? self.mlsCredential)
         try saveMetadata(metadata)
         self.userID = userID
+        self.accountHandle = accountHandle ?? self.accountHandle
+        self.mlsCredential = mlsCredential ?? self.mlsCredential
         authenticated = AuthenticatedSession(
             userID: userID, accessToken: accessToken, expiresAtMs: expiresAtMs)
     }
@@ -234,6 +275,67 @@ public final class IOSClient: SharedCoreIdentitySigner {
             throw IOSClientError.authenticatedSessionRequired
         }
         return authenticated.accessToken
+    }
+
+    /// Register or log in a local-development username using this hardware
+    /// identity. The username is not a password; the identity signs a fresh
+    /// nonce-bound transcript and the bearer remains memory-only.
+    @discardableResult
+    public func registerUsername(using api: IOSUsernameAuthClient, handle: String)
+        async throws -> IOSUsernameAuthSession {
+        try await usernameAuthentication(using: api, handle: handle, login: false)
+    }
+
+    @discardableResult
+    public func loginUsername(using api: IOSUsernameAuthClient, handle: String)
+        async throws -> IOSUsernameAuthSession {
+        try await usernameAuthentication(using: api, handle: handle, login: true)
+    }
+
+    /// Create a fresh signed `links://connect` payload for this local device.
+    /// The approving device must authenticate the account and submit it before
+    /// this client can use the account.
+    public func makePairingURI(for userID: String) throws -> String {
+        guard let identity, let deviceID, let mlsNodeID,
+              Self.isCanonicalUUID(userID),
+              Self.isCanonicalUUID(deviceID),
+              Self.isCanonicalUUID(mlsNodeID) else {
+            throw IOSClientError.identityNotEnrolled
+        }
+        let unsigned = try IOSPairingPayload(
+            userID: userID, deviceID: deviceID, mlsNodeID: mlsNodeID,
+            publicKey: identity.publicKey,
+            nonce: IOSPairingPayload.generateNonce(),
+            signature: Data(repeating: 0, count: 64))
+        let signature = try sign(try unsigned.signingTranscript())
+        let signed = try IOSPairingPayload(
+            userID: unsigned.userID, deviceID: unsigned.deviceID,
+            mlsNodeID: unsigned.mlsNodeID, publicKey: unsigned.publicKey,
+            nonce: unsigned.nonce, signature: signature)
+        return try signed.toURI()
+    }
+
+    /// Approve a pairing link while this client has a valid bearer session.
+    /// Signature, account, and response identity fields are checked before
+    /// the server-created credential is returned to the caller.
+    @discardableResult
+    public func approvePairing(using api: IOSUsernameAuthClient, uri: String)
+        async throws -> IOSPairingRegistrationResponse {
+        guard let userID, isAuthenticated else {
+            throw IOSClientError.authenticatedSessionRequired
+        }
+        let payload = try IOSPairingPayload(uri: uri)
+        try payload.verify()
+        guard payload.userID == userID else { throw IOSPairingError.invalidPayload }
+        let response = try await api.registerDevice(
+            accessToken: accessToken(), payload: payload)
+        guard response.userID == payload.userID,
+              response.deviceID == payload.deviceID,
+              response.mlsNodeID == payload.mlsNodeID,
+              response.publicKey == payload.publicKey else {
+            throw IOSPairingError.invalidPayload
+        }
+        return response
     }
 
     /// Sign a Rust-core transcript through the hardware-backed identity.
@@ -313,7 +415,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
             userID: userID,
             deviceID: deviceID,
             mlsNodeID: mlsNodeID,
-            identity: identity)
+            identity: identity,
+            mlsCredential: mlsCredential)
         let core = try factory.makeCore(identity: coreIdentity, signer: self)
         guard core.userID == userID, core.deviceID == deviceID else {
             throw IOSClientError.coreIdentityMismatch
@@ -343,7 +446,11 @@ public final class IOSClient: SharedCoreIdentitySigner {
         }
         guard Self.isCanonicalUUID(metadata.deviceID),
               Self.isCanonicalUUID(metadata.mlsNodeID),
-              metadata.userID.map(Self.isCanonicalUUID) ?? true else {
+              metadata.userID.map(Self.isCanonicalUUID) ?? true,
+              metadata.accountHandle.map({
+                  (try? IOSUsernameAuthClient.validateHandle($0)) != nil
+              }) ?? true,
+              metadata.mlsCredential.map({ !$0.isEmpty && $0.count <= 1024 }) ?? true else {
             throw IOSClientError.invalidMetadata
         }
         let restored = try IdentityKeyReference(
@@ -354,6 +461,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
         deviceID = metadata.deviceID
         mlsNodeID = metadata.mlsNodeID
         userID = metadata.userID
+        accountHandle = metadata.accountHandle
+        mlsCredential = metadata.mlsCredential
     }
 
     private func validate(_ challenge: IOSOTPChallenge, identity: IdentityKeyReference,
@@ -363,6 +472,63 @@ public final class IOSClient: SharedCoreIdentitySigner {
               challenge.publicKey == identity.publicKey else {
             throw IOSOTPError.challengeIdentityMismatch
         }
+    }
+
+    private func usernameAuthentication(using api: IOSUsernameAuthClient, handle: String,
+                                        login: Bool) async throws -> IOSUsernameAuthSession {
+        guard let identity, let deviceID, let mlsNodeID,
+              let deviceUUID = UUID(uuidString: deviceID),
+              let nodeUUID = UUID(uuidString: mlsNodeID) else {
+            throw IOSClientError.identityNotEnrolled
+        }
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        try IOSUsernameAuthClient.validateHandle(cleanHandle)
+        let nonce = IOSPairingPayload.generateNonce()
+        var transcript = try usernameTranscript(
+            handle: cleanHandle, deviceID: deviceUUID, mlsNodeID: nodeUUID,
+            publicKey: identity.publicKey, nonce: nonce, login: login)
+        var signature = try sign(transcript)
+        defer {
+            transcript.resetBytes(in: 0..<transcript.count)
+            signature.resetBytes(in: 0..<signature.count)
+        }
+        let session: IOSUsernameAuthSession
+        if login {
+            session = try await api.login(
+                handle: cleanHandle, deviceID: deviceID, mlsNodeID: mlsNodeID,
+                publicKey: identity.publicKey, nonce: nonce, signature: signature)
+        } else {
+            session = try await api.register(
+                handle: cleanHandle, deviceID: deviceID, mlsNodeID: mlsNodeID,
+                publicKey: identity.publicKey, nonce: nonce, signature: signature)
+        }
+        guard session.deviceID == deviceID else { throw IOSClientError.invalidMetadata }
+        try setAuthenticatedSession(
+            userID: session.userID,
+            accessToken: session.accessToken,
+            expiresAtMs: session.expiresAtMs,
+            accountHandle: session.handle,
+            mlsCredential: session.mlsCredential)
+        return session
+    }
+
+    private func usernameTranscript(handle: String, deviceID: UUID, mlsNodeID: UUID,
+                                    publicKey: Data, nonce: Data, login: Bool) throws -> Data {
+        let handleBytes = Array(handle.utf8)
+        guard handleBytes.count >= 3, handleBytes.count <= 32,
+              publicKey.count == 32, nonce.count == 32 else {
+            throw IOSClientError.invalidMetadata
+        }
+        var transcript = Data((login
+            ? "links/username-login/v1\0"
+            : "links/username-register/v1\0").utf8)
+        transcript.append(UInt8(handleBytes.count))
+        transcript.append(contentsOf: handleBytes)
+        transcript.append(contentsOf: deviceID.bytes)
+        transcript.append(contentsOf: mlsNodeID.bytes)
+        transcript.append(publicKey)
+        transcript.append(nonce)
+        return transcript
     }
 
     private func saveMetadata(_ metadata: StoredMetadata) throws {

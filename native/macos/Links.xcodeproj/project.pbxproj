@@ -22,6 +22,7 @@
 		A10000020000000000000004 /* MacOSClientShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientShell.swift; sourceTree = "<group>"; };
 		A10000020000000000000005 /* Links.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Links.entitlements; sourceTree = "<group>"; };
 		A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSApplicationDelegate.swift; sourceTree = "<group>"; };
+		A10000020000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +54,7 @@
 				A10000020000000000000004 /* MacOSClientShell.swift */,
 				A10000020000000000000005 /* Links.entitlements */,
 				A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */,
+				A10000020000000000000007 /* Info.plist */,
 			);
 			path = Links;
 			sourceTree = "<group>";
@@ -157,7 +159,8 @@
 				DEVELOPMENT_TEAM = "";
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Links/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Links contributors";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -187,7 +190,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Links/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Links contributors";
 				LD_RUNPATH_SEARCH_PATHS = (

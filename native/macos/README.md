@@ -61,6 +61,22 @@ Keychain storage.
 The SwiftUI app observes `scenePhase` so future transport and durable store
 hosts have explicit active, inactive, and background lifecycle hooks.
 
+## Local username auth and pairing
+
+After the hardware identity is enrolled, the first-run screen can register or
+log in a username against the local account-auth service. The default endpoint
+is `http://127.0.0.1:8080`; override it with `LINKS_AUTH_URL` or
+`--auth-url <url>`. Plain HTTP is accepted only for loopback development. A
+non-loopback endpoint must use HTTPS.
+
+The account screen can create a signed `links://connect` link for an existing
+account. Scan it on that account's authenticated device, then log in on this
+Mac with the account username. An authenticated macOS client can also approve
+a link from another device with the **Pair device** action, or by opening a
+registered `links://connect?...` URL. The app verifies the URI signature and
+account before calling `POST /v1/devices`; bearer tokens never enter the URL or
+the pairing payload.
+
 On background and application termination, the macOS delegate calls
 `IOSDirectMessaging.shutdown()`. This closes transport and releases the core;
 it does not clear the shared core's encrypted outbox or durable cursor. If the

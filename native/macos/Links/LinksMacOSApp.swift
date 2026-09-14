@@ -12,7 +12,7 @@ struct LinksMacOSApp: App {
             LinksRootView(model: model)
                 .frame(minWidth: 900, minHeight: 600)
                 .onAppear {
-                    applicationDelegate.model = model
+                    applicationDelegate.clientModel = model
                 }
         }
         .onChange(of: scenePhase) { phase in

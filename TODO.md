@@ -406,7 +406,10 @@ exchanging encrypted one-to-one text through the same local development stack.
   service, wrapped-seed context, and public metadata key. The macOS app accepts
   `--profile <name>`, and `IOSClient` rejects mismatched identity-store and
   client profiles before opening metadata.
-- [ ] Support first-run username registration/login for local development and authenticated device pairing through the existing `links://connect` flow.
+- [x] Support first-run username registration/login for local development and authenticated device pairing through the existing `links://connect` flow.
+  `IOSUsernameAuthClient` signs nonce-bound username registration/login requests,
+  keeps the bearer in memory, and the macOS shell can create or approve signed
+  `links://connect` payloads through the authenticated device endpoint.
 - [ ] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.
 - [ ] Persist only public account/device metadata, MLS credentials, and encrypted local state; keep the bearer token memory-only.
 - [ ] Generate a fresh non-nil `user_id`, `device_id`, and `mls_node_id` for every new local profile; reject accidental identity reuse.

@@ -7,6 +7,8 @@ struct LinksRootView: View {
         Group {
             if model.requiresOnboarding {
                 LinksOnboardingView(model: model)
+            } else if model.requiresAccountAuthentication {
+                LinksAccountOnboardingView(model: model)
             } else {
                 LinksMessagingView(model: model)
             }
@@ -54,7 +56,7 @@ private struct LinksOnboardingView: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
             }
-            Text("Account sign-in and encrypted transport appear after local identity setup.")
+            Text("Account sign-in appears after local identity setup.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -63,18 +65,103 @@ private struct LinksOnboardingView: View {
     }
 }
 
+private struct LinksAccountOnboardingView: View {
+    @ObservedObject var model: LinksMacOSAppModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Image(systemName: "person.badge.key")
+                    .font(.system(size: 50))
+                    .foregroundStyle(.tint)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Connect your account")
+                    .font(.largeTitle.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Register a local username or log in with the identity already enrolled on this Mac.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520, alignment: .center)
+
+                Picker("Account action", selection: $model.authMode) {
+                    ForEach(LinksMacOSAuthMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                TextField("Username, for example alice", text: $model.usernameInput)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.username)
+                Button(model.authMode == .register ? "Register username" : "Log in") {
+                    model.authenticateUsername()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isAuthenticating)
+                if model.isAuthenticating {
+                    ProgressView("Contacting local account service")
+                }
+                Text("Auth service: \(model.authEndpointText)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let error = model.onboardingError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Divider()
+                Text("Join an existing account")
+                    .font(.headline)
+                Text("Enter the account username or user ID. Scan the generated link on an authenticated device, then log in here with that username.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Account username or user ID", text: $model.pairingTarget)
+                    .textFieldStyle(.roundedBorder)
+                Button("Create pairing link") {
+                    model.createPairingLink()
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isPairing)
+                Text(model.pairingStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let pairingURI = model.pairingURI {
+                    Text(pairingURI)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(4)
+                    Button("Copy pairing link") {
+                        model.copyPairingLink()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: 520)
+            .padding(48)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
 private struct LinksMessagingView: View {
     @ObservedObject var model: LinksMacOSAppModel
     @State private var showingNewConversation = false
+    @State private var showingPairing = false
 
     var body: some View {
         NavigationSplitView {
-            LinksSidebar(model: model, showingNewConversation: $showingNewConversation)
+            LinksSidebar(model: model,
+                         showingNewConversation: $showingNewConversation,
+                         showingPairing: $showingPairing)
         } detail: {
             LinksConversationDetail(model: model)
         }
         .sheet(isPresented: $showingNewConversation) {
             NewConversationView(model: model)
+        }
+        .sheet(isPresented: $showingPairing) {
+            PairingView(model: model)
         }
     }
 }
@@ -82,6 +169,7 @@ private struct LinksMessagingView: View {
 private struct LinksSidebar: View {
     @ObservedObject var model: LinksMacOSAppModel
     @Binding var showingNewConversation: Bool
+    @Binding var showingPairing: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -124,6 +212,10 @@ private struct LinksSidebar: View {
                 HStack {
                     Text(model.packageStatus)
                     Spacer()
+                    Button("Pair device") {
+                        showingPairing = true
+                    }
+                    .buttonStyle(.link)
                     Button(model.hasMessagingHost ? "Disconnect" : "Connect") {
                         if model.hasMessagingHost {
                             model.disconnect()
@@ -335,5 +427,38 @@ private struct NewConversationView: View {
         }
         .padding(24)
         .frame(width: 430)
+    }
+}
+
+private struct PairingView: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Approve device")
+                .font(.title2.weight(.semibold))
+            Text("Paste a signed links://connect link from the device joining this account. Review it before approval.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $model.pairingInput)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 110)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            Text(model.pairingStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Approve device") {
+                    model.approvePairing()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isPairing)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
     }
 }
