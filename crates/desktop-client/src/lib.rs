@@ -28,6 +28,9 @@ pub use session::{
 };
 pub use surfaces::DesktopSurfaceClient;
 pub use links_client_core::surfaces::{SurfaceKind, SurfaceProfile, SurfaceRole};
+pub use links_client_core::sandbox::{
+    SandboxError, SandboxLimits, SandboxOutput, SandboxRuntime as DesktopMiniAppSandbox,
+};
 
 use links_client_core::{
     identity::{IdentitySeed, LocalIdentity},

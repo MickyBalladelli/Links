@@ -6,6 +6,7 @@
 use links_client_core::{
     identity::{HardwareIdentityStore, HardwareSeedVault, IdentityStore, KeyHandle},
     passkey_backup::{PasskeyBackupEnvelope, PasskeyBackupSalt},
+    sandbox::{SandboxError, SandboxLimits, SandboxRuntime},
     CoreError,
 };
 use std::{ffi::c_void, panic::AssertUnwindSafe, slice, str};
@@ -23,6 +24,9 @@ pub const MAX_RECOVERY_PHRASE: usize = 512;
 pub const MAX_RECOVERY_PASSPHRASE: usize = 256;
 pub const MAX_CREDENTIAL_ID: usize = 1024;
 pub const MAX_BACKUP_ENVELOPE: usize = 1152;
+pub const MAX_SANDBOX_MODULE: usize = links_client_core::sandbox::SANDBOX_MAX_MODULE_BYTES;
+pub const MAX_SANDBOX_INPUT: usize = links_client_core::sandbox::SANDBOX_MAX_INPUT_BYTES;
+pub const MAX_SANDBOX_OUTPUT: usize = links_client_core::sandbox::SANDBOX_MAX_OUTPUT_BYTES;
 const HANDLE_LEN: usize = 36;
 
 #[repr(C)]
@@ -656,6 +660,103 @@ pub unsafe extern "C" fn links_identity_delete(
         let key = unsafe { handle(key_handle)? };
         store.delete_key(key).map_err(status)
     })
+}
+
+/// Compile and validate a client mini-app. The returned pointer is opaque and
+/// owns only the compiled module; it has no identity, key, network, or file
+/// capabilities.
+/// # Safety
+/// `wasm` is readable for `wasm_len` bytes and `out_runtime` is writable for
+/// one pointer. No pointer is retained after this function returns.
+#[no_mangle]
+pub unsafe extern "C" fn links_sandbox_create(
+    wasm: *const u8,
+    wasm_len: usize,
+    out_runtime: *mut *mut std::ffi::c_void,
+) -> i32 {
+    if out_runtime.is_null() {
+        return INVALID;
+    }
+    unsafe { out_runtime.write(std::ptr::null_mut()) };
+    boundary(|| {
+        let wasm = unsafe {
+            read_bytes_limited(wasm, wasm_len, MAX_SANDBOX_MODULE, true).map_err(|_| INVALID)?
+        };
+        let runtime = SandboxRuntime::new(wasm, SandboxLimits::default())
+            .map_err(sandbox_status)?;
+        let handle = Box::into_raw(Box::new(runtime)) as *mut std::ffi::c_void;
+        unsafe { out_runtime.write(handle) };
+        Ok(())
+    })
+}
+
+/// Run one mini-app invocation with fresh guest memory and bounded input and
+/// output. The guest ABI uses `links.input_len`, `links.input_read`, and
+/// `links.output_write`; all other imports are rejected at creation.
+/// # Safety
+/// `runtime` is a live handle from `links_sandbox_create`. Input and output
+/// buffers obey the declared lengths and do not overlap.
+#[no_mangle]
+pub unsafe extern "C" fn links_sandbox_run(
+    runtime: *mut std::ffi::c_void,
+    input: *const u8,
+    input_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    if runtime.is_null() || output.is_null() || output_len.is_null() {
+        return INVALID;
+    }
+    unsafe { output_len.write(0) };
+    boundary(|| {
+        let input = unsafe {
+            read_bytes_limited(input, input_len, MAX_SANDBOX_INPUT, true)
+                .map_err(|_| INVALID)?
+        };
+        let runtime = unsafe { &*(runtime as *const SandboxRuntime) };
+        let result = runtime.run(input).map_err(sandbox_status)?;
+        if result.bytes.len() > output_capacity {
+            return Err(INVALID);
+        }
+        unsafe {
+            output.copy_from_nonoverlapping(result.bytes.as_ptr(), result.bytes.len());
+            output_len.write(result.bytes.len());
+        }
+        Ok(())
+    })
+}
+
+/// Release a compiled mini-app runtime.
+/// # Safety
+/// `runtime` is either null or the live pointer returned by
+/// `links_sandbox_create`, and is released at most once.
+#[no_mangle]
+pub unsafe extern "C" fn links_sandbox_destroy(runtime: *mut std::ffi::c_void) -> i32 {
+    if runtime.is_null() {
+        return OK;
+    }
+    boundary(|| {
+        unsafe { drop(Box::from_raw(runtime as *mut SandboxRuntime)) };
+        Ok(())
+    })
+}
+
+fn sandbox_status(error: SandboxError) -> i32 {
+    match error {
+        SandboxError::InvalidLimits
+        | SandboxError::ModuleTooLarge
+        | SandboxError::InvalidModule
+        | SandboxError::ForbiddenImport
+        | SandboxError::MissingEntrypoint
+        | SandboxError::MissingMemory
+        | SandboxError::InputTooLarge
+        | SandboxError::OutputTooLarge
+        | SandboxError::HostViolation => INVALID,
+        SandboxError::FuelExhausted
+        | SandboxError::ExecutionFailed
+        | SandboxError::GuestRejected => PROVIDER,
+    }
 }
 
 #[cfg(test)]

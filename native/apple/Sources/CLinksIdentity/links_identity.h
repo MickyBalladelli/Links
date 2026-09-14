@@ -69,6 +69,13 @@ int32_t links_identity_sign(const LinksVaultCallbacks *, const uint8_t *handle36
                             const uint8_t *expected_public32, const uint8_t *message,
                             size_t message_len, uint8_t *signature64);
 int32_t links_identity_delete(const LinksVaultCallbacks *, const uint8_t *handle36);
+enum { LINKS_SANDBOX_MAX_MODULE = 2 * 1024 * 1024,
+       LINKS_SANDBOX_MAX_INPUT = 64 * 1024,
+       LINKS_SANDBOX_MAX_OUTPUT = 256 * 1024 };
+int32_t links_sandbox_create(const uint8_t *wasm, size_t wasm_len, void **out_runtime);
+int32_t links_sandbox_run(void *runtime, const uint8_t *input, size_t input_len,
+                          uint8_t *output, size_t output_capacity, size_t *output_len);
+int32_t links_sandbox_destroy(void *runtime);
 int32_t links_phone_auth_transcript(const uint8_t *phone, size_t phone_len,
                                     const uint8_t *channel, size_t channel_len,
                                     const uint8_t *device16, const uint8_t *node16,

@@ -19,7 +19,7 @@ let package = Package(
             .linkedLibrary("links_identity_ffi"),
             .linkedFramework("Security")
         ]),
-        .target(name: "LinksClient", dependencies: ["LinksKeyStore"]),
+        .target(name: "LinksClient", dependencies: ["LinksKeyStore", "CLinksIdentity"]),
         .testTarget(name: "LinksKeyStoreTests", dependencies: ["LinksKeyStore"])
     ]
 )

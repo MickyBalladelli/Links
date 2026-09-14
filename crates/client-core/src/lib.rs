@@ -21,6 +21,8 @@ pub mod prekeys;
 pub mod privacy_pass;
 pub mod proof_of_work;
 pub mod receive;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sandbox;
 pub mod send;
 pub mod sequences;
 pub mod sframe;

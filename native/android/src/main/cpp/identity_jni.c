@@ -350,6 +350,73 @@ JNIEXPORT void JNICALL Java_ai_links_identity_NativeIdentityBridge_delete(JNIEnv
     if (!read_fixed(env, input, handle, 36) || !setup(env, vault, &ctx, &callbacks)) return;
     throw_status(env, links_identity_delete(&callbacks, handle));
 }
+JNIEXPORT jlong JNICALL Java_ai_links_identity_NativeSandboxBridge_create(
+        JNIEnv *env, jclass cls, jbyteArray wasm_input) {
+    (void)cls;
+    if (!wasm_input) { throw_status(env, LINKS_INVALID); return 0; }
+    jsize length = (*env)->GetArrayLength(env, wasm_input);
+    if (length > LINKS_SANDBOX_MAX_MODULE) {
+        throw_status(env, LINKS_INVALID);
+        return 0;
+    }
+    jbyte *wasm = NULL;
+    if (length) {
+        wasm = (*env)->GetByteArrayElements(env, wasm_input, NULL);
+        if (!wasm || (*env)->ExceptionCheck(env)) return 0;
+    }
+    void *runtime = NULL;
+    int32_t status = links_sandbox_create((const uint8_t *)wasm, (size_t)length, &runtime);
+    if (wasm) (*env)->ReleaseByteArrayElements(env, wasm_input, wasm, JNI_ABORT);
+    throw_status(env, status);
+    return status == LINKS_OK ? (jlong)(intptr_t)runtime : 0;
+}
+JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeSandboxBridge_run(
+        JNIEnv *env, jclass cls, jlong runtime_input, jbyteArray input) {
+    (void)cls;
+    if (!runtime_input || !input) { throw_status(env, LINKS_INVALID); return NULL; }
+    jsize input_length = (*env)->GetArrayLength(env, input);
+    if (input_length > LINKS_SANDBOX_MAX_INPUT) {
+        throw_status(env, LINKS_INVALID);
+        return NULL;
+    }
+    jbyte *input_bytes = NULL;
+    if (input_length) {
+        input_bytes = (*env)->GetByteArrayElements(env, input, NULL);
+        if (!input_bytes || (*env)->ExceptionCheck(env)) return NULL;
+    }
+    uint8_t *output = calloc(1, LINKS_SANDBOX_MAX_OUTPUT);
+    if (!output) {
+        if (input_bytes) (*env)->ReleaseByteArrayElements(env, input, input_bytes, JNI_ABORT);
+        throw_status(env, LINKS_PROVIDER);
+        return NULL;
+    }
+    size_t output_length = 0;
+    int32_t status = links_sandbox_run((void *)(intptr_t)runtime_input,
+            (const uint8_t *)input_bytes, (size_t)input_length, output,
+            LINKS_SANDBOX_MAX_OUTPUT, &output_length);
+    if (input_bytes) (*env)->ReleaseByteArrayElements(env, input, input_bytes, JNI_ABORT);
+    if (output_length > LINKS_SANDBOX_MAX_OUTPUT || output_length > 0x7fffffff) {
+        status = LINKS_PROVIDER;
+        output_length = 0;
+    }
+    jbyteArray result = NULL;
+    if (status == LINKS_OK && !(*env)->ExceptionCheck(env)) {
+        result = (*env)->NewByteArray(env, (jsize)output_length);
+        if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)output_length,
+                (const jbyte *)output);
+    }
+    if (status != LINKS_OK) throw_status(env, status);
+    wipe_memory(output, LINKS_SANDBOX_MAX_OUTPUT);
+    free(output);
+    return result;
+}
+JNIEXPORT void JNICALL Java_ai_links_identity_NativeSandboxBridge_destroy(
+        JNIEnv *env, jclass cls, jlong runtime_input) {
+    (void)cls;
+    if (!runtime_input) return;
+    int32_t status = links_sandbox_destroy((void *)(intptr_t)runtime_input);
+    throw_status(env, status);
+}
 JNIEXPORT jbyteArray JNICALL Java_ai_links_identity_NativeIdentityBridge_phoneAuthTranscript(
         JNIEnv *env, jclass cls, jbyteArray phone_input, jbyteArray channel_input,
         jbyteArray device_input, jbyteArray node_input, jbyteArray public_input) {
