@@ -280,7 +280,7 @@ pub trait SFrameKeyHandler: Send {
     ) -> Result<(), CoreError>;
 }
 
-struct RejectSFrameKeyHandler;
+pub(crate) struct RejectSFrameKeyHandler;
 
 #[async_trait]
 impl SFrameKeyHandler for RejectSFrameKeyHandler {

@@ -10,6 +10,8 @@ use crate::{
     envelopes::ClientCore,
     mls::MlsEngine,
     protocol::v1,
+    receive::{SFrameKeyHandler, RejectSFrameKeyHandler},
+    sframe::SFrameEpochKeyUpdate,
     sync::{SyncAdvance, SyncState},
     CoreError,
 };
@@ -102,6 +104,25 @@ impl<C, M, T, I> BackgroundWorker<C, M, T, I> {
         T: BackgroundTransport,
         I: InboxStore,
     {
+        let mut handler = RejectSFrameKeyHandler;
+        self.run_once_with_sframe(&mut handler, now_ms).await
+    }
+
+    /// Drain the mailbox and install MLS-authenticated SFrame controls before
+    /// committing the cursor. The handler must authorize and durably install
+    /// each key, and must accept an exact replay idempotently.
+    pub async fn run_once_with_sframe<H>(
+        &mut self,
+        handler: &mut H,
+        now_ms: u64,
+    ) -> Result<SyncRun, CoreError>
+    where
+        C: EnvelopeCrypto,
+        M: MlsEngine,
+        T: BackgroundTransport,
+        I: InboxStore,
+        H: SFrameKeyHandler,
+    {
         let device_id = self.sync.device_id().to_owned();
         let mut batch = self
             .transport
@@ -114,7 +135,7 @@ impl<C, M, T, I> BackgroundWorker<C, M, T, I> {
 
         loop {
             let high_watermark = batch.high_watermark;
-            let progress = self.process_batch(batch, now_ms).await?;
+            let progress = self.process_batch(batch, handler, now_ms).await?;
             run.batches += 1;
             run.messages += progress.messages;
             run.tombstones += progress.tombstones;
@@ -132,6 +153,7 @@ impl<C, M, T, I> BackgroundWorker<C, M, T, I> {
     async fn process_batch(
         &mut self,
         batch: v1::SyncBatch,
+        handler: &mut impl SFrameKeyHandler,
         now_ms: u64,
     ) -> Result<BatchProgress, CoreError>
     where
@@ -156,6 +178,16 @@ impl<C, M, T, I> BackgroundWorker<C, M, T, I> {
             match item.entry.ok_or(CoreError::InvalidSync)? {
                 v1::queue_item::Entry::Envelope(envelope) => {
                     let message = self.core.open_envelope(&envelope, now_ms)?;
+                    if let Some(update) = SFrameEpochKeyUpdate::from_message(&message)? {
+                        handler
+                            .handle_sframe_epoch_key(
+                                &message.conversation_id,
+                                &message.sender_device_id,
+                                &update,
+                            )
+                            .await?;
+                        continue;
+                    }
                     items.push(DecryptedSyncItem::Message {
                         cursor: item.cursor,
                         message,
