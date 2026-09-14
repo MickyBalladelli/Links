@@ -507,6 +507,7 @@ mod tests {
         let user = v1::User {
             user_id: USER.into(),
             handle: None,
+            verification_badge: None,
             devices: vec![
                 v1::Device {
                     device_id: DEVICE.into(),
@@ -515,6 +516,8 @@ mod tests {
                     mls_credential: vec![2],
                     registered_at_ms: 1,
                     revoked_at_ms: None,
+                    delegation_certificate: None,
+                    delegation_role: 0,
                 },
                 v1::Device {
                     device_id: revoked_device.into(),
@@ -523,6 +526,8 @@ mod tests {
                     mls_credential: vec![4],
                     registered_at_ms: 1,
                     revoked_at_ms: Some(2),
+                    delegation_certificate: None,
+                    delegation_role: 0,
                 },
             ],
         };
