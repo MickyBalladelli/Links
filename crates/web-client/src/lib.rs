@@ -9,6 +9,7 @@ use links_client_core::{
     identity::IdentitySeed,
     pairing::{PairingPayload, PairingRegistrationResponse},
     protocol, CoreError,
+    webrtc::{decode_server_signal, encode_client_signal, WebRtcSignal, WebRtcSignalKind},
 };
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -202,6 +203,53 @@ fn canonical_uuid(value: &str) -> Result<Uuid, CoreError> {
 #[wasm_bindgen]
 pub struct WebSelfSovereignIdentity {
     identity: IdentitySeed,
+}
+
+/// Server-delivered SDP/ICE signal decoded by the shared Rust protocol.
+/// Signaling text is exposed to the WebRTC host, never to the Links server
+/// application layer or the encrypted media path.
+#[wasm_bindgen]
+pub struct WebRtcSignalDelivery {
+    inner: links_client_core::webrtc::WebRtcSignalDelivery,
+}
+
+#[wasm_bindgen]
+impl WebRtcSignalDelivery {
+    pub fn request_id(&self) -> String {
+        self.inner.request_id.clone()
+    }
+
+    pub fn sender_device_id(&self) -> String {
+        self.inner.sender_device_id.to_string()
+    }
+
+    pub fn session_id(&self) -> String {
+        self.inner.signal.session_id.to_string()
+    }
+
+    pub fn target_device_id(&self) -> String {
+        self.inner.signal.target_device_id.to_string()
+    }
+
+    pub fn kind(&self) -> u8 {
+        match self.inner.signal.kind {
+            WebRtcSignalKind::Offer => 1,
+            WebRtcSignalKind::Answer => 2,
+            WebRtcSignalKind::IceCandidate => 3,
+        }
+    }
+
+    pub fn sdp(&self) -> String {
+        self.inner.signal.sdp.clone()
+    }
+
+    pub fn sdp_mid(&self) -> String {
+        self.inner.signal.sdp_mid.clone().unwrap_or_default()
+    }
+
+    pub fn sdp_mline_index(&self) -> u32 {
+        self.inner.signal.sdp_mline_index.unwrap_or_default()
+    }
 }
 
 #[wasm_bindgen]
@@ -409,5 +457,43 @@ impl WebClientIdentity {
 
     pub fn mls_node_id(&self) -> String {
         self.mls_node_id.to_string()
+    }
+
+    /// Encode one authenticated-device WebRTC offer, answer, or ICE signal.
+    /// The access token remains in the normal Hello frame, not in SDP.
+    pub fn encode_webrtc_signal(
+        &self,
+        request_id: &str,
+        session_id: &str,
+        target_device_id: &str,
+        kind: u8,
+        sdp: &str,
+        sdp_mid: &str,
+        sdp_mline_index: u32,
+    ) -> Result<Vec<u8>, JsValue> {
+        let kind = match kind {
+            1 => WebRtcSignalKind::Offer,
+            2 => WebRtcSignalKind::Answer,
+            3 => WebRtcSignalKind::IceCandidate,
+            _ => return Err(js_error(CoreError::Authentication)),
+        };
+        let signal = WebRtcSignal::new(
+            canonical_uuid(session_id).map_err(js_error)?,
+            canonical_uuid(target_device_id).map_err(js_error)?,
+            kind,
+            sdp.to_owned(),
+            (!sdp_mid.is_empty()).then_some(sdp_mid.to_owned()),
+            (sdp_mline_index != 0).then_some(sdp_mline_index),
+        )
+        .map_err(js_error)?;
+        encode_client_signal(request_id, &signal).map_err(js_error)
+    }
+
+    /// Decode one server-delivered WebRTC signal. Non-signaling frames are
+    /// rejected so the host must dispatch frames by body before calling this.
+    pub fn decode_webrtc_signal(&self, frame: &[u8]) -> Result<WebRtcSignalDelivery, JsValue> {
+        decode_server_signal(frame)
+            .map(|inner| WebRtcSignalDelivery { inner })
+            .map_err(js_error)
     }
 }

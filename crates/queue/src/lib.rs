@@ -5,7 +5,7 @@
 //! the chosen NATS client stay in the deployment adapter. It never decrypts or
 //! interprets sealed message bytes.
 use async_trait::async_trait;
-use links_gateway::{ForwardedEnvelope, GatewayError, RegionBus};
+use links_gateway::{ForwardedEnvelope, ForwardedWebRtcSignal, GatewayError, RegionBus};
 use links_protocol::{self as protocol, v1};
 use prost::Message;
 use sha2::{Digest, Sha256};
@@ -14,6 +14,7 @@ use thiserror::Error;
 
 pub const DELIVERY_SUBJECT_PREFIX: &str = "links.v1.gateway";
 pub const BROADCAST_SUBJECT_PREFIX: &str = "links.v1.broadcast";
+pub const SIGNAL_SUBJECT_PREFIX: &str = "links.v1.webrtc";
 
 #[derive(Debug, Error)]
 pub enum QueueError {
@@ -85,12 +86,92 @@ pub fn broadcast_subject(conversation_id: &str) -> Result<String, QueueError> {
     Ok(format!("{BROADCAST_SUBJECT_PREFIX}.{token}.publish"))
 }
 
+/// Exact subject for transient WebRTC signaling to one gateway.
+pub fn signal_subject(gateway_id: &str) -> Result<String, QueueError> {
+    protocol::validate_gateway_locator(gateway_id)
+        .map_err(|_| QueueError::Invalid("signal subject"))?;
+    Ok(format!(
+        "{SIGNAL_SUBJECT_PREFIX}.{}.deliver",
+        subject_token(gateway_id)
+    ))
+}
+
 /// Queue representation of a cross-region delivery. The serialized envelope
 /// is carried byte-for-byte and is not made available as application fields.
 pub struct QueueDelivery {
     source_gateway_id: String,
     destination_gateway_id: String,
     delivery: ForwardedEnvelope,
+}
+
+/// Cross-region WebRTC signaling wrapper. It carries SDP/ICE only while the
+/// target device has a live route and is never stored in the mailbox.
+pub struct QueueWebRtcSignal {
+    source_gateway_id: String,
+    destination_gateway_id: String,
+    delivery: v1::WebRtcSignalDelivery,
+}
+
+impl QueueWebRtcSignal {
+    pub fn new(
+        source_gateway_id: String,
+        destination_gateway_id: String,
+        delivery: v1::WebRtcSignalDelivery,
+    ) -> Result<Self, QueueError> {
+        let message = v1::GatewayWebRtcSignal {
+            protocol_version: protocol::VERSION,
+            source_gateway_id: source_gateway_id.clone(),
+            destination_gateway_id: destination_gateway_id.clone(),
+            delivery: Some(delivery.clone()),
+        };
+        protocol::validate_gateway_webrtc_signal(&message)?;
+        Ok(Self {
+            source_gateway_id,
+            destination_gateway_id,
+            delivery,
+        })
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, QueueError> {
+        let message = v1::GatewayWebRtcSignal {
+            protocol_version: protocol::VERSION,
+            source_gateway_id: self.source_gateway_id.clone(),
+            destination_gateway_id: self.destination_gateway_id.clone(),
+            delivery: Some(self.delivery.clone()),
+        };
+        protocol::validate_gateway_webrtc_signal(&message)?;
+        Ok(message.encode_to_vec())
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, QueueError> {
+        if bytes.is_empty() || bytes.len() > protocol::MAX_QUEUE_MESSAGE_BYTES {
+            return Err(QueueError::Invalid("signal size"));
+        }
+        let message = v1::GatewayWebRtcSignal::decode(bytes)
+            .map_err(|_| QueueError::Protocol(protocol::ProtocolError::Malformed))?;
+        let delivery = message
+            .delivery
+            .clone()
+            .ok_or(QueueError::Invalid("signal delivery"))?;
+        protocol::validate_gateway_webrtc_signal(&message)?;
+        Ok(Self {
+            source_gateway_id: message.source_gateway_id,
+            destination_gateway_id: message.destination_gateway_id,
+            delivery,
+        })
+    }
+
+    pub fn into_forwarded_for(
+        self,
+        destination_gateway_id: &str,
+    ) -> Result<ForwardedWebRtcSignal, QueueError> {
+        if self.destination_gateway_id != destination_gateway_id {
+            return Err(QueueError::WrongDestination);
+        }
+        Ok(ForwardedWebRtcSignal {
+            delivery: self.delivery,
+        })
+    }
 }
 
 impl QueueDelivery {
@@ -169,6 +250,13 @@ impl QueueDelivery {
 #[async_trait]
 pub trait NatsPublisher: Send + Sync {
     async fn publish_durable(&self, subject: &str, payload: Vec<u8>) -> Result<(), QueueError>;
+
+    /// Publish without JetStream persistence for live WebRTC signaling. The
+    /// default keeps simple local adapters source-compatible; production NATS
+    /// adapters must use a core NATS subject for this method.
+    async fn publish_transient(&self, subject: &str, payload: Vec<u8>) -> Result<(), QueueError> {
+        self.publish_durable(subject, payload).await
+    }
 }
 
 /// NATS JetStream adapter for broadcast posts. It validates only the public
@@ -257,6 +345,23 @@ where
             .await
             .map_err(GatewayError::from)
     }
+
+    async fn forward_signal(
+        &self,
+        destination_gateway_id: &str,
+        signal: ForwardedWebRtcSignal,
+    ) -> Result<(), GatewayError> {
+        let subject = signal_subject(destination_gateway_id)?;
+        let queued = QueueWebRtcSignal::new(
+            self.source_gateway_id.clone(),
+            destination_gateway_id.to_owned(),
+            signal.delivery,
+        )?;
+        self.publisher
+            .publish_transient(&subject, queued.encode()?)
+            .await
+            .map_err(GatewayError::from)
+    }
 }
 
 /// Decode one NATS message before handing it to `Gateway::handle_forwarded`.
@@ -267,4 +372,14 @@ pub fn decode_for_gateway(
     destination_gateway_id: &str,
 ) -> Result<ForwardedEnvelope, QueueError> {
     QueueDelivery::decode(payload)?.into_forwarded_for(destination_gateway_id)
+}
+
+/// Decode a transient signaling message before handing it to
+/// `Gateway::handle_forwarded_signal`. The NATS consumer must not retry a
+/// malformed or misrouted signal forever.
+pub fn decode_signal_for_gateway(
+    payload: &[u8],
+    destination_gateway_id: &str,
+) -> Result<ForwardedWebRtcSignal, QueueError> {
+    QueueWebRtcSignal::decode(payload)?.into_forwarded_for(destination_gateway_id)
 }

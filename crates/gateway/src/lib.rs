@@ -129,6 +129,11 @@ pub struct ForwardedEnvelope {
     pub cursor: u64,
 }
 
+#[derive(Clone)]
+pub struct ForwardedWebRtcSignal {
+    pub delivery: v1::WebRtcSignalDelivery,
+}
+
 #[async_trait]
 pub trait RegionBus: Send + Sync {
     async fn forward(
@@ -136,6 +141,18 @@ pub trait RegionBus: Send + Sync {
         destination_gateway_id: &str,
         delivery: ForwardedEnvelope,
     ) -> Result<(), GatewayError>;
+
+    /// Forward transient SDP/ICE signaling. Unlike envelopes, signals are
+    /// never appended to the durable mailbox and are dropped if the peer is
+    /// offline.
+    async fn forward_signal(
+        &self,
+        destination_gateway_id: &str,
+        signal: ForwardedWebRtcSignal,
+    ) -> Result<(), GatewayError> {
+        let _ = (destination_gateway_id, signal);
+        Err(GatewayError::Unavailable)
+    }
 }
 
 #[derive(Clone)]
@@ -218,6 +235,10 @@ pub enum GatewayAction {
     LocalDelivery {
         lease: SessionLease,
         delivery: ForwardedEnvelope,
+    },
+    LocalWebRtcSignal {
+        lease: SessionLease,
+        delivery: v1::WebRtcSignalDelivery,
     },
 }
 
@@ -409,6 +430,38 @@ where
         }
     }
 
+    /// Deliver transient SDP/ICE signaling to a currently connected peer.
+    /// Signaling is intentionally not queued: the WebRTC session retries or
+    /// fails through its own timeout when the target is offline.
+    pub async fn handle_forwarded_signal(
+        &self,
+        forwarded: ForwardedWebRtcSignal,
+        now_ms: u64,
+    ) -> Result<Option<GatewayAction>, GatewayError> {
+        protocol::validate_webrtc_signal_delivery(&forwarded.delivery)?;
+        let target_device_id = forwarded
+            .delivery
+            .signal
+            .as_ref()
+            .ok_or(GatewayError::Invalid)?
+            .target_device_id
+            .clone();
+        let Some(lease) = self.state.route(&target_device_id, now_ms).await? else {
+            return Ok(None);
+        };
+        if lease.gateway_id == self.config.gateway_id {
+            Ok(Some(GatewayAction::LocalWebRtcSignal {
+                lease,
+                delivery: forwarded.delivery,
+            }))
+        } else {
+            self.bus
+                .forward_signal(&lease.gateway_id, forwarded)
+                .await?;
+            Ok(None)
+        }
+    }
+
     /// Process one already-decoded frame. The socket adapter sends Server
     /// actions and writes LocalDelivery to the local socket. A failed forward
     /// or push leaves the durable mailbox entry intact for replay.
@@ -495,6 +548,30 @@ where
                 session.last_ack_cursor = ack.through_cursor;
                 Ok(Vec::new())
             }
+            v1::client_frame::Body::WebRtcSignal(signal) => {
+                let target_device_id = signal.target_device_id.clone();
+                let delivery = v1::WebRtcSignalDelivery {
+                    request_id,
+                    sender_device_id: session.device_id.to_string(),
+                    signal: Some(signal),
+                };
+                protocol::validate_webrtc_signal_delivery(&delivery)?;
+                let Some(lease) = self.state.route(&target_device_id, now_ms).await? else {
+                    return Ok(vec![temporary_unavailable(delivery.request_id)]);
+                };
+                let forwarded = ForwardedWebRtcSignal { delivery };
+                if lease.gateway_id == self.config.gateway_id {
+                    Ok(vec![GatewayAction::LocalWebRtcSignal {
+                        lease,
+                        delivery: forwarded.delivery,
+                    }])
+                } else {
+                    self.bus
+                        .forward_signal(&lease.gateway_id, forwarded)
+                        .await?;
+                    Ok(Vec::new())
+                }
+            }
         }
     }
 }
@@ -512,6 +589,9 @@ pub fn encode_server_frame(frame: &v1::ServerFrame) -> Result<Vec<u8>, GatewayEr
     protocol::validate_id(&frame.request_id)?;
     if let Some(v1::server_frame::Body::CompressedBatch(batch)) = frame.body.as_ref() {
         protocol::decompress_sync_batch(batch)?;
+    }
+    if let Some(v1::server_frame::Body::WebRtcSignal(delivery)) = frame.body.as_ref() {
+        protocol::validate_webrtc_signal_delivery(delivery)?;
     }
     if frame.encoded_len() > protocol::MAX_FRAME_BYTES {
         return Err(GatewayError::Invalid);
@@ -558,6 +638,9 @@ fn validate_request(frame: &v1::ClientFrame) -> Result<(), GatewayError> {
                 return Err(GatewayError::Invalid);
             }
         }
+        v1::client_frame::Body::WebRtcSignal(signal) => {
+            protocol::validate_webrtc_signal(signal)?;
+        }
     }
     Ok(())
 }
@@ -569,6 +652,16 @@ fn accepted(request_id: String, envelope: &v1::Envelope) -> v1::ServerFrame {
             envelope_id: envelope.envelope_id.clone(),
         })),
     }
+}
+
+fn temporary_unavailable(request_id: String) -> GatewayAction {
+    GatewayAction::Server(v1::ServerFrame {
+        request_id,
+        body: Some(v1::server_frame::Body::Error(v1::ProtocolError {
+            code: 6,
+            retry_after_ms: 1_000,
+        })),
+    })
 }
 
 fn sync_batch_action(
