@@ -18,10 +18,244 @@ pub const SANDBOX_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 pub const SANDBOX_MAX_INPUT_BYTES: usize = 64 * 1024;
 pub const SANDBOX_MAX_OUTPUT_BYTES: usize = 256 * 1024;
 pub const SANDBOX_MAX_FUEL: u64 = 5_000_000;
+pub const SANDBOX_MAX_NETWORK_RULES: usize = 8;
+pub const SANDBOX_MAX_CRYPTO_GRANTS: usize = 8;
 
 const INPUT_LENGTH_IMPORT: &str = "input_len";
 const INPUT_READ_IMPORT: &str = "input_read";
 const OUTPUT_WRITE_IMPORT: &str = "output_write";
+const NETWORK_REQUEST_IMPORT: &str = "network_request";
+const CRYPTO_OPERATION_IMPORT: &str = "crypto_operation";
+
+const NETWORK_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SandboxCryptoOperation {
+    Hash,
+    Hmac,
+    Sign,
+}
+
+impl SandboxCryptoOperation {
+    fn from_code(code: i32) -> Option<Self> {
+        match code {
+            1 => Some(Self::Hash),
+            2 => Some(Self::Hmac),
+            3 => Some(Self::Sign),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxNetworkRule {
+    host: String,
+    methods: Vec<String>,
+    max_request_bytes: usize,
+    max_response_bytes: usize,
+}
+
+impl SandboxNetworkRule {
+    pub fn new(
+        host: impl Into<String>,
+        methods: impl IntoIterator<Item = impl Into<String>>,
+        max_request_bytes: usize,
+        max_response_bytes: usize,
+    ) -> Result<Self, SandboxError> {
+        let host = host.into().to_ascii_lowercase();
+        let methods = methods
+            .into_iter()
+            .map(|method| method.into().to_ascii_uppercase())
+            .collect::<Vec<_>>();
+        if !valid_network_host(&host)
+            || methods.is_empty()
+            || methods.len() > NETWORK_METHODS.len()
+            || methods
+                .iter()
+                .any(|method| !NETWORK_METHODS.contains(&method.as_str()))
+            || max_request_bytes > SANDBOX_MAX_INPUT_BYTES
+            || max_response_bytes > SANDBOX_MAX_OUTPUT_BYTES
+        {
+            return Err(SandboxError::InvalidPermission);
+        }
+        Ok(Self {
+            host,
+            methods,
+            max_request_bytes,
+            max_response_bytes,
+        })
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn methods(&self) -> &[String] {
+        &self.methods
+    }
+
+    fn allows(&self, method: &str, request_bytes: usize) -> bool {
+        self.methods.iter().any(|allowed| allowed == method)
+            && request_bytes <= self.max_request_bytes
+    }
+}
+
+/// Opaque grant for one or more key operations. The token identifies a key
+/// inside the trusted host; it is not the key and cannot be used to extract it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxCryptoGrant {
+    capability: [u8; 32],
+    operations: Vec<SandboxCryptoOperation>,
+    max_input_bytes: usize,
+    max_output_bytes: usize,
+}
+
+impl SandboxCryptoGrant {
+    pub fn new(
+        capability: [u8; 32],
+        operations: impl IntoIterator<Item = SandboxCryptoOperation>,
+        max_input_bytes: usize,
+        max_output_bytes: usize,
+    ) -> Result<Self, SandboxError> {
+        let operations = operations.into_iter().collect::<Vec<_>>();
+        if capability.iter().all(|byte| *byte == 0)
+            || operations.is_empty()
+            || operations.len() > 3
+            || max_input_bytes > SANDBOX_MAX_INPUT_BYTES
+            || max_output_bytes > SANDBOX_MAX_OUTPUT_BYTES
+        {
+            return Err(SandboxError::InvalidPermission);
+        }
+        Ok(Self {
+            capability,
+            operations,
+            max_input_bytes,
+            max_output_bytes,
+        })
+    }
+
+    pub fn capability(&self) -> [u8; 32] {
+        self.capability
+    }
+
+    pub fn operations(&self) -> &[SandboxCryptoOperation] {
+        &self.operations
+    }
+
+    fn allows(&self, operation: SandboxCryptoOperation, input_bytes: usize) -> bool {
+        self.operations.contains(&operation) && input_bytes <= self.max_input_bytes
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SandboxPermissions {
+    network: Vec<SandboxNetworkRule>,
+    crypto: Vec<SandboxCryptoGrant>,
+}
+
+impl SandboxPermissions {
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    pub fn grant_network(&mut self, rule: SandboxNetworkRule) -> Result<(), SandboxError> {
+        if self.network.len() >= SANDBOX_MAX_NETWORK_RULES
+            || self.network.iter().any(|current| current.host == rule.host)
+        {
+            return Err(SandboxError::InvalidPermission);
+        }
+        self.network.push(rule);
+        Ok(())
+    }
+
+    pub fn grant_crypto(&mut self, grant: SandboxCryptoGrant) -> Result<(), SandboxError> {
+        if self.crypto.len() >= SANDBOX_MAX_CRYPTO_GRANTS
+            || self
+                .crypto
+                .iter()
+                .any(|current| current.capability == grant.capability)
+        {
+            return Err(SandboxError::InvalidPermission);
+        }
+        self.crypto.push(grant);
+        Ok(())
+    }
+
+    pub fn network_rules(&self) -> &[SandboxNetworkRule] {
+        &self.network
+    }
+
+    pub fn crypto_grants(&self) -> &[SandboxCryptoGrant] {
+        &self.crypto
+    }
+
+    fn network_rule(&self, host: &str, method: &str, request_bytes: usize) -> Option<&SandboxNetworkRule> {
+        self.network
+            .iter()
+            .find(|rule| rule.host == host && rule.allows(method, request_bytes))
+    }
+
+    fn crypto_grant(
+        &self,
+        capability: &[u8; 32],
+        operation: SandboxCryptoOperation,
+        input_bytes: usize,
+    ) -> Option<&SandboxCryptoGrant> {
+        self.crypto.iter().find(|grant| {
+            &grant.capability == capability && grant.allows(operation, input_bytes)
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxNetworkRequest {
+    pub url: String,
+    pub method: String,
+    pub body: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxNetworkResponse {
+    pub body: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxCryptoRequest {
+    pub capability: [u8; 32],
+    pub operation: SandboxCryptoOperation,
+    pub input: Vec<u8>,
+}
+
+/// Trusted host mediator. Implementations perform the actual network call or
+/// key operation. The sandbox gets only validated request data and results.
+pub trait SandboxHost: Send {
+    fn network_request(
+        &mut self,
+        request: SandboxNetworkRequest,
+    ) -> Result<SandboxNetworkResponse, SandboxError>;
+    fn crypto_operation(
+        &mut self,
+        request: SandboxCryptoRequest,
+    ) -> Result<Vec<u8>, SandboxError>;
+}
+
+struct DenyAllHost;
+
+impl SandboxHost for DenyAllHost {
+    fn network_request(
+        &mut self,
+        _request: SandboxNetworkRequest,
+    ) -> Result<SandboxNetworkResponse, SandboxError> {
+        Err(SandboxError::PermissionDenied)
+    }
+
+    fn crypto_operation(
+        &mut self,
+        _request: SandboxCryptoRequest,
+    ) -> Result<Vec<u8>, SandboxError> {
+        Err(SandboxError::PermissionDenied)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SandboxLimits {
