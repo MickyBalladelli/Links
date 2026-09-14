@@ -1,14 +1,15 @@
 //! Bounded native WASM runtime for client-side mini-apps.
 //!
-//! Only the `links` input/output ABI is available. There is deliberately no
+//! Only the `links` ABI is available. Input/output is always present; network
+//! and crypto calls require explicit host grants. There is deliberately no
 //! WASI, filesystem, socket, clock, randomness, identity, MLS, or key import.
 //! Each invocation gets a fresh store, bounded linear memory, and finite fuel.
 
 use std::cmp::min;
 use thiserror::Error;
 use wasmi::{
-    Caller, Config, Engine, Extern, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
-    TrapCode,
+    errors::HostError, Caller, Config, Engine, Extern, Linker, Module, Store, StoreLimits,
+    StoreLimitsBuilder, TrapCode,
 };
 
 pub const SANDBOX_ENTRYPOINT: &str = "links_run";
@@ -94,6 +95,14 @@ impl SandboxNetworkRule {
         &self.methods
     }
 
+    pub fn max_request_bytes(&self) -> usize {
+        self.max_request_bytes
+    }
+
+    pub fn max_response_bytes(&self) -> usize {
+        self.max_response_bytes
+    }
+
     fn allows(&self, method: &str, request_bytes: usize) -> bool {
         self.methods.iter().any(|allowed| allowed == method)
             && request_bytes <= self.max_request_bytes
@@ -140,6 +149,14 @@ impl SandboxCryptoGrant {
 
     pub fn operations(&self) -> &[SandboxCryptoOperation] {
         &self.operations
+    }
+
+    pub fn max_input_bytes(&self) -> usize {
+        self.max_input_bytes
+    }
+
+    pub fn max_output_bytes(&self) -> usize {
+        self.max_output_bytes
     }
 
     fn allows(&self, operation: SandboxCryptoOperation, input_bytes: usize) -> bool {
@@ -295,7 +312,7 @@ impl SandboxLimits {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum SandboxError {
     #[error("invalid sandbox limits")]
     InvalidLimits,
@@ -337,9 +354,21 @@ pub enum SandboxError {
     GuestRejected,
 }
 
+#[derive(Clone, Debug)]
+struct SandboxHostError(SandboxError);
+
+impl std::fmt::Display for SandboxHostError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl HostError for SandboxHostError {}
+
 struct HostState<'a> {
     input: Vec<u8>,
     output: Vec<u8>,
+    max_input_bytes: usize,
     max_output_bytes: usize,
     permissions: SandboxPermissions,
     host: &'a mut dyn SandboxHost,
@@ -406,6 +435,20 @@ impl SandboxRuntime {
     }
 
     pub fn run(&self, input: &[u8]) -> Result<SandboxOutput, SandboxError> {
+        let permissions = SandboxPermissions::deny_all();
+        let mut host = DenyAllHost;
+        self.run_with_host(input, &permissions, &mut host)
+    }
+
+    /// Run a mini-app with explicit, host-mediated capabilities. Network rules
+    /// are exact HTTPS host and method matches. Crypto grants carry opaque key
+    /// handles only; key material stays inside the trusted host.
+    pub fn run_with_host(
+        &self,
+        input: &[u8],
+        permissions: &SandboxPermissions,
+        host: &mut dyn SandboxHost,
+    ) -> Result<SandboxOutput, SandboxError> {
         if input.len() > self.limits.max_input_bytes {
             return Err(SandboxError::InputTooLarge);
         }
@@ -422,7 +465,10 @@ impl SandboxRuntime {
             HostState {
                 input: input.to_vec(),
                 output: Vec::with_capacity(self.limits.max_output_bytes),
+                max_input_bytes: self.limits.max_input_bytes,
                 max_output_bytes: self.limits.max_output_bytes,
+                permissions: permissions.clone(),
+                host,
                 limits: store_limits,
             },
         );
@@ -455,6 +501,58 @@ impl SandboxRuntime {
                 },
             )
             .map_err(|_| SandboxError::ExecutionFailed)?;
+        linker
+            .func_wrap(
+                "links",
+                NETWORK_REQUEST_IMPORT,
+                |mut caller: Caller<'_, HostState>,
+                 url_pointer: i32,
+                 url_length: i32,
+                 method_pointer: i32,
+                 method_length: i32,
+                 body_pointer: i32,
+                 body_length: i32,
+                 response_destination: i32,
+                 response_maximum: i32| {
+                    network_request(
+                        &mut caller,
+                        url_pointer,
+                        url_length,
+                        method_pointer,
+                        method_length,
+                        body_pointer,
+                        body_length,
+                        response_destination,
+                        response_maximum,
+                    )
+                },
+            )
+            .map_err(|_| SandboxError::ExecutionFailed)?;
+        linker
+            .func_wrap(
+                "links",
+                CRYPTO_OPERATION_IMPORT,
+                |mut caller: Caller<'_, HostState>,
+                 capability_pointer: i32,
+                 capability_length: i32,
+                 operation_code: i32,
+                 input_pointer: i32,
+                 input_length: i32,
+                 output_destination: i32,
+                 output_maximum: i32| {
+                    crypto_operation(
+                        &mut caller,
+                        capability_pointer,
+                        capability_length,
+                        operation_code,
+                        input_pointer,
+                        input_length,
+                        output_destination,
+                        output_maximum,
+                    )
+                },
+            )
+            .map_err(|_| SandboxError::ExecutionFailed)?;
 
         let instance = linker
             .instantiate_and_start(&mut store, &self.module)
@@ -482,7 +580,7 @@ pub struct SandboxOutput {
 }
 
 fn read_input(
-    caller: &mut Caller<'_, HostState>,
+    caller: &mut Caller<'_, HostState<'_>>,
     destination: i32,
     maximum: i32,
 ) -> Result<i32, wasmi::Error> {
@@ -502,7 +600,7 @@ fn read_input(
 }
 
 fn write_output(
-    caller: &mut Caller<'_, HostState>,
+    caller: &mut Caller<'_, HostState<'_>>,
     source: i32,
     length: i32,
 ) -> Result<i32, wasmi::Error> {
@@ -530,7 +628,208 @@ fn write_output(
     Ok(length as i32)
 }
 
+fn read_guest_bytes(
+    caller: &Caller<'_, HostState<'_>>,
+    pointer: i32,
+    length: i32,
+    maximum: usize,
+) -> Result<Vec<u8>, wasmi::Error> {
+    if pointer < 0 || length < 0 || length as usize > maximum {
+        return Err(wasmi::Error::new("invalid guest buffer"));
+    }
+    let memory = caller
+        .get_export(SANDBOX_MEMORY_EXPORT)
+        .and_then(Extern::into_memory)
+        .ok_or_else(|| wasmi::Error::new("memory export missing"))?;
+    let mut bytes = vec![0u8; length as usize];
+    memory
+        .read(caller, pointer as usize, &mut bytes)
+        .map_err(|_| wasmi::Error::new("guest buffer out of bounds"))?;
+    Ok(bytes)
+}
+
+fn network_request(
+    caller: &mut Caller<'_, HostState<'_>>,
+    url_pointer: i32,
+    url_length: i32,
+    method_pointer: i32,
+    method_length: i32,
+    body_pointer: i32,
+    body_length: i32,
+    response_destination: i32,
+    response_maximum: i32,
+) -> Result<i32, wasmi::Error> {
+    if response_destination < 0 || response_maximum < 0 {
+        return Err(wasmi::Error::new("invalid network response buffer"));
+    }
+    let url_bytes = read_guest_bytes(caller, url_pointer, url_length, 2048)?;
+    let method_bytes = read_guest_bytes(caller, method_pointer, method_length, 16)?;
+    let body = read_guest_bytes(
+        caller,
+        body_pointer,
+        body_length,
+        caller.data().max_input_bytes,
+    )?;
+    let (url, host) = parse_network_url(&url_bytes).map_err(abi_error)?;
+    let method = parse_network_method(&method_bytes).map_err(abi_error)?;
+    let response_limit = {
+        let state = caller.data();
+        state
+            .permissions
+            .network_rule(&host, &method, body.len())
+            .map(|rule| rule.max_response_bytes)
+            .ok_or_else(|| abi_error(SandboxError::PermissionDenied))?
+    };
+    let response_maximum = response_maximum as usize;
+    if response_maximum > caller.data().max_output_bytes
+        || response_maximum > response_limit
+    {
+        return Err(wasmi::Error::new("network response limit exceeds grant"));
+    }
+    let response = caller
+        .data_mut()
+        .host
+        .network_request(SandboxNetworkRequest { url, method, body })
+        .map_err(|_| abi_error(SandboxError::HostCallFailed))?;
+    if response.body.len() > response_limit
+        || response.body.len() > response_maximum
+        || response.body.len() > caller.data().max_output_bytes
+    {
+        return Err(abi_error(SandboxError::NetworkResponseTooLarge));
+    }
+    let length = response.body.len();
+    let memory = caller
+        .get_export(SANDBOX_MEMORY_EXPORT)
+        .and_then(Extern::into_memory)
+        .ok_or_else(|| wasmi::Error::new("memory export missing"))?;
+    memory
+        .write(caller, response_destination as usize, &response.body)
+        .map_err(|_| wasmi::Error::new("network response buffer out of bounds"))?;
+    Ok(length as i32)
+}
+
+fn crypto_operation(
+    caller: &mut Caller<'_, HostState<'_>>,
+    capability_pointer: i32,
+    capability_length: i32,
+    operation_code: i32,
+    input_pointer: i32,
+    input_length: i32,
+    output_destination: i32,
+    output_maximum: i32,
+) -> Result<i32, wasmi::Error> {
+    if output_destination < 0 || output_maximum < 0 || capability_length != 32 {
+        return Err(abi_error(SandboxError::InvalidCryptoRequest));
+    }
+    let operation = SandboxCryptoOperation::from_code(operation_code)
+        .ok_or_else(|| abi_error(SandboxError::InvalidCryptoRequest))?;
+    let capability_bytes = read_guest_bytes(caller, capability_pointer, capability_length, 32)?;
+    let mut capability = [0u8; 32];
+    capability.copy_from_slice(&capability_bytes);
+    let input = read_guest_bytes(
+        caller,
+        input_pointer,
+        input_length,
+        caller.data().max_input_bytes,
+    )?;
+    let output_limit = {
+        let state = caller.data();
+        state
+            .permissions
+            .crypto_grant(&capability, operation, input.len())
+            .map(|grant| grant.max_output_bytes)
+            .ok_or_else(|| abi_error(SandboxError::PermissionDenied))?
+    };
+    let output_maximum = output_maximum as usize;
+    if output_maximum > caller.data().max_output_bytes || output_maximum > output_limit {
+        return Err(wasmi::Error::new("crypto response limit exceeds grant"));
+    }
+    let response = caller
+        .data_mut()
+        .host
+        .crypto_operation(SandboxCryptoRequest {
+            capability,
+            operation,
+            input,
+        })
+        .map_err(|_| abi_error(SandboxError::HostCallFailed))?;
+    capability.fill(0);
+    if response.len() > output_limit
+        || response.len() > output_maximum
+        || response.len() > caller.data().max_output_bytes
+    {
+        return Err(abi_error(SandboxError::CryptoResponseTooLarge));
+    }
+    let length = response.len();
+    let memory = caller
+        .get_export(SANDBOX_MEMORY_EXPORT)
+        .and_then(Extern::into_memory)
+        .ok_or_else(|| wasmi::Error::new("memory export missing"))?;
+    memory
+        .write(caller, output_destination as usize, &response)
+        .map_err(|_| wasmi::Error::new("crypto response buffer out of bounds"))?;
+    Ok(length as i32)
+}
+
+fn parse_network_url(bytes: &[u8]) -> Result<(String, String), SandboxError> {
+    let url = std::str::from_utf8(bytes).map_err(|_| SandboxError::InvalidNetworkRequest)?;
+    if !url.starts_with("https://")
+        || url.len() > 2048
+        || url
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err(SandboxError::InvalidNetworkRequest);
+    }
+    let remainder = &url[8..];
+    let authority_length = remainder
+        .find(|character| matches!(character, '/' | '?' | '#'))
+        .unwrap_or(remainder.len());
+    let authority = &remainder[..authority_length];
+    if authority.is_empty() || authority.contains('@') || authority.contains(':') {
+        return Err(SandboxError::InvalidNetworkRequest);
+    }
+    let host = authority.to_ascii_lowercase();
+    if !valid_network_host(&host) {
+        return Err(SandboxError::InvalidNetworkRequest);
+    }
+    Ok((url.to_owned(), host))
+}
+
+fn parse_network_method(bytes: &[u8]) -> Result<String, SandboxError> {
+    let method = std::str::from_utf8(bytes)
+        .map_err(|_| SandboxError::InvalidNetworkRequest)?
+        .to_ascii_uppercase();
+    if NETWORK_METHODS.contains(&method.as_str()) {
+        Ok(method)
+    } else {
+        Err(SandboxError::InvalidNetworkRequest)
+    }
+}
+
+fn valid_network_host(host: &str) -> bool {
+    if host.is_empty() || host.len() > 253 || host.starts_with('.') || host.ends_with('.') {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
+}
+
+fn abi_error(error: SandboxError) -> wasmi::Error {
+    wasmi::Error::host(SandboxHostError(error))
+}
+
 fn map_execution_error(error: wasmi::Error) -> SandboxError {
+    if let Some(host_error) = error.downcast_ref::<SandboxHostError>() {
+        return host_error.0.clone();
+    }
     if error.as_trap_code() == Some(TrapCode::OutOfFuel) {
         SandboxError::FuelExhausted
     } else {

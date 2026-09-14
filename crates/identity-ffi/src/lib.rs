@@ -691,8 +691,9 @@ pub unsafe extern "C" fn links_sandbox_create(
 }
 
 /// Run one mini-app invocation with fresh guest memory and bounded input and
-/// output. The guest ABI uses `links.input_len`, `links.input_read`, and
-/// `links.output_write`; all other imports are rejected at creation.
+/// output. The guest ABI uses the input/output imports. Network and crypto
+/// imports are accepted by the shared runtime but remain deny-all through this
+/// compatibility FFI until a native host mediator is supplied.
 /// # Safety
 /// `runtime` is a live handle from `links_sandbox_create`. Input and output
 /// buffers obey the declared lengths and do not overlap.
@@ -752,7 +753,14 @@ fn sandbox_status(error: SandboxError) -> i32 {
         | SandboxError::MissingMemory
         | SandboxError::InputTooLarge
         | SandboxError::OutputTooLarge
-        | SandboxError::HostViolation => INVALID,
+        | SandboxError::HostViolation
+        | SandboxError::InvalidPermission
+        | SandboxError::PermissionDenied
+        | SandboxError::InvalidNetworkRequest
+        | SandboxError::InvalidCryptoRequest
+        | SandboxError::NetworkResponseTooLarge
+        | SandboxError::CryptoResponseTooLarge => INVALID,
+        SandboxError::HostCallFailed => PROVIDER,
         SandboxError::FuelExhausted
         | SandboxError::ExecutionFailed
         | SandboxError::GuestRejected => PROVIDER,

@@ -20,11 +20,22 @@ The only allowed imports are functions in the `links` namespace:
 links.input_len() -> i32
 links.input_read(destination: i32, maximum: i32) -> i32
 links.output_write(source: i32, length: i32) -> i32
+links.network_request(
+    url_pointer: i32, url_length: i32,
+    method_pointer: i32, method_length: i32,
+    body_pointer: i32, body_length: i32,
+    response_destination: i32, response_maximum: i32) -> i32
+links.crypto_operation(
+    capability_pointer: i32, capability_length: i32,
+    operation: i32, input_pointer: i32, input_length: i32,
+    output_destination: i32, output_maximum: i32) -> i32
 ```
 
 The host gives each invocation fresh linear memory and input. The guest reads
 the request with `input_read`, writes its response with `output_write`, and
 returns zero from `links_run` on success. Non-zero status traps the invocation.
+The network and crypto imports are available only when a trusted host supplies
+matching `SandboxPermissions`; otherwise they fail closed.
 
 ## Limits and capabilities
 
@@ -42,6 +53,10 @@ randomness, threads, identity handles, MLS state, or private keys. Unknown
 imports, missing entrypoint, missing exported memory, malformed pointers, fuel
 exhaustion, and resource growth fail closed.
 
+Fine-grained host grants and the mediated request contract are documented in
+[`mini-app-permissions.md`](mini-app-permissions.md). Crypto grants pass only
+opaque key handles, never private key bytes.
+
 ## Native hosts
 
 `IOSMiniAppSandbox` and `AndroidMiniAppSandbox` own opaque native handles and
@@ -49,6 +64,7 @@ call the FFI create/run/destroy functions. The FFI copies no identity or key
 material into the guest. `DesktopMiniAppSandbox` re-exports the same
 `SandboxRuntime` from the desktop Rust crate.
 
-Mini-app permissions, network mediation, and organization-level enablement are
-separate release gates. Until those are implemented, mini-app code has only
-the bounded input/output ABI above.
+The native FFI wrappers use the deny-all host by default. Rust desktop hosts
+can install an audited `SandboxHost` with exact HTTPS host/method grants and
+opaque hardware-key operation handles. Organization-level enablement remains a
+separate release gate.

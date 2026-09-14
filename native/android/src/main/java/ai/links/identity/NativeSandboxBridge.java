@@ -2,7 +2,8 @@ package ai.links.identity;
 
 import java.security.GeneralSecurityException;
 
-/** Opaque JNI bridge for the shared native WASM mini-app runtime. */
+/** Opaque JNI bridge for the shared native WASM mini-app runtime.
+ * Native calls use the shared runtime's deny-all permission host. */
 public final class NativeSandboxBridge {
     static { System.loadLibrary("links_identity_jni"); }
 

@@ -1,9 +1,9 @@
 import CLinksIdentity
 import Foundation
 
-/// iOS host for the shared native WASM mini-app runtime. The runtime exposes
-/// input/output only; it has no WASI, network, filesystem, clock, randomness,
-/// identity, MLS, or private-key imports.
+/// iOS facade for the shared native WASM mini-app runtime. This FFI facade uses
+/// the runtime's deny-all permission host. It has no WASI, filesystem, clock,
+/// randomness, identity, MLS, or private-key imports.
 public final class IOSMiniAppSandbox {
     private var runtime: UnsafeMutableRawPointer?
 

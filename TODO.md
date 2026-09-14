@@ -608,7 +608,11 @@ Add programmable features only after the account, permission, and messaging boun
   re-exports it as `DesktopMiniAppSandbox`. No WASI, network, filesystem,
   clock, randomness, identity, MLS, or key capability is available. See
   `docs/mini-app-sandbox.md`.
-- [ ] Implement a fine-grained Mini-App permission SDK that restricts direct network calls and isolates cryptographic keys.
+- [x] Implement a fine-grained Mini-App permission SDK that restricts direct network calls and isolates cryptographic keys.
+  `SandboxPermissions` grants exact HTTPS hosts/methods with request/response
+  limits, while `SandboxCryptoGrant` exposes only opaque operation handles.
+  `SandboxHost` mediates every call; `SandboxRuntime::run` remains deny-all.
+  See `docs/mini-app-permissions.md`.
 - [ ] Expose Mini-Apps and bots through organization account controls.
 
 ---
