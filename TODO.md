@@ -709,3 +709,7 @@ Run these checks continuously at the relevant phase boundary, with the full audi
   `deploy/benchmarks/decentralized-gossip-50.yaml`; keep this open until
   three real runs produce a signed worst-run report.
 - [ ] Review battery use, reconnect behavior, offline delivery, key recovery, and multi-device removal before public release.
+  The evidence matrix and test sequence are prepared in
+  `docs/release-readiness-review.md`. Source contracts are present, but the
+  public-release gate stays open until physical-device, failure-injection,
+  push/provider, recovery, battery, and MLS-removal evidence is signed.

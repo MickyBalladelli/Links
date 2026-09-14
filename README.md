@@ -43,6 +43,7 @@ remain open.
 | `docs/zero-knowledge-routing.md` | Centralized/decentralized routing verification matrix, code evidence, metadata limits, and release checks. |
 | `docs/centralized-websocket-benchmark.md` | One-million-connection WebSocket workload, latency pass gate, privacy checks, and report template. |
 | `docs/decentralized-gossip-benchmark.md` | Fifty-node multi-hop federation workload, propagation measurements, correctness gates, and report template. |
+| `docs/release-readiness-review.md` | Public-release battery, reconnect, offline, recovery, and multi-device removal evidence matrix. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 | `docs/directory.md` | Global `@username` lookup, active-device W3C `did:key` and public keys, revocation visibility and pre-key handoff. |
 | `docs/contact-discovery.md` | Local E.164 address-book hashing with Argon2id and a persistent client salt. |
