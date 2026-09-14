@@ -31,7 +31,9 @@ content.
 The repository does not yet provide a runnable production chat app. In
 particular:
 
-- `native/apple` is a Swift package, not a macOS application target.
+- `native/apple` is the shared Apple Swift package; `native/macos` now contains
+  the macOS SwiftUI application target that embeds its `LinksClient` and
+  `LinksKeyStore` products.
 - `web` contains a WASM host library, not a complete browser chat UI.
 - `links-gateway` is a transport-neutral library; a runnable WebSocket adapter
   is still needed for local two-client messaging.

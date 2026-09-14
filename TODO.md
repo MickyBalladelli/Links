@@ -364,7 +364,11 @@ exchanging encrypted one-to-one text through the same local development stack.
 
 ### macOS application host
 
-- [ ] Add a macOS 13+ SwiftUI or AppKit application target that embeds the existing `LinksClient` and `LinksKeyStore` Swift package products.
+- [x] Add a macOS 13+ SwiftUI application target that embeds the existing `LinksClient` and `LinksKeyStore` Swift package products.
+  `native/macos/Links.xcodeproj` provides the macOS application target and shared
+  Links package dependency. Its SwiftUI shell imports both products and reports
+  identity, account, and connection state while the concrete host integrations
+  are added in the following tasks.
 - [ ] Add Debug and Release schemes, application lifecycle handling, and a clean dependency on the Rust `links-identity-ffi` library for arm64 macOS; add x86_64 support if Intel Macs remain in scope.
 - [ ] Implement the macOS client shell: onboarding, account state, device state, connection state, conversation list, message list, composer, send action, and receive rendering.
 - [ ] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
