@@ -8,6 +8,7 @@ pub mod background;
 pub mod broadcast;
 pub mod contact_discovery;
 pub mod content_addressed;
+pub mod decentralized;
 pub mod crypto;
 pub mod delegation;
 pub mod envelopes;
@@ -63,4 +64,6 @@ pub enum CoreError {
     SFrame(#[from] sframe::SFrameError),
     #[error("provider failed")]
     Provider,
+    #[error(transparent)]
+    Decentralized(#[from] decentralized::DecentralizedError),
 }

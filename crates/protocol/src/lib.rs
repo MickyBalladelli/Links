@@ -32,6 +32,8 @@ pub const MAX_SFU_DISCOVERY_RESULTS: usize = 16;
 pub const MAX_MEDIA_RELAY_RECORD_BYTES: usize = 8 * 1024;
 pub const MAX_MEDIA_RELAY_TOKEN_BYTES: usize = 4 * 1024;
 pub const MAX_MEDIA_RELAY_USAGE_RECEIPT_BYTES: usize = 4 * 1024;
+pub const MEDIA_RELAY_RECORD_SIGNATURE_DOMAIN: &[u8] =
+    b"links/media-relay/record-signature/v1\0";
 pub const SFRAME_CIPHER_SUITE_AES_128_GCM_SHA256_128: u32 = 1;
 pub const SFRAME_AES_128_KEY_BYTES: usize = 16;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
@@ -732,6 +734,30 @@ pub fn validate_media_relay_record(
         return Err(ProtocolError::TooLarge);
     }
     Ok(())
+}
+
+/// Canonical transcript shared by relay publishers and clients. Endpoint,
+/// pricing, expiry, and SFrame capability are all signed; signature bytes are
+/// deliberately excluded from the transcript.
+pub fn media_relay_record_signature_transcript(record: &v1::MediaRelayRecord) -> Vec<u8> {
+    let mut transcript = MEDIA_RELAY_RECORD_SIGNATURE_DOMAIN.to_vec();
+    append_signature_field(&mut transcript, record.node_id.as_bytes());
+    append_signature_field(&mut transcript, record.region.as_bytes());
+    append_signature_field(&mut transcript, record.websocket_url.as_bytes());
+    append_signature_field(&mut transcript, record.turn_url.as_bytes());
+    append_signature_field(&mut transcript, &record.public_key);
+    transcript.extend_from_slice(&record.sequence.to_be_bytes());
+    transcript.extend_from_slice(&record.expires_at_ms.to_be_bytes());
+    transcript.extend_from_slice(&record.mode.to_be_bytes());
+    transcript.extend_from_slice(&record.price_units_per_minute.to_be_bytes());
+    transcript.extend_from_slice(&record.max_bitrate_kbps.to_be_bytes());
+    transcript.push(u8::from(record.supports_sframe));
+    transcript
+}
+
+fn append_signature_field(transcript: &mut Vec<u8>, value: &[u8]) {
+    transcript.extend_from_slice(&(value.len() as u32).to_be_bytes());
+    transcript.extend_from_slice(value);
 }
 
 pub fn decode_media_relay_record(
