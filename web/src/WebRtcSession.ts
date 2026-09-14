@@ -78,7 +78,8 @@ export class WebRtcSession implements WebCoreTransport {
   private sframeController: WebRtcSFrameController | null = null
   private readonly sframeControlKeys = new Map<
     string,
-    { key: CryptoKey; fingerprint: string }
+    { key: CryptoKey
+      fingerprint: string }
   >()
 
   constructor(options: WebRtcSessionOptions) {
