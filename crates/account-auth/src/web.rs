@@ -3,6 +3,7 @@ use crate::{
         AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest, CreateGroupRequest,
         DelegatedDeviceRegistrationRequest, DeviceRegistrationRequest,
         EncryptedKeyBackupRequest, FinishRequest,
+        OrganizationControlsRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
         PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest,
     },
@@ -28,6 +29,10 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/auth/username/register", post(username_register))
         .route("/v1/auth/username/login", post(username_login))
         .route("/v1/auth/me", get(me))
+        .route(
+            "/v1/organization/controls",
+            get(organization_controls).put(set_organization_controls),
+        )
         .route("/v1/devices", post(register_device))
         .route("/v1/devices/delegated", post(register_delegated_device))
         .route("/v1/devices/{device_id}", delete(revoke_device))
@@ -249,6 +254,25 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(auth.authenticate(bearer(&headers)?).await?))
+}
+async fn organization_controls(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.organization_controls(bearer(&headers)?).await?))
+}
+async fn set_organization_controls(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<OrganizationControlsRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.set_organization_controls(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
 }
 async fn register_device(
     State(auth): State<Arc<AccountAuth>>,
