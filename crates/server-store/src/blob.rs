@@ -32,7 +32,11 @@ pub struct BlobReceipt {
 }
 
 impl BlobReceipt {
-    pub fn new(attachment_id: &str, size_bytes: u64, sha256: [u8; 32]) -> Result<Self, StoreError> {
+    pub fn new(
+        attachment_id: &str,
+        size_bytes: u64,
+        sha256: [u8; 32],
+    ) -> Result<Self, StoreError> {
         validate_id(attachment_id)?;
         let attachment_id = uuid::Uuid::parse_str(attachment_id)
             .map_err(|_| StoreError::Invalid)?
