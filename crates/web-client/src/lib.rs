@@ -17,6 +17,11 @@ use links_client_core::{
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
+pub use links_client_core::decentralized::{
+    DecentralizedClient, DecentralizedClientPlan, DecentralizedChunkStorage,
+    DecentralizedMediaRelay, DecentralizedMediaRoute, DecentralizedTransportAdapter,
+};
+
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
 }
