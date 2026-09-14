@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "prekeys",
         "queue",
         "webrtc",
+        "sfu",
     ]
     .map(|name| format!("{root}/links/v1/{name}.proto"));
     for file in &files {

@@ -6,10 +6,12 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+ed25519-dalek = { version = "2", features = ["zeroize"] }
 links-protocol.workspace = true
 links-server-store.workspace = true
 links-account-auth = { path = "../account-auth" }
 prost.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid = { workspace = true, features = ["v4"] }

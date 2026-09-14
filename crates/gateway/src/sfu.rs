@@ -6,6 +6,7 @@
 //! stores LiveKit API secrets, room credentials, or media keys.
 
 use super::valid_locator;
+use links_protocol::ProtocolError;
 use thiserror::Error;
 
 pub const LIVEKIT_CLOUD_PROVIDER: &str = "livekit-cloud";
@@ -67,6 +68,16 @@ pub enum SfuError {
     UnknownRegion,
     #[error("no healthy SFU region is available")]
     Unavailable,
+    #[error("SFU DHT is unavailable")]
+    DhtUnavailable,
+    #[error("SFU discovery record is not trusted")]
+    UntrustedNode,
+    #[error("SFU discovery signature is invalid")]
+    InvalidSignature,
+    #[error("SFU discovery record is expired")]
+    ExpiredRecord,
+    #[error(transparent)]
+    Protocol(#[from] ProtocolError),
 }
 
 /// A public, provider-issued regional endpoint. No LiveKit API secret belongs

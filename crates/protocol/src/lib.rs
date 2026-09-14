@@ -26,6 +26,9 @@ pub const MAX_FANOUT_DEVICES: usize = 100;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_WEBRTC_SDP_BYTES: usize = 256 * 1024;
 pub const MAX_WEBRTC_SDP_MID_BYTES: usize = 128;
+pub const MAX_SFU_DISCOVERY_RECORD_BYTES: usize = 8 * 1024;
+pub const MAX_SFU_DISCOVERY_TTL_MS: u64 = 10 * 60 * 1000;
+pub const MAX_SFU_DISCOVERY_RESULTS: usize = 16;
 pub const SFRAME_CIPHER_SUITE_AES_128_GCM_SHA256_128: u32 = 1;
 pub const SFRAME_AES_128_KEY_BYTES: usize = 16;
 pub const MAX_QUEUE_MESSAGE_BYTES: usize = 512 * 1024;
@@ -621,6 +624,64 @@ pub fn decode_federated_envelope_batch(
         .map_err(|_| ProtocolError::Malformed)?;
     validate_federated_envelope_batch(&batch)?;
     Ok(batch)
+}
+
+pub fn validate_sfu_discovery_record(
+    record: &v1::SfuDiscoveryRecord,
+) -> Result<(), ProtocolError> {
+    if record.protocol_version != VERSION {
+        return Err(ProtocolError::UnsupportedVersion);
+    }
+    validate_gateway_locator(&record.node_id)?;
+    validate_gateway_locator(&record.region)?;
+    if record.websocket_url.is_empty()
+        || record.websocket_url.len() > 512
+        || !record.websocket_url.starts_with("wss://")
+        || record
+            .websocket_url
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'#')
+    {
+        return Err(ProtocolError::Invalid("sfu websocket url"));
+    }
+    if !record.turn_url.is_empty()
+        && (record.turn_url.len() > 512
+            || !(record.turn_url.starts_with("turn:") || record.turn_url.starts_with("turns:"))
+            || record
+                .turn_url
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'#'))
+    {
+        return Err(ProtocolError::Invalid("sfu turn url"));
+    }
+    if record.public_key.len() != 32
+        || record.public_key.iter().all(|byte| *byte == 0)
+        || record.sequence == 0
+        || record.expires_at_ms == 0
+        || !record.supports_sframe
+        || record.signature.len() != 64
+    {
+        return Err(ProtocolError::Invalid("sfu discovery record"));
+    }
+    if record.encoded_len() > MAX_SFU_DISCOVERY_RECORD_BYTES {
+        return Err(ProtocolError::TooLarge);
+    }
+    Ok(())
+}
+
+pub fn decode_sfu_discovery_record(
+    bytes: &[u8],
+) -> Result<v1::SfuDiscoveryRecord, ProtocolError> {
+    if bytes.is_empty() || bytes.len() > MAX_SFU_DISCOVERY_RECORD_BYTES {
+        return Err(if bytes.len() > MAX_SFU_DISCOVERY_RECORD_BYTES {
+            ProtocolError::TooLarge
+        } else {
+            ProtocolError::Malformed
+        });
+    }
+    let record = v1::SfuDiscoveryRecord::decode(bytes).map_err(|_| ProtocolError::Malformed)?;
+    validate_sfu_discovery_record(&record)?;
+    Ok(record)
 }
 
 pub fn decode_message(bytes: &[u8]) -> Result<v1::Message, ProtocolError> {
