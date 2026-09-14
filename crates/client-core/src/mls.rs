@@ -855,14 +855,15 @@ fn verify_processed_sender<V: MlsCredentialVerifier>(
     verify_credential(verifier, &member.credential, &member.signature_key)
 }
 
-fn validate_direct_staged_commit<V: MlsCredentialVerifier>(
+fn validate_staged_commit<V: MlsCredentialVerifier>(
     verifier: &V,
     group: &MlsGroup,
     sender_index: LeafNodeIndex,
     staged: &StagedCommit,
+    max_users: usize,
 ) -> Result<(), CoreError> {
     let mut users = verified_group_user_counts(verifier, group)?;
-    ensure_direct_user_limit(&users)?;
+    ensure_group_user_limit(&users, max_users)?;
     let mut allowed_users = users.keys().copied().collect::<Vec<_>>();
 
     for proposal in staged.queued_proposals() {
@@ -892,7 +893,7 @@ fn validate_direct_staged_commit<V: MlsCredentialVerifier>(
     for proposal in staged.add_proposals() {
         let binding = verify_leaf(verifier, proposal.add_proposal().key_package().leaf_node())?;
         if !allowed_users.contains(&binding.user_id) {
-            if allowed_users.len() == DIRECT_MAX_USERS {
+            if allowed_users.len() == max_users {
                 return Err(CoreError::Authentication);
             }
             allowed_users.push(binding.user_id);
@@ -923,7 +924,7 @@ fn validate_direct_staged_commit<V: MlsCredentialVerifier>(
             return Err(CoreError::Authentication);
         }
     }
-    ensure_direct_user_limit(&users)
+    ensure_group_user_limit(&users, max_users)
 }
 
 fn verified_group_user_counts<V: MlsCredentialVerifier>(
@@ -956,12 +957,35 @@ fn decrement_user(users: &mut HashMap<Uuid, usize>, user_id: Uuid) -> Result<(),
     Ok(())
 }
 
-fn ensure_direct_user_limit(users: &HashMap<Uuid, usize>) -> Result<(), CoreError> {
-    if users.len() > DIRECT_MAX_USERS {
+fn ensure_group_user_limit(
+    users: &HashMap<Uuid, usize>,
+    max_users: usize,
+) -> Result<(), CoreError> {
+    if users.len() > max_users {
         Err(CoreError::Authentication)
     } else {
         Ok(())
     }
+}
+
+fn group_shape_is_ready(
+    users: &HashMap<Uuid, usize>,
+    local_user_id: &Uuid,
+    max_users: usize,
+) -> bool {
+    users.len() >= 2 && users.len() <= max_users && users.contains_key(local_user_id)
+}
+
+fn ensure_group_ready<V: MlsCredentialVerifier>(
+    verifier: &V,
+    group: &MlsGroup,
+    local_user_id: &Uuid,
+) -> Result<(), CoreError> {
+    let users = verified_group_user_counts(verifier, group)?;
+    if !group_shape_is_ready(&users, local_user_id, MAX_GROUP_USERS) {
+        return Err(CoreError::Authentication);
+    }
+    Ok(())
 }
 
 fn ensure_direct_group_ready<V: MlsCredentialVerifier>(
@@ -970,7 +994,9 @@ fn ensure_direct_group_ready<V: MlsCredentialVerifier>(
     local_user_id: &Uuid,
 ) -> Result<(), CoreError> {
     let users = verified_group_user_counts(verifier, group)?;
-    if users.len() != DIRECT_MAX_USERS || !users.contains_key(local_user_id) {
+    if !group_shape_is_ready(&users, local_user_id, DIRECT_MAX_USERS)
+        || users.len() != DIRECT_MAX_USERS
+    {
         return Err(CoreError::Authentication);
     }
     Ok(())
