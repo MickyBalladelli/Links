@@ -91,8 +91,9 @@ least two verified users remain, the local user is present, and the group stays
 within the 100-user/100-device bounds. `send_group_message()` adds missing
 verified device leaves, stages and delivers any pending TreeKEM commit, then
 encrypts the application message once and fans out independently sealed
-envelopes to every active group device. `receive_available()` applies group
-welcomes/commits before decrypting those envelopes.
+envelopes to every active group device. `receive_group_available()` accepts only
+group welcomes/commits, applies them before decrypting those envelopes, commits
+the replay cursor durably, and returns private delivery-receipt requests.
 
 The host storage implementation must make OpenMLS state writes durable and
 transaction-compatible with the application outbox. A process crash must not

@@ -498,7 +498,10 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
   OpenMLS can stage verified device-leaf removals, report committed epochs, and
   reject control commits against stale epoch checkpoints. Hosts must deliver
   each resulting MLS commit before merging it locally.
-- [ ] Extend the send and receive flows to many-to-many groups.
+- [x] Extend the send and receive flows to many-to-many groups.
+  Group send/receive adapters now have first-class contracts, bounded active
+  device fan-out, group-only MLS update validation, replay, decryption, and
+  private delivery-receipt handling through the shared client core.
 
 ### Broadcast channels
 

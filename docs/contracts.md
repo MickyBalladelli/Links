@@ -272,6 +272,24 @@ coordinator, with a fresh message ID and sender-local sequence. They must never
 send the receipt protobuf as a plaintext gateway payload. A failed render or
 ack leaves replay safe; durable stores must deduplicate message IDs.
 
+## Many-to-many group send and receive
+
+Group hosts use `GroupChatDirectory` to return every active device belonging to
+the current account-level membership snapshot, excluding the local device. The
+`send_group_message()` coordinator verifies each device's pre-key claim, installs
+its Sealed Sender key, adds missing verified MLS leaves, persists and delivers a
+pending group commit, then encrypts one MLS application message and seals a
+separate envelope for each active device. The message and complete fan-out share
+one durable outbox write and one sender-local sequence.
+
+Group hosts use the `GroupChatTransport` and `GroupChatStore` contracts for that
+path. On receive, `GroupReceiveTransport` rejects direct-chat MLS updates,
+replays the device mailbox, applies `GroupWelcome`/`GroupCommit` updates before
+opening envelopes, commits messages, MLS updates, tombstones, and cursor before
+QueueAck, and returns grouped private delivery receipts. The server sees only
+opaque per-device envelopes; group membership, sender identity, and receipt
+content stay inside authenticated MLS payloads.
+
 ## Provider and platform boundaries
 
 `IdentityStore` exposes keystore references and signing, not secret key export.

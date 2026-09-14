@@ -82,6 +82,10 @@ impl MlsEpochUpdate {
         }
     }
 
+    pub fn is_group(&self) -> bool {
+        matches!(self, Self::GroupWelcome { .. } | Self::GroupCommit { .. })
+    }
+
     fn new(conversation_id: String, bytes: Vec<u8>) -> Result<(String, Vec<u8>), CoreError> {
         protocol::validate_id(&conversation_id)?;
         if bytes.is_empty() {
@@ -122,6 +126,10 @@ pub struct DirectReceiveBatch {
     pub mls_updates: Vec<MlsEpochUpdate>,
 }
 
+/// Group receive uses the same replay envelope, but its transport adapter must
+/// supply `GroupWelcome`/`GroupCommit` updates for the group's MLS state.
+pub type GroupReceiveBatch = DirectReceiveBatch;
+
 #[async_trait]
 pub trait DirectReceiveTransport: Send {
     async fn connect(
@@ -142,6 +150,17 @@ pub trait DirectReceiveTransport: Send {
     async fn acknowledge(&mut self, ack: v1::QueueAck) -> Result<(), CoreError>;
 }
 
+pub trait GroupReceiveTransport: DirectReceiveTransport {
+    fn validate_group_batch(&self, batch: &GroupReceiveBatch) -> Result<(), CoreError> {
+        if batch.mls_updates.iter().any(|update| !update.is_group()) {
+            return Err(CoreError::Authentication);
+        }
+        Ok(())
+    }
+}
+
+impl<T> GroupReceiveTransport for T where T: DirectReceiveTransport + ?Sized {}
+
 #[async_trait]
 pub trait DirectReceiveStore: Send {
     /// Persist MLS state, received messages/tombstones, and the cursor in one
@@ -153,6 +172,10 @@ pub trait DirectReceiveStore: Send {
         items: &[DecryptedSyncItem],
     ) -> Result<(), CoreError>;
 }
+
+pub trait GroupReceiveStore: DirectReceiveStore {}
+
+impl<T> GroupReceiveStore for T where T: DirectReceiveStore + ?Sized {}
 
 #[async_trait]
 pub trait MessageRenderer: Send {
@@ -209,6 +232,8 @@ pub struct DirectReceiveResult {
     pub cursor: u64,
 }
 
+pub type GroupReceiveResult = DirectReceiveResult;
+
 /// Fetch replay pages, apply authenticated MLS epoch updates, decrypt and
 /// render messages, durably commit them, emit QueueAck, and return private
 /// delivery-receipt requests for the host's MLS send path.
@@ -255,6 +280,57 @@ where
             return Ok(result);
         }
         next = transport.replay(sync.cursor(), replay_limit).await?;
+    }
+}
+
+/// Receive many-to-many group traffic through the shared cursor/replay path.
+/// Group MLS updates are applied before any envelope is opened, and the
+/// returned receipts stay private until the host sends them through MLS.
+pub async fn receive_group_available<C, M, T, S, R>(
+    core: &mut ClientCore<C, M>,
+    sync: &mut SyncState,
+    transport: &mut T,
+    store: &mut S,
+    renderer: &mut R,
+    replay_limit: u32,
+    now_ms: u64,
+) -> Result<GroupReceiveResult, CoreError>
+where
+    C: EnvelopeCrypto,
+    M: MlsEngine,
+    T: GroupReceiveTransport,
+    S: GroupReceiveStore,
+    R: MessageRenderer,
+{
+    if replay_limit == 0 || replay_limit as usize > protocol::MAX_BATCH_ITEMS || now_ms == 0 {
+        return Err(CoreError::InvalidSync);
+    }
+    let device_id = sync.device_id().to_owned();
+    let mut next = transport
+        .connect(&device_id, sync.cursor(), replay_limit)
+        .await?;
+    transport.validate_group_batch(&next)?;
+    let mut result = DirectReceiveResult {
+        messages: Vec::new(),
+        delivery_receipts: Vec::new(),
+        queue_acks: Vec::new(),
+        tombstones: 0,
+        cursor: sync.cursor(),
+    };
+
+    loop {
+        let high_watermark = next.batch.high_watermark;
+        let page = receive_batch(core, sync, transport, store, renderer, next, now_ms).await?;
+        result.messages.extend(page.messages);
+        result.delivery_receipts.extend(page.delivery_receipts);
+        result.queue_acks.push(page.queue_ack);
+        result.tombstones += page.tombstones;
+        result.cursor = sync.cursor();
+        if page.idle || result.cursor >= high_watermark {
+            return Ok(result);
+        }
+        next = transport.replay(sync.cursor(), replay_limit).await?;
+        transport.validate_group_batch(&next)?;
     }
 }
 

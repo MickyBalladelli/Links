@@ -98,6 +98,13 @@ pub trait DirectChatTransport: Send {
     async fn send_envelope(&mut self, envelope: &v1::Envelope) -> Result<(), CoreError>;
 }
 
+/// Group control/envelope transport. It shares the authenticated wire
+/// boundary with direct chats, but is named separately so hosts cannot
+/// accidentally use a two-user directory for group fan-out.
+pub trait GroupChatTransport: DirectChatTransport {}
+
+impl<T> GroupChatTransport for T where T: DirectChatTransport + ?Sized {}
+
 /// Durable send boundary. Persist pending MLS state before bootstrap delivery,
 /// then persist the exact message, sequence and envelopes before sending any
 /// envelope to the gateway. The store must make each operation transactional
@@ -122,6 +129,12 @@ pub trait DirectChatStore: Send {
         last_sequence_id: u64,
     ) -> Result<(), CoreError>;
 }
+
+/// Durable group outbox boundary. Implementations must persist the group MLS
+/// commit, encrypted message, sequence, and all device envelopes together.
+pub trait GroupChatStore: DirectChatStore {}
+
+impl<T> GroupChatStore for T where T: DirectChatStore + ?Sized {}
 
 pub struct DirectSendResult {
     pub message: v1::Message,
@@ -238,8 +251,8 @@ where
     C: EnvelopeCrypto + RecipientKeyDirectory,
     M: MlsEngine,
     D: GroupChatDirectory,
-    T: DirectChatTransport,
-    O: DirectChatStore,
+    T: GroupChatTransport,
+    O: GroupChatStore,
 {
     protocol::validate_id(&conversation_id)?;
     protocol::validate_id(&message_id)?;
