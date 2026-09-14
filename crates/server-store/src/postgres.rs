@@ -318,7 +318,7 @@ impl RelationalStore {
         actor_user_id: Uuid,
         device_id: Uuid,
     ) -> Result<(), StoreError> {
-        let result = sqlx::query("UPDATE devices SET revoked_at = COALESCE(revoked_at, now()) WHERE device_id = $1 AND user_id = $2")
+        let result = sqlx::query("WITH RECURSIVE descendants AS (SELECT device_id FROM devices WHERE device_id=$1 AND user_id=$2 UNION ALL SELECT child.device_id FROM devices child JOIN descendants parent ON child.delegated_by_device_id=parent.device_id WHERE child.user_id=$2) UPDATE devices SET revoked_at=COALESCE(revoked_at,now()) WHERE device_id IN (SELECT device_id FROM descendants) AND user_id=$2")
             .bind(device_id).bind(actor_user_id).execute(&self.pool).await?;
         if result.rows_affected() == 0 {
             return Err(StoreError::NotFound);
