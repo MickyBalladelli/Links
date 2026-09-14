@@ -634,7 +634,11 @@ This is a separate expansion track. Do not block the centralized release on it.
   Existing MLS, Sealed Sender, queues, cursors, and client replay stay intact.
   Nostr/XMTP relays and Libp2p mesh are not selected for this expansion. See
   `docs/federation.md`.
-- [ ] Implement W3C Decentralized Identifiers (DIDs) or smart-contract key registries on Solana / Base to map `@handles` to public identity keys.
+- [x] Implement W3C Decentralized Identifiers (DIDs) or smart-contract key registries on Solana / Base to map `@handles` to public identity keys.
+  Links uses W3C `did:key` identifiers for Ed25519 device keys. The global
+  `@handle` directory now returns each active device DID beside its public key;
+  clients verify the deterministic DID/key binding before PQXDH. No Solana,
+  Base, or smart-contract dependency is needed. See `docs/directory.md`.
 
 ### Routing and storage
 

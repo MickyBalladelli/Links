@@ -40,6 +40,7 @@ pub const MAX_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub const MAX_SUBCERTIFICATE_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 pub const MAX_VERIFICATION_BADGE_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 pub const MAX_CURSOR: u64 = i64::MAX as u64;
+pub const ED25519_DID_KEY_MULTICODEC: [u8; 2] = [0xed, 0x01];
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProtocolError {
@@ -73,6 +74,54 @@ pub fn validate_handle(value: &str) -> Result<(), ProtocolError> {
         return Err(ProtocolError::Invalid("handle"));
     }
     Ok(())
+}
+
+/// Encode an Ed25519 public key as a W3C `did:key` identifier. The `did:key`
+/// method uses the Ed25519 multicodec varint followed by base58btc (`z`).
+pub fn did_key_for_ed25519(public_key: &[u8]) -> Result<String, ProtocolError> {
+    if public_key.len() != 32 || public_key.iter().all(|byte| *byte == 0) {
+        return Err(ProtocolError::Invalid("ed25519 public key"));
+    }
+    let mut multicodec_key = Vec::with_capacity(ED25519_DID_KEY_MULTICODEC.len() + 32);
+    multicodec_key.extend_from_slice(&ED25519_DID_KEY_MULTICODEC);
+    multicodec_key.extend_from_slice(public_key);
+    Ok(format!("did:key:z{}", base58btc_encode(&multicodec_key)))
+}
+
+/// Check that a DID resolves to exactly the supplied public key. This prevents
+/// a directory from returning a mismatched DID/key pair for the same handle.
+pub fn validate_did_key(did: &str, public_key: &[u8]) -> Result<(), ProtocolError> {
+    if did_key_for_ed25519(public_key)?.as_str() != did {
+        return Err(ProtocolError::Invalid("did:key"));
+    }
+    Ok(())
+}
+
+fn base58btc_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 58] =
+        b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits = vec![0u8];
+    for byte in bytes {
+        let mut carry = u32::from(*byte);
+        for digit in &mut digits {
+            let value = u32::from(*digit) * 256 + carry;
+            *digit = (value % 58) as u8;
+            carry = value / 58;
+        }
+        while carry > 0 {
+            digits.push((carry % 58) as u8);
+            carry /= 58;
+        }
+    }
+    let leading_zeroes = bytes.iter().take_while(|byte| **byte == 0).count();
+    let mut encoded = String::with_capacity(leading_zeroes + digits.len());
+    for _ in 0..leading_zeroes {
+        encoded.push('1');
+    }
+    for digit in digits.iter().rev() {
+        encoded.push(ALPHABET[*digit as usize] as char);
+    }
+    encoded
 }
 
 pub fn validate_blur_hash(value: &str) -> Result<(), ProtocolError> {

@@ -76,6 +76,7 @@ pub struct EncryptedKeyBackupRecord {
 pub struct DirectoryDeviceRecord {
     pub device_id: Uuid,
     pub mls_node_id: Uuid,
+    pub did: String,
     pub identity_public_key: Vec<u8>,
     pub mls_credential: Vec<u8>,
     pub delegation_role: String,
@@ -244,6 +245,8 @@ impl RelationalStore {
             {
                 return Err(StoreError::CorruptObject);
             }
+            let did = protocol::did_key_for_ed25519(&identity_public_key)
+                .map_err(|_| StoreError::CorruptObject)?;
             let delegation_role: String = row.get("delegation_role");
             let delegation_role_id = match delegation_role.as_str() {
                 "owner" => 0,
@@ -272,6 +275,7 @@ impl RelationalStore {
             devices.push(DirectoryDeviceRecord {
                 device_id: row.get("device_id"),
                 mls_node_id: row.get("mls_node_id"),
+                did,
                 identity_public_key,
                 mls_credential,
                 delegation_role,

@@ -81,7 +81,7 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /finish` | `challenge_id`, `code`, `signature` | A device-scoped bearer access token, expiry, user ID and device ID. |
 | `POST /v1/auth/username/register` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Creates a pseudonymous account and returns its session, handle, and MLS credential. |
 | `POST /v1/auth/username/login` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Returns a session after the registered device key proves possession. |
-| `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's public identity key, MLS node ID and MLS credential. |
+| `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's W3C `did:key`, public identity key, MLS node ID and MLS credential. |
 | `GET /v1/contact-discovery/parameters` | Bearer session | OPRF public key and opaque active phone-directory membership filter. |
 | `POST /v1/contact-discovery/query` | Bearer session plus bounded blinded Ristretto points | One verifiable OPRF evaluation per blinded input. |
 | `GET /v1/privacy-pass/parameters` | None | Privacy Pass VOPRF public key and key identifier. |

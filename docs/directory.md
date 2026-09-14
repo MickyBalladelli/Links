@@ -18,6 +18,7 @@ with the shared lowercase ASCII handle validator. The JSON response is:
     {
       "device_id": "uuid",
       "mls_node_id": "uuid",
+      "did": "did:key:z…",
       "identity_public_key": "base64url",
       "mls_credential": "base64url"
     }
@@ -31,9 +32,16 @@ not use an eventually consistent local cache. The service validates each
 credential against the stored account/device/node/public-key binding before
 serializing it. Empty or inconsistent records fail closed.
 
+The `did` is the W3C `did:key` derived from the device's Ed25519 public key
+using the Ed25519 multicodec and base58btc encoding. The handle maps to the
+active device DIDs through this directory response; clients must verify that
+each DID resolves to the accompanying `identity_public_key` before trusting
+it. A DID does not replace the authenticated device enrollment or MLS
+credential checks.
+
 The endpoint is public because a sender must discover a recipient before an
 authenticated session exists. It reveals only stable public directory data:
-handle, user ID, device IDs, MLS node IDs, identity public keys, and MLS
+handle, user ID, device IDs, MLS node IDs, DIDs, identity public keys, and MLS
 credentials. It never returns phone subjects, sessions, routing locators,
 pre-key private material, or one-time pre-key inventory. Lookup responses are
 `no-store` and rate-limited by both canonical handle and source address.

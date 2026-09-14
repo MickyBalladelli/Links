@@ -34,8 +34,9 @@ federated gateway forwards only encrypted delivery material to another node:
 Federation is a server-to-server transport boundary, not a new encryption
 protocol. Existing MLS, Sealed Sender, device queues, receipts, and client
 replay rules remain unchanged. Cross-node directory and node-key discovery
-must be authenticated before federation is enabled; the later DID/key-registry
-task remains separate.
+must be authenticated before federation is enabled. The global directory now
+provides deterministic W3C `did:key` bindings for device keys, but those user
+DIDs do not authenticate a server node or replace node-level federation trust.
 
 ## Rollout boundary
 

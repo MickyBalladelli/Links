@@ -118,6 +118,7 @@ pub struct UsernameDirectoryResponse {
 pub struct UsernameDirectoryDeviceResponse {
     pub device_id: Uuid,
     pub mls_node_id: Uuid,
+    pub did: String,
     pub identity_public_key: String,
     pub mls_credential: String,
     pub delegation_role: String,
@@ -959,6 +960,7 @@ impl AccountAuth {
             devices.push(UsernameDirectoryDeviceResponse {
                 device_id: device.device_id,
                 mls_node_id: device.mls_node_id,
+                did: device.did,
                 identity_public_key: encode(&public_key),
                 mls_credential: encode(&device.mls_credential),
                 delegation_role: device.delegation_role,
