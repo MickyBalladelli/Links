@@ -1,0 +1,60 @@
+# Decentralized federation gossip benchmark target.
+# This is a run contract only. It does not provision nodes or load clients.
+benchmark:
+  name: links-decentralized-gossip-50
+  protocol: links.v1
+  node_count: 50
+  minimum_regions: 5
+  minimum_continents: 3
+  topology:
+    graph: authenticated-overlay
+    minimum_peer_degree: 4
+    maximum_hops: 8
+    direct_origin_fanout: 4
+    topology_snapshot_required: true
+  timing:
+    minimum_warmup_ms: 300000
+    minimum_steady_state_ms: 900000
+    partition_duration_ms: 60000
+    minimum_recovery_ms: 300000
+    minimum_settle_ms: 300000
+    repetitions: 3
+    clock_calibration: required
+    maximum_clock_uncertainty_ms_env: LINKS_BENCHMARK_CLOCK_UNCERTAINTY_MS
+  payload_profiles:
+    - name: one-sealed-envelope
+      bytes_env: LINKS_BENCHMARK_NORMAL_ENVELOPE_B64
+    - name: hundred-envelope-batch
+      bytes_env: LINKS_BENCHMARK_MAX_BATCH_B64
+  federation:
+    node_endpoints_env: LINKS_BENCHMARK_FEDERATION_NODE_ENDPOINTS
+    node_trust_bundle_env: LINKS_BENCHMARK_NODE_TRUST_BUNDLE
+    client_certificate_env: LINKS_BENCHMARK_CLIENT_CERT
+    client_key_env: LINKS_BENCHMARK_CLIENT_KEY
+    batch_expiry_ms: 3600000
+    max_batch_items: 100
+    max_batch_bytes: 524288
+    payload_inspection: disabled
+    payload_decryption: disabled
+  workload:
+    local_region_ratio: 0.25
+    intercontinental_ratio: 0.50
+    maximum_hop_ratio: 0.25
+    duplicate_publish_ratio: 0.05
+    consumer_redelivery_ratio: 0.05
+    rotating_origins: true
+    publish_rate_per_second_env: LINKS_BENCHMARK_GOSSIP_RATE
+    controlled_partition: true
+  acceptance:
+    per_node_receipt_required: true
+    max_lost_batches: 0
+    max_lost_envelopes: 0
+    max_duplicate_claims_after_deduplication: 0
+    max_unverified_batches: 0
+    privacy_log_inspection: required
+    signed_report: required
+  infrastructure:
+    independent_relay_clusters_minimum: 3
+    durable_claim_store: required
+    resource_capture: required
+    report_collector_outside_relay_nodes: true

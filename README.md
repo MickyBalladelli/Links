@@ -42,6 +42,7 @@ remain open.
 | `docs/crypto-audit-scope.md` | Independent PQXDH, MLS, SFrame, identity, envelope, and media-routing audit scope and sign-off record. |
 | `docs/zero-knowledge-routing.md` | Centralized/decentralized routing verification matrix, code evidence, metadata limits, and release checks. |
 | `docs/centralized-websocket-benchmark.md` | One-million-connection WebSocket workload, latency pass gate, privacy checks, and report template. |
+| `docs/decentralized-gossip-benchmark.md` | Fifty-node multi-hop federation workload, propagation measurements, correctness gates, and report template. |
 | `docs/prekeys.md` | Pre-key generation, automatic refill, authenticated upload and atomic claim contracts. |
 | `docs/directory.md` | Global `@username` lookup, active-device W3C `did:key` and public keys, revocation visibility and pre-key handoff. |
 | `docs/contact-discovery.md` | Local E.164 address-book hashing with Argon2id and a persistent client salt. |
@@ -64,6 +65,7 @@ remain open.
 | `deploy/sfu-dht/regions.example.yaml` | Authenticated regional DHT, signed SFU node records, health probes, and key configuration boundary. |
 | `deploy/media-relays/regions.example.yaml` | Authenticated relay DHT, open/token relay policy, key names, health probes, and SFrame-only forwarding boundary. |
 | `deploy/benchmarks/centralized-websocket-1m.yaml` | Centralized one-million-WebSocket benchmark target, workload split, acceptance gate, and report inputs. |
+| `deploy/benchmarks/decentralized-gossip-50.yaml` | Decentralized fifty-node gossip benchmark topology, workload, correctness gate, and report inputs. |
 | `docs/android-text-milestone.md` | Internal Android one-to-one text build scope and two-device acceptance gate. |
 | `docs/ios-client.md` | iOS client foundation, shared-core boundary and release limits. |
 | `docs/ios-text-milestone.md` | Internal iOS one-to-one text build scope and two-device acceptance gate. |

@@ -704,4 +704,8 @@ Run these checks continuously at the relevant phase boundary, with the full audi
   `deploy/benchmarks/centralized-websocket-1m.yaml`; keep this open until
   three real runs produce a signed worst-run report.
 - [ ] Decentralized benchmark: measure multi-hop gossip propagation across 50 international nodes.
+  The runbook and target contract are prepared in
+  `docs/decentralized-gossip-benchmark.md` and
+  `deploy/benchmarks/decentralized-gossip-50.yaml`; keep this open until
+  three real runs produce a signed worst-run report.
 - [ ] Review battery use, reconnect behavior, offline delivery, key recovery, and multi-device removal before public release.
