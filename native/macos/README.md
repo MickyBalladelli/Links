@@ -127,3 +127,8 @@ Profile names are canonical lower-case ASCII names. Each non-default profile
 uses its own Keychain service and public metadata key. A mismatched provider
 and client profile is rejected before metadata is opened, so one local client
 cannot accidentally validate or overwrite another client's identity.
+
+New profiles generate distinct non-nil device and MLS-node UUIDs. The account
+service generates the user UUID during username or phone registration. After a
+profile is bound, a later session must return the same user, handle, and MLS
+credential; a mismatch fails closed instead of rebinding the local identity.

@@ -96,6 +96,7 @@ public enum IOSClientError: Error {
     case coreIdentityMismatch
     case metadataUnavailable
     case profileMismatch
+    case identityReuse
 }
 
 /// Base iOS client session. It owns hardware identity enrollment and public
@@ -213,8 +214,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
 
     private func adoptNewIdentity(_ created: IdentityKeyReference) throws -> IdentityKeyReference {
         guard identity == nil else { throw IOSClientError.identityAlreadyEnrolled }
-        let createdDeviceID = UUID().uuidString.lowercased()
-        let createdMLSNodeID = UUID().uuidString.lowercased()
+        let createdDeviceID = Self.freshIdentifier()
+        let createdMLSNodeID = Self.freshIdentifier(excluding: createdDeviceID)
         do {
             try saveMetadata(StoredMetadata(
                 handle: created.handle,
@@ -253,6 +254,19 @@ public final class IOSClient: SharedCoreIdentitySigner {
               expiresAtMs > Self.nowMs(),
               mlsCredential.map({ !$0.isEmpty && $0.count <= 1024 }) ?? true else {
             throw IOSClientError.invalidMetadata
+        }
+        guard self.userID == nil || self.userID == userID else {
+            throw IOSClientError.identityReuse
+        }
+        if let storedHandle = self.accountHandle {
+            guard accountHandle == nil || accountHandle == storedHandle else {
+                throw IOSClientError.identityReuse
+            }
+        }
+        if let storedCredential = self.mlsCredential {
+            guard mlsCredential == nil || mlsCredential == storedCredential else {
+                throw IOSClientError.identityReuse
+            }
         }
         let metadata = StoredMetadata(
             handle: identity.handle,
@@ -547,6 +561,16 @@ public final class IOSClient: SharedCoreIdentitySigner {
 
     private static func nowMs() -> UInt64 {
         UInt64(max(0, Date().timeIntervalSince1970 * 1000))
+    }
+
+    private static func freshIdentifier(excluding: String? = nil) -> String {
+        let nilValue = nilUUID.uuidString.lowercased()
+        while true {
+            let value = UUID().uuidString.lowercased()
+            if value != nilValue && value != excluding {
+                return value
+            }
+        }
     }
 
     private static func metadataKey(for profile: ClientProfile) -> String {

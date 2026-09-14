@@ -420,7 +420,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   encrypts macOS shell state with AES-GCM under profile-scoped Application
   Support storage and a Keychain-held key. Bearer sessions remain an
   in-memory-only `AuthenticatedSession`.
-- [ ] Generate a fresh non-nil `user_id`, `device_id`, and `mls_node_id` for every new local profile; reject accidental identity reuse.
+- [x] Generate a fresh non-nil `user_id`, `device_id`, and `mls_node_id` for every new local profile; reject accidental identity reuse.
+  New macOS identities create distinct non-nil UUIDs for the device and MLS
+  node. Username/OTP registration assigns the fresh server-generated user ID;
+  later sessions must match the saved user, handle, and MLS credential or the
+  client rejects the identity as reused. Pairing an existing account remains
+  intentional and uses a new device/node pair.
 - [ ] Generate and upload the initial pre-key inventory, claim and verify recipient pre-keys, and initialize the first two-user MLS conversation through the shared client core.
 
 ### Native networking and encrypted messaging
