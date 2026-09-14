@@ -104,8 +104,13 @@ device through `POST /v1/prekeys/{device_id}/claim`, and passes the opaque
 claims to the shared core. The core verifies each claim against the directory
 identity key, establishes the two-user MLS group, and delivers the pending
 commit before sending application text. Swift does not parse or trust claimed
-key material. A host without the concrete Rust core or authenticated directory
-stays fail-closed and reports the missing integration.
+key material. The platform-neutral Rust binding includes
+`DesktopCoreHostAdapter` for this host integration: its
+`DesktopCoreServices` implementation supplies directory/pre-key I/O and the
+encrypted durable store, while the adapter performs claim verification,
+device fan-out, envelope sealing/decryption, cursor commit, and QueueAck. A
+host without the concrete Rust core or authenticated directory stays
+fail-closed and reports the missing integration.
 
 On background and application termination, the macOS delegate calls
 `IOSDirectMessaging.shutdown()`. This closes transport and releases the core;

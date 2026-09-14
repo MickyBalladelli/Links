@@ -8,10 +8,12 @@ mod session;
 mod surfaces;
 mod call;
 mod core;
+mod host;
 
 pub use core::{
     bind_desktop_text_session, DesktopCoreHost, RustDesktopMessagingCore,
 };
+pub use host::{DesktopCoreHostAdapter, DesktopCoreServices, DesktopInboxItem};
 
 pub use call::{
     DesktopCallEpochKey, DesktopCallMediaEngine, DesktopCallMode, DesktopCallMlsKeyProvider,

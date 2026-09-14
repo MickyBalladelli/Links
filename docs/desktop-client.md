@@ -18,10 +18,20 @@ After pairing, the desktop host binds the shared core with:
 4. `bind_desktop_text_session()`, which wraps that core in the concrete
    `RustDesktopMessagingCore` and attaches the native `DesktopSocketFactory`.
 
-`DesktopCoreHost` is the only remaining host-owned seam at this layer. It
-connects the shared core's receive/send coordinators to durable inbox,
-outbox, cursor, directory, and async runtime providers. It receives the real
-`ClientCore`; it must not replace it with UI crypto or a second MLS engine.
+`DesktopCoreHostAdapter` is the concrete host orchestrator at this layer. Its
+`DesktopCoreServices` implementation performs the public directory lookup,
+claims one pre-key per active recipient device, and supplies the matching MLS
+KeyPackage. The adapter verifies every claim through the shared core, stages
+and delivers pending MLS commits, encrypts one MLS message, creates exact
+per-device Sealed Sender envelopes, persists those exact Send frames, and then
+writes them to the socket.
+
+The same adapter validates replay batches, decrypts each envelope through
+`ClientCore`, commits inbox data and the cursor through one durable service
+call, sends QueueAck only after that commit, and invokes the UI callback last.
+`DesktopCoreHost` remains the small protocol seam; `DesktopCoreHostAdapter`
+is the reference implementation. Its service must encrypt message data before
+local persistence and must never persist the bearer token.
 The adapter validates every binary protobuf server frame, creates a fresh
 protocol-v1 Hello, and keeps the bearer token memory-only through the supplied
 token closure.

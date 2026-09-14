@@ -77,9 +77,35 @@ public struct IOSUsernameAuthSession: Sendable {
     }
 }
 
+public struct IOSDirectoryDevice: Sendable {
+    public let deviceID: String
+    public let mlsNodeID: String
+    public let identityPublicKey: Data
+    public let mlsCredential: Data
+
+    fileprivate init(object: [String: Any]) throws {
+        guard let deviceID = object["device_id"] as? String,
+              IOSClient.isCanonicalUUID(deviceID),
+              let mlsNodeID = object["mls_node_id"] as? String,
+              IOSClient.isCanonicalUUID(mlsNodeID),
+              let publicKey = object["identity_public_key"] as? String,
+              let identityPublicKey = IOSUsernameAuthSession.decode(publicKey, count: 32),
+              let credential = object["mls_credential"] as? String,
+              let mlsCredential = IOSUsernameAuthSession.decode(credential, maximum: 1024),
+              !mlsCredential.isEmpty else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        self.deviceID = deviceID
+        self.mlsNodeID = mlsNodeID
+        self.identityPublicKey = identityPublicKey
+        self.mlsCredential = mlsCredential
+    }
+}
+
 public struct IOSUsernameDirectory: Sendable {
     public let handle: String
     public let userID: String
+    public let devices: [IOSDirectoryDevice]
 
     fileprivate init(object: [String: Any]) throws {
         guard let handle = object["handle"] as? String,
@@ -90,6 +116,8 @@ public struct IOSUsernameDirectory: Sendable {
         }
         self.handle = handle
         self.userID = userID
+        let deviceObjects = object["devices"] as? [[String: Any]] ?? []
+        self.devices = try deviceObjects.map(IOSDirectoryDevice.init)
     }
 }
 

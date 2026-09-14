@@ -96,6 +96,68 @@ public protocol IOSDirectChatDirectory: AnyObject {
         async throws -> [IOSRecipientDeviceDescriptor]
 }
 
+/// Supplies the current MLS KeyPackage for one directory device. KeyPackages
+/// are public bootstrap material, but must still be bound to the exact device
+/// and credential returned by the directory. The provider must not retain the
+/// access token after this call.
+public protocol IOSMLSKeyPackageProvider: AnyObject {
+    func keyPackage(accessToken: String, userID: String, deviceID: String,
+                    mlsNodeID: String, mlsCredential: Data) async throws -> Data
+}
+
+/// Concrete HTTPS directory adapter used by macOS and iOS hosts. The account
+/// service lookup is public; pre-key claims are deliberately left to
+/// `IOSDirectMessaging`, which calls the authenticated claim endpoint only
+/// after this snapshot has been validated.
+public final class IOSUsernameDirectoryChatAdapter: IOSDirectChatDirectory {
+    private let directoryClient: IOSUsernameAuthClient
+    private let handlesByUserID: [String: String]
+    private let keyPackageProvider: any IOSMLSKeyPackageProvider
+
+    public init(directoryClient: IOSUsernameAuthClient,
+                handlesByUserID: [String: String],
+                keyPackageProvider: any IOSMLSKeyPackageProvider) {
+        self.directoryClient = directoryClient
+        self.handlesByUserID = handlesByUserID
+        self.keyPackageProvider = keyPackageProvider
+    }
+
+    public func queryRecipientDevices(accessToken: String, recipientUserID: String)
+        async throws -> [IOSRecipientDeviceDescriptor] {
+        guard !accessToken.isEmpty, accessToken.utf8.count <= 4096,
+              IOSClient.isCanonicalUUID(recipientUserID),
+              let handle = handlesByUserID[recipientUserID] else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        let directory = try await directoryClient.lookup(handle: handle)
+        guard directory.userID == recipientUserID,
+              !directory.devices.isEmpty,
+              directory.devices.count <= 100 else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        var deviceIDs = Set<String>()
+        var descriptors = [IOSRecipientDeviceDescriptor]()
+        descriptors.reserveCapacity(directory.devices.count)
+        for device in directory.devices {
+            guard deviceIDs.insert(device.deviceID).inserted else {
+                throw IOSPreKeyError.invalidRecipient
+            }
+            let keyPackage = try await keyPackageProvider.keyPackage(
+                accessToken: accessToken,
+                userID: directory.userID,
+                deviceID: device.deviceID,
+                mlsNodeID: device.mlsNodeID,
+                mlsCredential: device.mlsCredential)
+            descriptors.append(try IOSRecipientDeviceDescriptor(
+                userID: directory.userID,
+                deviceID: device.deviceID,
+                identityPublicKey: device.identityPublicKey,
+                mlsKeyPackage: keyPackage))
+        }
+        return descriptors
+    }
+}
+
 /// Authenticated protobuf boundary for account-auth pre-key operations.
 /// Access tokens are supplied by the caller and are never retained here.
 public protocol IOSPreKeyAPI: AnyObject {

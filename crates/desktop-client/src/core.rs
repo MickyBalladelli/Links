@@ -20,9 +20,9 @@ use prost::Message;
 use uuid::Uuid;
 
 /// Host-owned durable and protocol orchestration boundary around the shared
-/// `ClientCore`. Implementations persist the cursor/inbox/outbox and call the
-/// existing `links-client-core` receive/send coordinators with the supplied
-/// core. No private key or bearer token belongs in this host object.
+/// `ClientCore`. Implementations persist the cursor/inbox/outbox and execute
+/// the shared-core receive/send order with the supplied core. No private key
+/// or bearer token belongs in this host object.
 pub trait DesktopCoreHost<C, M>: Send
 where
     C: EnvelopeCrypto,
