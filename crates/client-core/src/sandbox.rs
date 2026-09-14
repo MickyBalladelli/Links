@@ -377,7 +377,11 @@ impl SandboxRuntime {
             if import.module() != "links"
                 || !matches!(
                     import.name(),
-                    INPUT_LENGTH_IMPORT | INPUT_READ_IMPORT | OUTPUT_WRITE_IMPORT
+                    INPUT_LENGTH_IMPORT
+                        | INPUT_READ_IMPORT
+                        | OUTPUT_WRITE_IMPORT
+                        | NETWORK_REQUEST_IMPORT
+                        | CRYPTO_OPERATION_IMPORT
                 )
             {
                 return Err(SandboxError::ForbiddenImport);
