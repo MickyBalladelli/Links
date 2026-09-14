@@ -6,11 +6,15 @@ import LinksKeyStore
 @main
 struct LinksMacOSApp: App {
     @StateObject private var model = LinksMacOSAppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup("Links") {
             LinksRootView(model: model)
                 .frame(minWidth: 760, minHeight: 480)
+        }
+        .onChange(of: scenePhase) { phase in
+            model.scenePhaseDidChange(phase)
         }
     }
 }
@@ -20,6 +24,7 @@ final class LinksMacOSAppModel: ObservableObject {
     @Published private(set) var identityStatus = "Checking identity"
     @Published private(set) var accountStatus = "Signed out"
     @Published private(set) var connectionStatus = "Offline"
+    @Published private(set) var lifecycleStatus = "Launching"
     @Published private(set) var detail = "The macOS host is ready for the shared client integration."
 
     private let client: IOSClient?
@@ -41,6 +46,19 @@ final class LinksMacOSAppModel: ObservableObject {
 
     var packageStatus: String {
         return "LinksClient + LinksKeyStore"
+    }
+
+    func scenePhaseDidChange(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            lifecycleStatus = "Active"
+        case .inactive:
+            lifecycleStatus = "Inactive"
+        case .background:
+            lifecycleStatus = "Background"
+        @unknown default:
+            lifecycleStatus = "Unknown"
+        }
     }
 }
 
@@ -65,6 +83,7 @@ private struct LinksRootView: View {
                 StatusRow(title: "Identity", value: model.identityStatus)
                 StatusRow(title: "Account", value: model.accountStatus)
                 StatusRow(title: "Connection", value: model.connectionStatus)
+                StatusRow(title: "Lifecycle", value: model.lifecycleStatus)
             }
 
             Spacer()

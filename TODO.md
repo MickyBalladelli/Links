@@ -369,7 +369,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   Links package dependency. Its SwiftUI shell imports both products and reports
   identity, account, and connection state while the concrete host integrations
   are added in the following tasks.
-- [ ] Add Debug and Release schemes, application lifecycle handling, and a clean dependency on the Rust `links-identity-ffi` library for arm64 macOS; add x86_64 support if Intel Macs remain in scope.
+- [x] Add Debug and Release schemes, application lifecycle handling, and a clean dependency on the Rust `links-identity-ffi` library for arm64 macOS; add x86_64 support if Intel Macs remain in scope.
+  `native/macos/Links.xcodeproj` now includes shared `Links-Debug` and
+  `Links-Release` schemes, arm64-only deployment settings, and the SwiftUI
+  `scenePhase` lifecycle hook. `LinksKeyStore` owns the package-level Rust FFI
+  linker declaration; Intel remains out of scope until an x86_64 archive is
+  available.
 - [ ] Implement the macOS client shell: onboarding, account state, device state, connection state, conversation list, message list, composer, send action, and receive rendering.
 - [ ] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
 - [ ] Add crash-safe shutdown and restart behavior so pending outbox data and the durable cursor are not lost.
