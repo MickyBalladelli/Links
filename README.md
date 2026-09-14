@@ -16,7 +16,7 @@ remain open.
 | --- | --- |
 | `proto/links/v1` | Versioned protobuf message, identity, pre-key, envelope, sync and transport contracts. |
 | `crates/protocol` | Generated common types, descriptors, boundary validation, bounded Zstd dictionary sync compression, verifiable-OPRF contact PSI, Privacy Pass VOPRF primitives, chat-request proof-of-work hashing, and MLS group limits. |
-| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, and shared video profiles. |
+| `crates/client-core` | Portable identity/PQXDH/MLS interfaces, bounded many-to-many TreeKEM groups, first-class group send/receive fan-out, passive read-only MLS broadcast subscribers, local Argon2id contact hashing, verifiable-OPRF contact PSI, anonymous Privacy Pass token issuance, client-side chat-request proof-of-work solving, encrypted conversation sequencing, PRF-encrypted passkey backup, per-device envelope fanout, background replay/decrypt, durable sync validation, Opus voice-note muxing, and shared video profiles. |
 | `crates/web-client` | WASM Web identity, self-sovereign mnemonic/passkey derivation, and paired-device bootstrap facade built on `links-client-core`. |
 | `crates/desktop-client` | Platform-neutral desktop identity and shared-core binding facade. |
 | `crates/desktop-client/src/session.rs` | Desktop registration, encrypted sync, reconnect, and recovery session shell. |
@@ -42,6 +42,7 @@ remain open.
 | `docs/contact-discovery.md` | Local E.164 address-book hashing with Argon2id and a persistent client salt. |
 | `docs/chat-proof-of-work.md` | Client-side Hashcash admission proof for pseudonymous one-to-one connection starts. |
 | `docs/mls.md` | OpenMLS RFC 9420 TreeKEM core, hybrid suite, credential checks and durable commit flow. |
+| `docs/broadcast.md` | Passive/read-only MLS broadcast subscriber profile and authenticated update boundary. |
 | `docs/group-rbac.md` | Authenticated group membership/RBAC API, device revocation, MLS leaf changes, and epoch checkpoint flow. |
 | `docs/passkey-backup.md` | WebAuthn ceremonies, PRF-encrypted identity backup and server storage boundary. |
 | `docs/pairing.md` | Canonical device-pairing QR URI, signature verification and client flow. |

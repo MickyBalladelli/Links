@@ -336,7 +336,8 @@ where
 
     loop {
         let high_watermark = next.batch.high_watermark;
-        let page = receive_batch(core, sync, transport, store, renderer, next, now_ms).await?;
+        let page =
+            receive_batch(core, sync, transport, store, renderer, next, now_ms, true).await?;
         result.messages.extend(page.messages);
         result.delivery_receipts.extend(page.delivery_receipts);
         result.queue_acks.push(page.queue_ack);
@@ -386,7 +387,8 @@ where
 
     loop {
         let high_watermark = next.batch.high_watermark;
-        let page = receive_batch(core, sync, transport, store, renderer, next, now_ms).await?;
+        let page =
+            receive_batch(core, sync, transport, store, renderer, next, now_ms, true).await?;
         result.messages.extend(page.messages);
         result.delivery_receipts.extend(page.delivery_receipts);
         result.queue_acks.push(page.queue_ack);
@@ -437,7 +439,8 @@ where
 
     loop {
         let high_watermark = next.batch.high_watermark;
-        let page = receive_batch(core, sync, transport, store, renderer, next, now_ms).await?;
+        let page =
+            receive_batch(core, sync, transport, store, renderer, next, now_ms, false).await?;
         result.messages.extend(page.messages);
         result.delivery_receipts.extend(page.delivery_receipts);
         result.queue_acks.push(page.queue_ack);
@@ -467,6 +470,7 @@ async fn receive_batch<C, M, T, S, R>(
     renderer: &mut R,
     incoming: DirectReceiveBatch,
     now_ms: u64,
+    collect_delivery_receipts: bool,
 ) -> Result<ReceivedPage, CoreError>
 where
     C: EnvelopeCrypto,
@@ -488,7 +492,9 @@ where
         match item.entry.ok_or(CoreError::InvalidSync)? {
             v1::queue_item::Entry::Envelope(envelope) => {
                 let message = core.open_envelope(&envelope, now_ms)?;
-                add_receipt(&mut receipts, &message, now_ms)?;
+                if collect_delivery_receipts {
+                    add_receipt(&mut receipts, &message, now_ms)?;
+                }
                 items.push(DecryptedSyncItem::Message {
                     cursor: item.cursor,
                     message: message.clone(),

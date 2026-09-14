@@ -101,6 +101,23 @@ forget a pending commit or advance the application state without its accepted
 delivery record. `RustCryptoProvider<Storage>` supplies RustCrypto and leaves
 this durable storage boundary explicit.
 
+## Broadcast profile
+
+`links-client-core::broadcast::BroadcastSubscriber<M>` is the passive/read-only
+MLS profile. It accepts broadcast welcomes, publisher commits, and encrypted
+application messages through `receive_broadcast_available()`. Its MLS engine
+implementation rejects local group creation, direct-chat joins/commits, message
+encryption, membership changes, and pending local commit merges. The wrapped
+engine is not exposed as mutable state, so a subscriber cannot publish by
+accident through the profile.
+
+MLS itself has no universal read-only leaf permission. Links therefore enforces
+the policy at the client API and transport boundary: broadcast transports accept
+only `BroadcastWelcome` and `BroadcastCommit` updates, while publisher-side
+authorization and post signatures remain separate controls. The broadcast
+receive coordinator does not create delivery receipts, so the passive profile
+has no outbound message path.
+
 ## Complexity and remaining gates
 
 OpenMLS TreeKEM updates derive and publish only the changed path, giving

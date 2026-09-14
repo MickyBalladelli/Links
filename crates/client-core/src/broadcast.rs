@@ -19,10 +19,6 @@ impl<M> BroadcastSubscriber<M> {
         Self { engine }
     }
 
-    pub fn into_inner(self) -> M {
-        self.engine
-    }
-
     pub fn engine(&self) -> &M {
         &self.engine
     }

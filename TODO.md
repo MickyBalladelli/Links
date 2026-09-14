@@ -505,7 +505,10 @@ Add richer communication modes once 1-to-1 messaging, identity, sync, and media 
 
 ### Broadcast channels
 
-- [ ] Configure MLS broadcast profiles where subscribers join as passive/read-only leaves.
+- [x] Configure MLS broadcast profiles where subscribers join as passive/read-only leaves.
+  `BroadcastSubscriber` is a read-only client-core MLS profile: it accepts only
+  broadcast welcomes/commits and application messages, while rejecting local
+  publishing, group creation, membership changes, and pending-commit merges.
 - [ ] Enforce Ed25519 signatures on all broadcast posts by admin devices.
 - [ ] Implement the publish flow: admin signs post, encrypts with broadcast master key, and dispatches to the broker.
 - [ ] Implement the receive flow: subscriber fetches signed payload, verifies the admin signature, decrypts, and renders.
