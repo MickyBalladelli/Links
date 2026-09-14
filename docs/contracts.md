@@ -75,6 +75,12 @@ ciphertext digest stay private too. Native iOS/Android staging, Web/WASM
 chunk helpers, and desktop file streams must use the same nonce/AAD derivation
 and verify the complete ciphertext digest before publishing plaintext.
 
+Content-addressed large attachments add an ordered private
+`MediaMetadata.chunk_cids` list. Each CID is derived from one ciphertext chunk;
+the canonical retrieval URI is `ipfs://CID`. IPFS, Arweave, and Filecoin
+adapters receive only those encrypted blocks and must verify the CID on both
+write and read.
+
 Large encrypted attachments may bypass blob storage through an authenticated,
 ordered and reliable WebRTC DataChannel. `links-client-core::p2p_transfer` and
 the Web `WebRtcFileTransfer` adapter use byte-compatible `LDT1` frames with
