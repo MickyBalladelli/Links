@@ -589,6 +589,65 @@ where
             plaintext: SecretBytes::new(plaintext),
         })
     }
+
+    fn ensure_group_members(
+        &mut self,
+        conversation_id: &str,
+        key_package_bytes: &[&[u8]],
+    ) -> Result<Option<PendingCommit>, CoreError> {
+        if key_package_bytes.is_empty() || key_package_bytes.len() > MAX_GROUP_DEVICES {
+            return Err(CoreError::Authentication);
+        }
+
+        let group_id = group_id(conversation_id)?;
+        let mut packages = Vec::with_capacity(key_package_bytes.len());
+        let mut target_devices = HashSet::with_capacity(key_package_bytes.len());
+        for bytes in key_package_bytes {
+            let package = self.validate_key_package(bytes)?;
+            let binding = verify_leaf(&self.verifier, package.leaf_node())?;
+            if binding.user_id == self.local_binding.user_id
+                || !target_devices.insert(binding.device_id)
+            {
+                return Err(CoreError::Authentication);
+            }
+            packages.push((*bytes, binding.device_id));
+        }
+
+        let existing =
+            MlsGroup::load(self.provider.storage(), &group_id).map_err(|_| CoreError::Provider)?;
+        let Some(group) = existing else {
+            self.create_group_with_id(group_id)?;
+            return self
+                .add_group_members(conversation_id, key_package_bytes)
+                .map(Some);
+        };
+
+        let users = verified_group_user_counts(&self.verifier, &group)?;
+        ensure_group_user_limit(&users, MAX_GROUP_USERS)?;
+        if !users.contains_key(&self.local_binding.user_id)
+            || group.members().count() > MAX_GROUP_DEVICES
+        {
+            return Err(CoreError::Authentication);
+        }
+
+        let existing_devices = group
+            .members()
+            .map(|member| {
+                verify_credential(&self.verifier, &member.credential, &member.signature_key)
+                    .map(|binding| binding.device_id)
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
+        let missing = packages
+            .iter()
+            .filter(|(_, device_id)| !existing_devices.contains(device_id))
+            .map(|(bytes, _)| *bytes)
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            ensure_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
+            return Ok(None);
+        }
+        self.add_group_members(conversation_id, &missing).map(Some)
+    }
 }
 
 impl<P, S, V> MlsEngine for OpenMlsEngine<P, S, V>
