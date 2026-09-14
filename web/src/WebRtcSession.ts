@@ -46,7 +46,7 @@ export interface WebRtcSessionOptions {
 export class WebRtcSession implements WebCoreTransport {
   static readonly maximumSdpBytes = 256 * 1024
 
-  readonly sessionID: string
+  private sessionIDValue: string | null
   readonly targetDeviceID: string
   private readonly endpoint: string
   private readonly core: WebMessagingCore
@@ -70,9 +70,9 @@ export class WebRtcSession implements WebCoreTransport {
     }
     requireCanonicalUUID(options.core.deviceID, 'device ID')
     requireCanonicalUUID(options.targetDeviceID, 'target device ID')
-    const sessionID = options.sessionID ?? crypto.randomUUID()
-    requireCanonicalUUID(sessionID, 'WebRTC session ID')
-    this.sessionID = sessionID
+    const sessionID = options.sessionID ?? null
+    if (sessionID !== null) requireCanonicalUUID(sessionID, 'WebRTC session ID')
+    this.sessionIDValue = sessionID
     this.targetDeviceID = options.targetDeviceID
     this.endpoint = options.endpoint
     this.core = options.core
@@ -87,6 +87,10 @@ export class WebRtcSession implements WebCoreTransport {
 
   get state(): WebRtcSessionState {
     return this.currentState
+  }
+
+  get sessionID(): string | null {
+    return this.sessionIDValue
   }
 
   get isConnected(): boolean {
@@ -138,6 +142,7 @@ export class WebRtcSession implements WebCoreTransport {
   /** Call after the signaling WebSocket reaches its ready state. */
   async startOffer(dataChannelLabel?: string): Promise<RTCDataChannel | null> {
     if (!this.isSignalingReady()) throw new Error('WebRTC signaling is not connected')
+    if (this.sessionIDValue === null) this.sessionIDValue = crypto.randomUUID()
     const peer = this.createPeer(true)
     const channel = dataChannelLabel === undefined
       ? null
@@ -157,7 +162,10 @@ export class WebRtcSession implements WebCoreTransport {
     requireCanonicalUUID(delivery.senderDeviceID, 'sender device ID')
     requireCanonicalUUID(delivery.sessionID, 'WebRTC session ID')
     requireCanonicalUUID(delivery.targetDeviceID, 'target device ID')
-    if (delivery.sessionID !== this.sessionID ||
+    if (this.sessionIDValue === null && delivery.kind === 1) {
+      this.sessionIDValue = delivery.sessionID
+    }
+    if (this.sessionIDValue === null || delivery.sessionID !== this.sessionIDValue ||
         delivery.senderDeviceID !== this.targetDeviceID ||
         delivery.targetDeviceID !== this.core.deviceID ||
         delivery.sdp.length === 0 ||
@@ -253,7 +261,7 @@ export class WebRtcSession implements WebCoreTransport {
     const kindNumber = kind === 'offer' ? 1 : kind === 'answer' ? 2 : 3
     const frame = this.signaling.encodeWebRtcSignal(
       crypto.randomUUID(),
-      this.sessionID,
+      this.sessionIDValue ?? (() => { throw new Error('WebRTC session ID unavailable') })(),
       this.targetDeviceID,
       kindNumber,
       sdp,
