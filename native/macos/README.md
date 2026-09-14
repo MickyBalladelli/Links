@@ -12,6 +12,11 @@ declares the `links_identity_ffi` linker dependency and reads
 Intel support stays out of scope until an x86_64 Rust archive is built and
 validated.
 
+The shell creates the local identity on first run, shows account/device/
+connection state, and only sends through an installed `IOSDirectMessaging`
+host. Without concrete Rust-core and durable providers it remains in a safe
+"Core not configured" state.
+
 Build the Rust library first, then build the app from the repository root:
 
 ```sh

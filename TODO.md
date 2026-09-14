@@ -375,7 +375,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   `scenePhase` lifecycle hook. `LinksKeyStore` owns the package-level Rust FFI
   linker declaration; Intel remains out of scope until an x86_64 archive is
   available.
-- [ ] Implement the macOS client shell: onboarding, account state, device state, connection state, conversation list, message list, composer, send action, and receive rendering.
+- [x] Implement the macOS client shell: onboarding, account state, device state, connection state, conversation list, message list, composer, send action, and receive rendering.
+  `MacOSClientModel` owns local identity onboarding, account/device state, and
+  the `IOSDirectMessaging` delegate boundary. `MacOSClientShell` provides the
+  onboarding screen, conversation list, message list, composer, send action,
+  and receive rendering. The UI stays fail-closed until a concrete shared-core
+  and durable host is installed.
 - [ ] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
 - [ ] Add crash-safe shutdown and restart behavior so pending outbox data and the durable cursor are not lost.
 

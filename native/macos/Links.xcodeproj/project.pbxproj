@@ -10,11 +10,15 @@
 		A10000010000000000000001 /* LinksMacOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000001 /* LinksMacOSApp.swift */; };
 		A10000010000000000000002 /* LinksClient in Frameworks */ = {isa = PBXBuildFile; productRef = A10000030000000000000001 /* LinksClient */; };
 		A10000010000000000000003 /* LinksKeyStore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000030000000000000002 /* LinksKeyStore */; };
+		A10000010000000000000004 /* MacOSClientModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000003 /* MacOSClientModel.swift */; };
+		A10000010000000000000005 /* MacOSClientShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000004 /* MacOSClientShell.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A10000020000000000000001 /* LinksMacOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSApp.swift; sourceTree = "<group>"; };
 		A10000020000000000000002 /* Links.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Links.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000020000000000000003 /* MacOSClientModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientModel.swift; sourceTree = "<group>"; };
+		A10000020000000000000004 /* MacOSClientShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSClientShell.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,6 +46,8 @@
 			isa = PBXGroup;
 			children = (
 				A10000020000000000000001 /* LinksMacOSApp.swift */,
+				A10000020000000000000003 /* MacOSClientModel.swift */,
+				A10000020000000000000004 /* MacOSClientShell.swift */,
 			);
 			path = Links;
 			sourceTree = "<group>";
@@ -125,6 +131,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000010000000000000001 /* LinksMacOSApp.swift in Sources */,
+				A10000010000000000000004 /* MacOSClientModel.swift in Sources */,
+				A10000010000000000000005 /* MacOSClientShell.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
