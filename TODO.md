@@ -436,7 +436,11 @@ exchanging encrypted one-to-one text through the same local development stack.
 
 ### Native networking and encrypted messaging
 
-- [ ] Implement the macOS TLS WebSocket adapter for `wss://<host>/v1/connect` using the `links.v1` subprotocol and binary-only frames.
+- [x] Implement the macOS TLS WebSocket adapter for `wss://<host>/v1/connect` using the `links.v1` subprotocol and binary-only frames.
+  The shared Apple transport used by the macOS target now pins the exact
+  `/v1/connect` WSS endpoint, requires TLS 1.3 and the negotiated `links.v1`
+  subprotocol, rejects redirects and text frames, bounds every binary frame at
+  1 MiB, and keeps ping/reconnect/Hello-deadline handling on the socket queue.
 - [ ] Bind the adapter to `DesktopTextSession` and a concrete `DesktopMessagingCore` implementation backed by the shared Rust core.
 - [ ] Implement durable macOS providers for MLS state, inbox, outbox, message IDs, conversation sequences, and replay cursor under the profile's Application Support directory.
 - [ ] Implement directory lookup, pre-key claim, message fan-out, Sealed Sender envelope creation, decrypt, durable commit, and QueueAck in the host integration.

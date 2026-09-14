@@ -17,6 +17,13 @@ connection state, and only sends through an installed `IOSDirectMessaging`
 host. Without concrete Rust-core and durable providers it remains in a safe
 "Core not configured" state.
 
+The macOS messaging path uses `IOSConnectionManager` as its native TLS socket
+adapter. It accepts only `wss://<host>/v1/connect`, requests and verifies the
+`links.v1` subprotocol, uses TLS 1.3, sends and receives binary protobuf frames
+only, rejects redirects and oversized frames, and handles ping heartbeats plus
+bounded full-jitter reconnects. Hello is produced by the shared core and must
+arrive within five seconds of the handshake.
+
 Build the Rust library first, then build a signed Debug app after choosing an
 Apple Development team in Xcode:
 

@@ -35,6 +35,15 @@ public final class IOSConnectionManager {
                         reason: Data?) {
             owner?.closed(webSocketTask)
         }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest,
+                        completionHandler: @escaping (URLRequest?) -> Void) {
+            // The gateway endpoint is pinned. Never follow a redirect that
+            // could move the bearer-authenticated session to another host.
+            completionHandler(nil)
+        }
     }
 
     private let endpoint: URL
@@ -44,7 +53,7 @@ public final class IOSConnectionManager {
     private let stateQueue = DispatchQueue(label: "ai.links.ios.connection")
     private let socketDelegate = SocketDelegate()
     private lazy var urlSession = URLSession(
-        configuration: .ephemeral,
+        configuration: Self.makeURLSessionConfiguration(),
         delegate: socketDelegate,
         delegateQueue: nil)
 
@@ -65,6 +74,8 @@ public final class IOSConnectionManager {
         guard endpoint.scheme?.lowercased() == "wss",
               endpoint.host?.isEmpty == false,
               endpoint.user == nil,
+              endpoint.password == nil,
+              endpoint.path == "/v1/connect",
               endpoint.query == nil,
               endpoint.fragment == nil else {
             throw IOSConnectionError.invalidEndpoint
@@ -344,6 +355,16 @@ public final class IOSConnectionManager {
             guard let self else { return }
             self.delegate?.connectionManagerDidDisconnect(self)
         }
+    }
+
+    private static func makeURLSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpCookieStorage = nil
+        configuration.waitsForConnectivity = false
+        configuration.tlsMinimumSupportedProtocolVersion = .TLSv13
+        return configuration
     }
 }
 
