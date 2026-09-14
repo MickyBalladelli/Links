@@ -6,6 +6,7 @@
 
 use crate::{
     background::DecryptedSyncItem,
+    broadcast::BroadcastSubscriber,
     crypto::EnvelopeCrypto,
     envelopes::ClientCore,
     mls::MlsEngine,
@@ -31,6 +32,14 @@ pub enum MlsEpochUpdate {
         bytes: Vec<u8>,
     },
     GroupCommit {
+        conversation_id: String,
+        bytes: Vec<u8>,
+    },
+    BroadcastWelcome {
+        conversation_id: String,
+        bytes: Vec<u8>,
+    },
+    BroadcastCommit {
         conversation_id: String,
         bytes: Vec<u8>,
     },
@@ -65,6 +74,20 @@ impl MlsEpochUpdate {
         })
     }
 
+    pub fn broadcast_welcome(conversation_id: String, bytes: Vec<u8>) -> Result<Self, CoreError> {
+        Self::new(conversation_id, bytes).map(|(conversation_id, bytes)| Self::BroadcastWelcome {
+            conversation_id,
+            bytes,
+        })
+    }
+
+    pub fn broadcast_commit(conversation_id: String, bytes: Vec<u8>) -> Result<Self, CoreError> {
+        Self::new(conversation_id, bytes).map(|(conversation_id, bytes)| Self::BroadcastCommit {
+            conversation_id,
+            bytes,
+        })
+    }
+
     pub fn conversation_id(&self) -> &str {
         match self {
             Self::Welcome {
@@ -78,12 +101,31 @@ impl MlsEpochUpdate {
             }
             | Self::GroupCommit {
                 conversation_id, ..
+            }
+            | Self::BroadcastWelcome {
+                conversation_id, ..
+            }
+            | Self::BroadcastCommit {
+                conversation_id, ..
             } => conversation_id,
         }
     }
 
     pub fn is_group(&self) -> bool {
-        matches!(self, Self::GroupWelcome { .. } | Self::GroupCommit { .. })
+        matches!(
+            self,
+            Self::GroupWelcome { .. }
+                | Self::GroupCommit { .. }
+                | Self::BroadcastWelcome { .. }
+                | Self::BroadcastCommit { .. }
+        )
+    }
+
+    pub fn is_broadcast(&self) -> bool {
+        matches!(
+            self,
+            Self::BroadcastWelcome { .. } | Self::BroadcastCommit { .. }
+        )
     }
 
     fn new(conversation_id: String, bytes: Vec<u8>) -> Result<(String, Vec<u8>), CoreError> {
@@ -112,6 +154,14 @@ impl MlsEpochUpdate {
                 bytes,
             } => mls.process_direct_commit(conversation_id, bytes),
             Self::GroupCommit {
+                conversation_id,
+                bytes,
+            } => mls.process_commit(conversation_id, bytes),
+            Self::BroadcastWelcome {
+                conversation_id,
+                bytes,
+            } => mls.join_group(conversation_id, bytes),
+            Self::BroadcastCommit {
                 conversation_id,
                 bytes,
             } => mls.process_commit(conversation_id, bytes),
@@ -177,6 +227,21 @@ pub trait GroupReceiveStore: DirectReceiveStore {}
 
 impl<T> GroupReceiveStore for T where T: DirectReceiveStore + ?Sized {}
 
+pub trait BroadcastReceiveTransport: DirectReceiveTransport {
+    fn validate_broadcast_batch(&self, batch: &GroupReceiveBatch) -> Result<(), CoreError> {
+        if batch
+            .mls_updates
+            .iter()
+            .any(|update| !update.is_broadcast())
+        {
+            return Err(CoreError::Authentication);
+        }
+        Ok(())
+    }
+}
+
+impl<T> BroadcastReceiveTransport for T where T: DirectReceiveTransport + ?Sized {}
+
 #[async_trait]
 pub trait MessageRenderer: Send {
     async fn render(&mut self, message: &v1::Message) -> Result<(), CoreError>;
@@ -233,6 +298,7 @@ pub struct DirectReceiveResult {
 }
 
 pub type GroupReceiveResult = DirectReceiveResult;
+pub type BroadcastReceiveResult = DirectReceiveResult;
 
 /// Fetch replay pages, apply authenticated MLS epoch updates, decrypt and
 /// render messages, durably commit them, emit QueueAck, and return private
@@ -331,6 +397,57 @@ where
         }
         next = transport.replay(sync.cursor(), replay_limit).await?;
         transport.validate_group_batch(&next)?;
+    }
+}
+
+/// Receive broadcast traffic with a passive subscriber engine. Only
+/// broadcast Welcome/Commit updates are accepted, and the subscriber engine
+/// rejects every local publishing or membership operation.
+pub async fn receive_broadcast_available<C, M, T, S, R>(
+    core: &mut ClientCore<C, BroadcastSubscriber<M>>,
+    sync: &mut SyncState,
+    transport: &mut T,
+    store: &mut S,
+    renderer: &mut R,
+    replay_limit: u32,
+    now_ms: u64,
+) -> Result<BroadcastReceiveResult, CoreError>
+where
+    C: EnvelopeCrypto,
+    M: MlsEngine,
+    T: BroadcastReceiveTransport,
+    S: GroupReceiveStore,
+    R: MessageRenderer,
+{
+    if replay_limit == 0 || replay_limit as usize > protocol::MAX_BATCH_ITEMS || now_ms == 0 {
+        return Err(CoreError::InvalidSync);
+    }
+    let device_id = sync.device_id().to_owned();
+    let mut next = transport
+        .connect(&device_id, sync.cursor(), replay_limit)
+        .await?;
+    transport.validate_broadcast_batch(&next)?;
+    let mut result = DirectReceiveResult {
+        messages: Vec::new(),
+        delivery_receipts: Vec::new(),
+        queue_acks: Vec::new(),
+        tombstones: 0,
+        cursor: sync.cursor(),
+    };
+
+    loop {
+        let high_watermark = next.batch.high_watermark;
+        let page = receive_batch(core, sync, transport, store, renderer, next, now_ms).await?;
+        result.messages.extend(page.messages);
+        result.delivery_receipts.extend(page.delivery_receipts);
+        result.queue_acks.push(page.queue_ack);
+        result.tombstones += page.tombstones;
+        result.cursor = sync.cursor();
+        if page.idle || result.cursor >= high_watermark {
+            return Ok(result);
+        }
+        next = transport.replay(sync.cursor(), replay_limit).await?;
+        transport.validate_broadcast_batch(&next)?;
     }
 }
 
