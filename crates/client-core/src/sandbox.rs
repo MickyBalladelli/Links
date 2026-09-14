@@ -315,6 +315,20 @@ pub enum SandboxError {
     OutputTooLarge,
     #[error("sandbox host ABI violation")]
     HostViolation,
+    #[error("invalid mini-app permission")]
+    InvalidPermission,
+    #[error("mini-app capability denied")]
+    PermissionDenied,
+    #[error("invalid mini-app network request")]
+    InvalidNetworkRequest,
+    #[error("invalid mini-app cryptographic request")]
+    InvalidCryptoRequest,
+    #[error("mini-app network response is too large")]
+    NetworkResponseTooLarge,
+    #[error("mini-app cryptographic response is too large")]
+    CryptoResponseTooLarge,
+    #[error("mini-app host call failed")]
+    HostCallFailed,
     #[error("sandbox fuel exhausted")]
     FuelExhausted,
     #[error("sandbox execution failed")]
@@ -323,10 +337,12 @@ pub enum SandboxError {
     GuestRejected,
 }
 
-struct HostState {
+struct HostState<'a> {
     input: Vec<u8>,
     output: Vec<u8>,
     max_output_bytes: usize,
+    permissions: SandboxPermissions,
+    host: &'a mut dyn SandboxHost,
     limits: StoreLimits,
 }
 
