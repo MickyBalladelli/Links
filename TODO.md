@@ -373,8 +373,8 @@ exchanging encrypted one-to-one text through the same local development stack.
   `native/macos/Links.xcodeproj` now includes shared `Links-Debug` and
   `Links-Release` schemes, arm64-only deployment settings, and the SwiftUI
   `scenePhase` lifecycle hook. `LinksKeyStore` owns the package-level Rust FFI
-  linker declaration; Intel remains out of scope until an x86_64 archive is
-  available.
+  linker declaration. Arm64 Debug and Release builds link successfully;
+  Intel remains out of scope until an x86_64 archive is available.
 - [x] Implement the macOS client shell: onboarding, account state, device state, connection state, conversation list, message list, composer, send action, and receive rendering.
   `MacOSClientModel` owns local identity onboarding, account/device state, and
   the `IOSDirectMessaging` delegate boundary. `MacOSClientShell` provides the

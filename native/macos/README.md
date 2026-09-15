@@ -26,11 +26,11 @@ redirects and oversized frames, and handles ping heartbeats plus bounded
 full-jitter reconnects. Hello is produced by the shared core and must arrive
 within five seconds of the handshake.
 
-Build the Rust library first, then build a signed Debug app after choosing an
-Apple Development team in Xcode:
+Build the arm64 Rust library first with the same macOS deployment target, then
+build a signed Debug app after choosing an Apple Development team in Xcode:
 
 ```sh
-cargo build -p links-identity-ffi --locked
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build -p links-identity-ffi --locked
 xcodebuild \
   -project native/macos/Links.xcodeproj \
   -scheme Links-Debug \
@@ -39,8 +39,21 @@ xcodebuild \
   build
 ```
 
-Use the `Links-Release` scheme and `-configuration Release` for a release
-build. The target enables Automatic signing, the hardened runtime, and
+Use the `Links-Release` scheme and `-configuration Release` with the matching
+Rust release archive:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=13.0 \
+  cargo build -p links-identity-ffi --release --locked
+LINKS_IDENTITY_LIB_DIR="$PWD/target/release" xcodebuild \
+  -project native/macos/Links.xcodeproj \
+  -scheme Links-Release \
+  -configuration Release \
+  -sdk macosx \
+  build
+```
+
+The target enables Automatic signing, the hardened runtime, and
 `Links/Links.entitlements`. Choose an Apple Development team in Xcode for
 Debug builds. Use a Developer ID Application identity and the same team for
 release distribution.
@@ -50,7 +63,7 @@ release distribution.
 Use this path when no Apple signing team or certificate is available:
 
 ```sh
-cargo build -p links-identity-ffi --locked
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build -p links-identity-ffi --locked
 xcodebuild \
   -project native/macos/Links.xcodeproj \
   -scheme Links-Debug \
