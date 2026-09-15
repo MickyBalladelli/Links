@@ -87,8 +87,9 @@ xcodebuild \
 
 The unsigned app is useful for UI and package-link checks. It has no signed
 Keychain entitlements, so hardware identity creation can fail with a missing
-Keychain entitlement. Use a signed Debug build to exercise Secure Enclave and
-Keychain storage.
+Keychain entitlement. The two-client launcher rejects an unsigned bundle.
+Use a signed Debug build to exercise Secure Enclave, pre-key, and Keychain
+storage.
 
 The SwiftUI app observes `scenePhase` so future transport and durable store
 hosts have explicit active, inactive, and background lifecycle hooks.

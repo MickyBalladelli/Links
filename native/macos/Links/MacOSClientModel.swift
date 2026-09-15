@@ -457,6 +457,30 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         return "Connection could not start. Check the local gateway and profile state."
     }
 
+    private static func preKeySetupErrorMessage(_ error: Error) -> String {
+        if let coreError = error as? MacOSRustCoreError {
+            switch coreError {
+            case .status(let status) where status == 3:
+                return "Pre-key Keychain storage unavailable. Use a signed Debug build."
+            case .status(let status) where status == 4:
+                return "Pre-key profile state could not be saved. Check Keychain access."
+            case .status(let status):
+                return "Pre-key setup failed (code \(status))."
+            }
+        }
+        if let error = error as? IOSPreKeyError {
+            switch error {
+            case .serviceRejected:
+                return "Pre-key service rejected the request. Check the local account service."
+            case .invalidToken:
+                return "Pre-key upload needs a fresh account login."
+            default:
+                break
+            }
+        }
+        return "Initial pre-key inventory could not be uploaded."
+    }
+
     func startOTPEnrollment() {
         guard let client, let otpClient, client.isEnrolled, !isOTPWorking else {
             otpStatus = "Use an HTTPS account-auth endpoint for phone OTP"
@@ -640,7 +664,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                             + "\(inventory.oneTimeKEMPreKeys) KEM keys"
                     } catch {
                         self.preKeyStatus = "Pre-key setup failed"
-                        self.actionError = "Initial pre-key inventory could not be uploaded."
+                        self.actionError = Self.preKeySetupErrorMessage(error)
                     }
                 }
             }

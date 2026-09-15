@@ -57,6 +57,13 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 
+if [[ "${LINKS_BUILD_APP:-1}" != "1" ]] && ! codesign --verify --deep --strict "$app_path" >/dev/null 2>&1; then
+  echo "Links.app is not validly signed." >&2
+  echo "The two-client launcher needs Keychain entitlements for pre-key storage." >&2
+  echo "Run ./launch-links.sh to build a signed Debug app, then retry." >&2
+  exit 1
+fi
+
 backend_pid=""
 cleanup() {
   if [[ -n "$backend_pid" ]] && kill -0 "$backend_pid" 2>/dev/null; then
