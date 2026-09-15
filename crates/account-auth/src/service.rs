@@ -1965,6 +1965,33 @@ impl AccountAuth {
             .await?)
     }
 
+    pub async fn put_mls_key_package(
+        &self,
+        token: &str,
+        key_package: Vec<u8>,
+    ) -> Result<(), AuthError> {
+        let account = self.authenticate(token).await?;
+        if key_package.is_empty() || key_package.len() > links_protocol::MAX_FRAME_BYTES {
+            return Err(AuthError::Invalid);
+        }
+        RelationalStore::from_pool(self.pool.clone())
+            .put_mls_key_package(account.device_id, &key_package)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_mls_key_package(
+        &self,
+        token: &str,
+        target_device_id: Uuid,
+    ) -> Result<Vec<u8>, AuthError> {
+        self.authenticate(token).await?;
+        RelationalStore::from_pool(self.pool.clone())
+            .mls_key_package(target_device_id)
+            .await?
+            .ok_or(AuthError::Denied)
+    }
+
     pub async fn contact_psi_parameters(
         &self,
         token: &str,

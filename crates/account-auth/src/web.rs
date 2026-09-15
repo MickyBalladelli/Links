@@ -68,6 +68,10 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .route("/v1/prekeys/status", get(prekey_inventory))
         .route("/v1/prekeys/{device_id}/claim", post(claim_prekeys))
         .layer(DefaultBodyLimit::max(MAX_PREKEY_UPLOAD_BYTES));
+    let mls_routes = Router::new()
+        .route("/v1/mls/key-package", put(upload_mls_key_package))
+        .route("/v1/mls/key-package/{device_id}", get(download_mls_key_package))
+        .layer(DefaultBodyLimit::max(links_protocol::MAX_FRAME_BYTES));
     let directory_routes = Router::new()
         .route("/v1/directory/{handle}", get(directory_lookup))
         .layer(DefaultBodyLimit::max(4096));
@@ -99,6 +103,7 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .merge(group_routes)
         .merge(passkey_routes)
         .merge(prekey_routes)
+        .merge(mls_routes)
         .merge(directory_routes)
         .merge(contact_psi_routes)
         .merge(privacy_pass_routes)
@@ -442,6 +447,32 @@ async fn claim_prekeys(
         auth.claim_prekey_bundle(bearer(&headers)?, device_id)
             .await?,
     )
+}
+
+async fn upload_mls_key_package(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.put_mls_key_package(bearer(&headers)?, body.to_vec())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn download_mls_key_package(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    Path(device_id): Path<uuid::Uuid>,
+) -> Result<Response, AuthError> {
+    let package = auth
+        .get_mls_key_package(bearer(&headers)?, device_id)
+        .await?;
+    let mut response = package.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "application/x-protobuf".parse().unwrap(),
+    );
+    Ok(response)
 }
 fn bearer(headers: &HeaderMap) -> Result<&str, AuthError> {
     headers

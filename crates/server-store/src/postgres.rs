@@ -288,6 +288,37 @@ impl RelationalStore {
             verification_badge,
         }))
     }
+
+    pub async fn put_mls_key_package(
+        &self,
+        device_id: Uuid,
+        key_package: &[u8],
+    ) -> Result<(), StoreError> {
+        if key_package.is_empty() || key_package.len() > MAX_FRAME_BYTES {
+            return Err(StoreError::Invalid);
+        }
+        sqlx::query(
+            "INSERT INTO device_mls_key_packages (device_id,key_package) VALUES ($1,$2) ON CONFLICT (device_id) DO UPDATE SET key_package=EXCLUDED.key_package,updated_at=now()",
+        )
+        .bind(device_id)
+        .bind(key_package)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mls_key_package(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        let package = sqlx::query_scalar(
+            "SELECT key_package FROM device_mls_key_packages dkp JOIN devices d USING (device_id) WHERE dkp.device_id=$1 AND d.revoked_at IS NULL",
+        )
+        .bind(device_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(package)
+    }
     pub async fn register_device(
         &self,
         user_id: Uuid,
