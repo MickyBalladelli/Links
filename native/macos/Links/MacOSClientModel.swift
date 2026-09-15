@@ -185,6 +185,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
     private var directChatDirectory: (any IOSDirectChatDirectory)?
+    private var initializedConversationIDs = Set<String>()
     private var profileLogger: LinksMacOSProfileLogger?
     private var profileStatus: LinksMacOSProfileStatus?
     private let identityQueue = DispatchQueue(
@@ -297,6 +298,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     var hasMessagingHost: Bool { messaging != nil }
 
     var isConnectionRequested: Bool { connectionRequested }
+
+    var canInitializeSelectedConversation: Bool {
+        messaging?.state == .ready && messaging?.isConnected == true
+    }
 
     func scenePhaseDidChange(_ phase: ScenePhase) {
         switch phase {
@@ -733,13 +738,22 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
               let conversation = conversations.first(where: {
                   $0.id == selectedConversationID
               }),
-              let messaging,
-              let preKeyAPI,
-              let directChatDirectory else {
+              let messaging else {
             conversationSetupStatus = "MLS host directory is not configured"
             actionError = "Configure an authenticated directory with MLS KeyPackages first."
             return
         }
+        guard messaging.state == .ready && messaging.isConnected else {
+            conversationSetupStatus = "Connect before initializing MLS"
+            actionError = "Click Connect and wait for Ready, then initialize secure chat."
+            return
+        }
+        guard let preKeyAPI, let directChatDirectory else {
+            conversationSetupStatus = "MLS host directory is not configured"
+            actionError = "Configure an authenticated directory with MLS KeyPackages first."
+            return
+        }
+        initializedConversationIDs.remove(conversation.id)
         conversationSetupStatus = "Claiming recipient pre-keys"
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -750,10 +764,22 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     directory: directChatDirectory,
                     preKeyAPI: preKeyAPI)
                 self.conversationSetupStatus = "Secure two-user MLS conversation ready"
+                self.initializedConversationIDs.insert(conversation.id)
+                if self.messaging?.state == .ready {
+                    self.deliveryState = .ready
+                    self.connectionStatus = self.deliveryState.title
+                }
                 self.actionError = nil
+                self.publishProfileStatus()
             } catch {
-                self.conversationSetupStatus = "MLS conversation setup failed"
-                self.actionError = "Recipient pre-key verification or MLS setup failed."
+                if let messagingError = error as? IOSMessagingError,
+                   case .notConnected = messagingError {
+                    self.conversationSetupStatus = "Connect before initializing MLS"
+                    self.actionError = "Connection dropped. Click Connect and try again."
+                } else {
+                    self.conversationSetupStatus = "MLS conversation setup failed"
+                    self.actionError = "Recipient pre-key verification or MLS setup failed."
+                }
             }
         }
     }
@@ -768,6 +794,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         let conversation = conversations[index]
+        guard initializedConversationIDs.contains(conversation.id) else {
+            actionError = "Initialize secure chat first."
+            return
+        }
         guard let messaging else {
             actionError = "Messaging host is not configured yet."
             return
