@@ -60,7 +60,7 @@ particular:
 ### Prerequisites
 
 - Stable Rust with Cargo
-- Docker Desktop for local PostgreSQL
+- PostgreSQL 15+ for local development; Docker is optional
 - Node.js and npm for the Web/WASM package
 - Xcode and Swift 5.9+ for Apple targets
 - JDK, Android SDK, and Gradle for Android builds
@@ -68,16 +68,27 @@ particular:
 
 ### Start the local development composition
 
-The local composition uses Docker PostgreSQL and one Debug Rust process. That
-process starts account auth on `127.0.0.1:8080` and the encrypted-mailbox
-gateway on `127.0.0.1:8081`. Both clients use the same WebSocket endpoint:
-`ws://127.0.0.1:8081/v1/connect`.
+The local composition uses host PostgreSQL or Docker PostgreSQL and one Debug
+Rust process. That process starts account auth on `127.0.0.1:8080` and the
+encrypted-mailbox gateway on `127.0.0.1:8081`. Both clients use the same
+WebSocket endpoint: `ws://127.0.0.1:8081/v1/connect`.
 
 ```sh
 cp .env.example .env
 # Edit .env. Set AUTH_LOOKUP_KEY to a random 32-byte base64url secret.
 bash scripts/local-dev.sh
 ```
+
+To build and launch two separate macOS clients with `alice` and `bob`
+profiles, run:
+
+```sh
+bash launch-links.sh
+```
+
+The launcher builds the signed Debug app, starts the local backend without
+Docker, and uses two `open -n` processes. Set `LINKS_BUILD_APP=0` with
+`LINKS_APP_PATH=/path/to/Links.app` to use an existing build.
 
 Set `LINKS_GATEWAY_ENDPOINT` to that value in both the macOS and Web client
 hosts. The auth URL is `http://127.0.0.1:8080`. The process applies the
