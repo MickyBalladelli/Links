@@ -432,6 +432,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             switch authError {
             case .invalidHandle:
                 return "Use a valid lowercase username."
+            case .rateLimited(let retryAfterSeconds):
+                if let retryAfterSeconds, retryAfterSeconds >= 60 {
+                    let minutes = max(1, (retryAfterSeconds + 59) / 60)
+                    return "Too many login attempts. Try again in about \(minutes) minutes."
+                }
+                return "Too many login attempts. Wait and try again."
             default:
                 break
             }

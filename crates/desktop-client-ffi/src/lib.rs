@@ -719,9 +719,17 @@ impl LinksDesktopCore {
         for item in &batch.items {
             let Some(entry) = item.entry.as_ref() else { return Err(CoreError::InvalidSync) };
             if let v1::queue_item::Entry::Envelope(envelope) = entry {
-                let message = self.client.open_envelope(envelope, now_ms())?;
-                if let Some(v1::message::Content::Text(text)) = message.content {
-                    rendered.push((message.conversation_id, message.sender_device_id, text, message.sequence_id, message.sent_at_ms));
+                match self.client.open_envelope(envelope, now_ms()) {
+                    Ok(message) => {
+                        if let Some(v1::message::Content::Text(text)) = message.content {
+                            rendered.push((message.conversation_id, message.sender_device_id, text, message.sequence_id, message.sent_at_ms));
+                        }
+                    }
+                    Err(CoreError::Authentication) => {
+                        // An undecryptable envelope is permanently unusable. Ack it
+                        // so one stale message cannot wedge the whole mailbox.
+                    }
+                    Err(error) => return Err(error),
                 }
             }
         }

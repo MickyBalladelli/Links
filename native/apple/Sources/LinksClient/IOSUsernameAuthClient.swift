@@ -6,6 +6,7 @@ public enum IOSUsernameAuthError: Error {
     case invalidRequest
     case invalidResponse
     case serviceRejected
+    case rateLimited(retryAfterSeconds: Int?)
 }
 
 public struct IOSUsernameAuthSession: Sendable {
@@ -232,7 +233,15 @@ public final class IOSUsernameAuthClient: Sendable {
 
     private func post(_ request: URLRequest) async throws -> [String: Any] {
         let (data, response) = try await data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 429 {
+                let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
+                    .flatMap(Int.init)
+                throw IOSUsernameAuthError.rateLimited(retryAfterSeconds: retryAfter)
+            }
             throw IOSUsernameAuthError.serviceRejected
         }
         return try decodeObject(data)
@@ -240,7 +249,15 @@ public final class IOSUsernameAuthClient: Sendable {
 
     private func get(_ request: URLRequest) async throws -> [String: Any] {
         let (data, response) = try await data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 429 {
+                let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
+                    .flatMap(Int.init)
+                throw IOSUsernameAuthError.rateLimited(retryAfterSeconds: retryAfter)
+            }
             throw IOSUsernameAuthError.serviceRejected
         }
         return try decodeObject(data)
