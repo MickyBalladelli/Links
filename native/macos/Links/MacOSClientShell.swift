@@ -83,6 +83,11 @@ private struct LinksAccountOnboardingView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 520, alignment: .center)
+                Text("Loopback development uses lowercase handles ending in _test, such as alice_test.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520, alignment: .center)
 
                 Picker("Account action", selection: $model.authMode) {
                     ForEach(LinksMacOSAuthMode.allCases) { mode in
@@ -90,7 +95,7 @@ private struct LinksAccountOnboardingView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                TextField("Username, for example alice", text: $model.usernameInput)
+                TextField("Username, for example alice_test", text: $model.usernameInput)
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.username)
                 Button(model.authMode == .register ? "Register username" : "Log in") {
@@ -188,18 +193,23 @@ private struct LinksAccountOnboardingView: View {
 private struct LinksMessagingView: View {
     @ObservedObject var model: LinksMacOSAppModel
     @State private var showingNewConversation = false
+    @State private var showingAddContact = false
     @State private var showingPairing = false
 
     var body: some View {
         NavigationSplitView {
             LinksSidebar(model: model,
                          showingNewConversation: $showingNewConversation,
+                         showingAddContact: $showingAddContact,
                          showingPairing: $showingPairing)
         } detail: {
             LinksConversationDetail(model: model)
         }
         .sheet(isPresented: $showingNewConversation) {
             NewConversationView(model: model)
+        }
+        .sheet(isPresented: $showingAddContact) {
+            AddContactView(model: model)
         }
         .sheet(isPresented: $showingPairing) {
             PairingView(model: model)
@@ -210,6 +220,7 @@ private struct LinksMessagingView: View {
 private struct LinksSidebar: View {
     @ObservedObject var model: LinksMacOSAppModel
     @Binding var showingNewConversation: Bool
+    @Binding var showingAddContact: Bool
     @Binding var showingPairing: Bool
 
     var body: some View {
@@ -218,6 +229,12 @@ private struct LinksSidebar: View {
                 Label("Links", systemImage: "lock.shield")
                     .font(.title2.weight(.semibold))
                 Spacer()
+                Button {
+                    showingAddContact = true
+                } label: {
+                    Image(systemName: "person.badge.plus")
+                }
+                .help("Add contact")
                 Button {
                     showingNewConversation = true
                 } label: {
@@ -237,6 +254,21 @@ private struct LinksSidebar: View {
                         ForEach(model.conversations) { conversation in
                             ConversationRow(conversation: conversation)
                                 .tag(conversation.id as String?)
+                        }
+                    }
+                }
+                Section("Contacts") {
+                    if model.contacts.isEmpty {
+                        Text("Add someone by username")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.contacts) { contact in
+                            Button {
+                                model.startConversation(with: contact)
+                            } label: {
+                                ContactRow(contact: contact)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -301,6 +333,29 @@ private struct ConversationRow: View {
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+private struct ContactRow: View {
+    let contact: LinksMacOSContact
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.crop.circle")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("@\(contact.handle)")
+                    .lineLimit(1)
+                Text(contact.deviceCount == 1
+                     ? "1 active device"
+                     : "\(contact.deviceCount) active devices")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
     }
 }
 
@@ -529,6 +584,39 @@ private struct NewConversationView: View {
         }
         .padding(24)
         .frame(width: 430)
+    }
+}
+
+private struct AddContactView: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var handle = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add contact")
+                .font(.title2.weight(.semibold))
+            Text("Find someone by their username. Only public handle, account ID, and active-device count are saved in this profile.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Username, for example alice_test", text: $handle)
+                .textFieldStyle(.roundedBorder)
+                .textContentType(.username)
+            Text(model.contactStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Find and add") {
+                    model.addContact(handle: handle)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isAddingContact)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
     }
 }
 

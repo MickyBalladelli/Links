@@ -20,6 +20,14 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     var messages: [LinksMacOSMessage]
 }
 
+struct LinksMacOSContact: Identifiable, Equatable, Codable {
+    let handle: String
+    let userID: String
+    let deviceCount: Int
+
+    var id: String { userID }
+}
+
 enum LinksMacOSAuthMode: String, CaseIterable, Identifiable {
     case register
     case login
@@ -105,6 +113,26 @@ private final class IOSClientBox: @unchecked Sendable {
 private struct LinksMacOSPersistedState: Codable {
     let conversations: [LinksMacOSConversation]
     let selectedConversationID: String?
+    let contacts: [LinksMacOSContact]
+
+    init(conversations: [LinksMacOSConversation], selectedConversationID: String?,
+         contacts: [LinksMacOSContact]) {
+        self.conversations = conversations
+        self.selectedConversationID = selectedConversationID
+        self.contacts = contacts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case conversations, selectedConversationID, contacts
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        conversations = try values.decode([LinksMacOSConversation].self, forKey: .conversations)
+        selectedConversationID = try values.decodeIfPresent(
+            String.self, forKey: .selectedConversationID)
+        contacts = try values.decodeIfPresent([LinksMacOSContact].self, forKey: .contacts) ?? []
+    }
 }
 
 @MainActor
@@ -117,6 +145,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var pendingOutboxCount = 0
     @Published private(set) var lifecycleStatus = "Launching"
     @Published private(set) var conversations: [LinksMacOSConversation] = []
+    @Published private(set) var contacts: [LinksMacOSContact] = []
     @Published var selectedConversationID: String?
     @Published var composerText = ""
     @Published private(set) var onboardingError: String?
@@ -137,6 +166,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var isOTPWorking = false
     @Published private(set) var preKeyStatus = "Pre-key inventory not initialized"
     @Published private(set) var conversationSetupStatus = "MLS conversation not initialized"
+    @Published private(set) var contactStatus = "No contacts yet"
+    @Published private(set) var isAddingContact = false
     @Published var pairingTarget = ""
     @Published var pairingInput = ""
     @Published private(set) var pairingURI: String?
@@ -611,6 +642,57 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         return true
     }
 
+    func addContact(handle: String) {
+        guard let authClient, client?.isAuthenticated == true, !isAddingContact else {
+            contactStatus = "Sign in before adding contacts"
+            return
+        }
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().replacingOccurrences(of: "^@", with: "", options: .regularExpression)
+        guard !cleanHandle.isEmpty else {
+            contactStatus = "Enter a username"
+            return
+        }
+        isAddingContact = true
+        contactStatus = "Looking up contact"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let directory = try await authClient.lookup(handle: cleanHandle)
+                guard directory.userID != self.client?.userID else {
+                    throw IOSUsernameAuthError.invalidHandle
+                }
+                let contact = LinksMacOSContact(
+                    handle: directory.handle,
+                    userID: directory.userID,
+                    deviceCount: directory.devices.count)
+                if let index = self.contacts.firstIndex(where: { $0.userID == contact.userID }) {
+                    self.contacts[index] = contact
+                } else {
+                    self.contacts.append(contact)
+                }
+                self.contacts.sort { $0.handle < $1.handle }
+                self.persistLocalState()
+                self.contactStatus = "Added @\(contact.handle)"
+                self.isAddingContact = false
+            } catch {
+                self.contactStatus = "Contact not found. Use a valid username, such as alice_test."
+                self.isAddingContact = false
+            }
+        }
+    }
+
+    func startConversation(with contact: LinksMacOSContact) {
+        if let existing = conversations.first(where: {
+            $0.recipientUserID == contact.userID
+        }) {
+            selectedConversationID = existing.id
+            persistLocalState()
+            return
+        }
+        _ = createConversation(title: "@\(contact.handle)", recipientUserID: contact.userID)
+    }
+
     /// Claim and verify recipient pre-keys, then stage the first two-user MLS
     /// conversation in the shared client core.
     func initializeSelectedConversation() {
@@ -842,10 +924,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             let state = try PropertyListDecoder().decode(
                 LinksMacOSPersistedState.self, from: encoded)
             guard state.conversations.count <= 5_000,
-                  state.conversations.allSatisfy(isValidConversation) else {
+                  state.conversations.allSatisfy(isValidConversation),
+                  state.contacts.count <= 5_000,
+                  state.contacts.allSatisfy(isValidContact) else {
                 throw MacOSEncryptedStateStore.StateError.invalidState
             }
             conversations = state.conversations
+            contacts = state.contacts
             selectedConversationID = state.selectedConversationID.flatMap { selectedID in
                 state.conversations.contains(where: { $0.id == selectedID }) ? selectedID : nil
             }
@@ -859,8 +944,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private func persistLocalState() {
         guard let encryptedStateStore else { return }
         let state = LinksMacOSPersistedState(
-            conversations: conversations,
-            selectedConversationID: selectedConversationID)
+            conversations: conversations, selectedConversationID: selectedConversationID,
+            contacts: contacts)
         do {
             let encoded = try PropertyListEncoder().encode(state)
             try encryptedStateStore.write(encoded)
@@ -885,6 +970,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 && (message.senderDeviceID == nil
                     || IOSClient.isCanonicalUUID(message.senderDeviceID!))
         }
+    }
+
+    private func isValidContact(_ contact: LinksMacOSContact) -> Bool {
+        IOSClient.isCanonicalUUID(contact.userID)
+            && (try? IOSUsernameAuthClient.validateHandle(contact.handle)) != nil
+            && (0...100).contains(contact.deviceCount)
     }
 
     private func shortID(_ value: String) -> String {

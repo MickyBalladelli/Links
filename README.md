@@ -92,7 +92,8 @@ Docker, and uses two `open -n` processes. Set `LINKS_BUILD_APP=0` with
 team selected, pass your Apple Development Team ID:
 
 ```sh
-LINKS_DEVELOPMENT_TEAM=ABCDE12345 bash launch-links.sh
+# Replace YOUR_TEAM_ID with your real Apple Team ID.
+LINKS_DEVELOPMENT_TEAM=YOUR_TEAM_ID bash launch-links.sh
 ```
 
 The launcher allows Xcode to create or download the matching development

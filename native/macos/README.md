@@ -179,6 +179,15 @@ are wiped immediately after use. `IOSClient` persists public identity metadata
 only; the seed is never written to UserDefaults, files, logs, URLs, or
 analytics.
 
+## Contacts
+
+After account authentication, use the person-plus button in the messaging
+sidebar to look up a known username through the account directory. The client
+saves only the public handle, account ID, and active-device count in the
+profile's encrypted local state. Saved contacts appear in the Contacts list;
+click one to create or open its conversation. The directory does not expose a
+public list of every account.
+
 Pass an explicit profile to run more than one local identity:
 
 ```sh

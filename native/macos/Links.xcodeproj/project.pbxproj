@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -117,7 +117,7 @@
 			);
 			mainGroup = A10000050000000000000001;
 			packageReferences = (
-				A10000090000000000000001 /* XCLocalSwiftPackageReference "apple" */,
+				A10000090000000000000001 /* XCLocalSwiftPackageReference "../apple" */,
 			);
 			productRefGroup = A10000050000000000000003 /* Products */;
 			projectDirPath = "";
@@ -164,8 +164,8 @@
 				CODE_SIGN_ENTITLEMENTS = Links/Links.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3SZ568CM7P;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Links/Info.plist;
@@ -194,8 +194,8 @@
 				CODE_SIGN_ENTITLEMENTS = Links/Links.entitlements;
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -261,7 +261,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A10000090000000000000001 /* XCLocalSwiftPackageReference "apple" */ = {
+		A10000090000000000000001 /* XCLocalSwiftPackageReference "../apple" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../apple;
 		};
@@ -270,12 +270,12 @@
 /* Begin XCSwiftPackageProductDependency section */
 		A10000030000000000000001 /* LinksClient */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A10000090000000000000001 /* XCLocalSwiftPackageReference "apple" */;
+			package = A10000090000000000000001 /* XCLocalSwiftPackageReference "../apple" */;
 			productName = LinksClient;
 		};
 		A10000030000000000000002 /* LinksKeyStore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A10000090000000000000001 /* XCLocalSwiftPackageReference "apple" */;
+			package = A10000090000000000000001 /* XCLocalSwiftPackageReference "../apple" */;
 			productName = LinksKeyStore;
 		};
 /* End XCSwiftPackageProductDependency section */
