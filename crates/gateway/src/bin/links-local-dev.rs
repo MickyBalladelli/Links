@@ -63,7 +63,9 @@ fn build_auth(
 fn lookup_key() -> Result<Zeroizing<[u8; 32]>, Box<dyn Error>> {
     let encoded = std::env::var("AUTH_LOOKUP_KEY")
         .map_err(|_| "AUTH_LOOKUP_KEY must be a 32-byte base64url secret")?;
-    let decoded = URL_SAFE_NO_PAD.decode(encoded.as_bytes())?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(encoded.as_bytes())
+        .map_err(|_| "AUTH_LOOKUP_KEY must be base64url without padding")?;
     Ok(Zeroizing::new(
         <[u8; 32]>::try_from(decoded.as_slice())
             .map_err(|_| "AUTH_LOOKUP_KEY must decode to exactly 32 bytes")?,

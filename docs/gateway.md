@@ -91,6 +91,15 @@ lease, queue outage, push outage and reconnect acceptance checks before release.
 
 ## Loopback development socket
 
+For a fresh local `.env`, generate the required lookup key with:
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+```
+
+Put the output in `AUTH_LOOKUP_KEY`. It must be 32 random bytes encoded as
+base64url without padding.
+
 Run the full local composition with:
 
 ```sh
