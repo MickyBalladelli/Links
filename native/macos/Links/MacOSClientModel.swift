@@ -474,11 +474,25 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 return "Pre-key service rejected the request. Check the local account service."
             case .invalidToken:
                 return "Pre-key upload needs a fresh account login."
+            case .invalidUpload:
+                return "Pre-key upload was rejected before sending. Rebuild the signed Debug app."
+            case .invalidResponse:
+                return "Pre-key service returned an invalid response. Restart the local backend."
+            case .invalidEndpoint:
+                return "Pre-key endpoint is invalid. Use http://127.0.0.1:8080 in Debug."
+            case .invalidRecipient:
+                return "Pre-key recipient data is invalid. Check the account device record."
+            }
+        }
+        if let error = error as? IOSMessagingError {
+            switch error {
+            case .preKeyBootstrapUnavailable:
+                return "The shared Rust core cannot generate pre-keys."
             default:
                 break
             }
         }
-        return "Initial pre-key inventory could not be uploaded."
+        return "Initial pre-key inventory could not be uploaded (\(String(describing: error)))."
     }
 
     func startOTPEnrollment() {
