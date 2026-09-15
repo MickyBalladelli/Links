@@ -500,7 +500,11 @@ exchanging encrypted one-to-one text through the same local development stack.
 
 ### macOS two-client acceptance gate
 
-- [ ] Launch Alice and Bob as separate macOS processes with separate profiles on one machine.
+- [x] Launch Alice and Bob as separate macOS processes with separate profiles on one machine.
+  The Debug bundle was launched with `scripts/launch-macos-two-client.sh`;
+  Alice and Bob run as separate PIDs with the shared endpoint and isolated
+  profile roots. Both profile status files are present and report
+  `identity-required` until local enrollment is completed.
 - [ ] Verify both accounts have distinct identity public keys, device IDs, MLS node IDs, local stores, Keychain records, and bearer tokens.
 - [ ] Verify both clients reach `ready` concurrently and remain connected for at least one heartbeat interval.
 - [ ] Send Alice → Bob and Bob → Alice text; verify ordered delivery, exactly one render per message, and successful private delivery receipts.
