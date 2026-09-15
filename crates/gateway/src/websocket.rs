@@ -55,6 +55,11 @@ enum Outbound {
         lease: SessionLease,
         delivery: v1::WebRtcSignalDelivery,
     },
+    MlsBootstrap {
+        lease: SessionLease,
+        request_id: String,
+        bootstrap: v1::MlsBootstrap,
+    },
 }
 
 impl<S, Q, A, B, P> WebSocketAdapter<S, Q, A, B, P>
@@ -255,6 +260,22 @@ where
                     body: Some(v1::server_frame::Body::WebRtcSignal(delivery)),
                 }))
             }
+            Outbound::MlsBootstrap {
+                lease,
+                request_id,
+                bootstrap,
+            } => {
+                if lease.session_id != session.session_id()
+                    || lease.device_id != session.device_id().to_string()
+                    || bootstrap.recipient_device_id != session.device_id().to_string()
+                {
+                    return Err(GatewayError::Authentication);
+                }
+                Ok(Some(v1::ServerFrame {
+                    request_id,
+                    body: Some(v1::server_frame::Body::MlsBootstrap(bootstrap)),
+                }))
+            }
         }
     }
 
@@ -287,6 +308,22 @@ where
                     self.send_to(
                         &target_session_id,
                         Outbound::WebRtcSignal { lease, delivery },
+                    )
+                    .await?;
+                }
+                GatewayAction::LocalMlsBootstrap {
+                    lease,
+                    request_id,
+                    bootstrap,
+                } => {
+                    let target_session_id = lease.session_id.clone();
+                    self.send_to(
+                        &target_session_id,
+                        Outbound::MlsBootstrap {
+                            lease,
+                            request_id,
+                            bootstrap,
+                        },
                     )
                     .await?;
                 }

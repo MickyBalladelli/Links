@@ -13,6 +13,7 @@ message ClientFrame {
     Replay replay = 4;
     QueueAck ack = 5;
     WebRtcSignal web_rtc_signal = 6;
+    MlsBootstrap mls_bootstrap = 7;
   }
 }
 message Hello {
@@ -32,6 +33,7 @@ message ServerFrame {
     ProtocolError error = 5;
     CompressedSyncBatch compressed_batch = 6;
     WebRtcSignalDelivery web_rtc_signal = 7;
+    MlsBootstrap mls_bootstrap = 8;
   }
 }
 message Welcome { uint32 protocol_version = 1; uint32 heartbeat_seconds = 2; }
@@ -49,4 +51,14 @@ message ProtocolError {
   }
   Code code = 1;
   uint32 retry_after_ms = 2;
+}
+
+// Live MLS group bootstrap. The gateway routes these opaque bytes to the
+// target device and never stores or inspects them. The sender keeps its local
+// pending commit until the peer has received this frame.
+message MlsBootstrap {
+  string conversation_id = 1;
+  string recipient_device_id = 2;
+  bytes commit = 3;
+  bytes welcome = 4;
 }

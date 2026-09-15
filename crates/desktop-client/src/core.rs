@@ -238,6 +238,13 @@ fn decode_server_frame(bytes: &[u8]) -> Result<v1::ServerFrame, CoreError> {
                 return Err(CoreError::Authentication);
             }
         }
+        v1::server_frame::Body::MlsBootstrap(bootstrap) => {
+            protocol::validate_id(&bootstrap.conversation_id)?;
+            protocol::validate_id(&bootstrap.recipient_device_id)?;
+            if bootstrap.commit.is_empty() || bootstrap.welcome.is_empty() {
+                return Err(CoreError::Authentication);
+            }
+        }
     }
     Ok(frame)
 }

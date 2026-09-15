@@ -164,6 +164,7 @@ where
             }
             v1::server_frame::Body::Error(error) => Err(server_error(error)),
             v1::server_frame::Body::WebRtcSignal(_) => Err(CoreError::Provider),
+            v1::server_frame::Body::MlsBootstrap(_) => Err(CoreError::Provider),
             v1::server_frame::Body::Batch(_) | v1::server_frame::Body::CompressedBatch(_) => {
                 self.handle_sync_batch(core, body, transport, full_sync, on_text_message)
             }
@@ -386,7 +387,9 @@ fn encode_client_frame(body: v1::client_frame::Body) -> Result<Vec<u8>, CoreErro
         v1::client_frame::Body::Ack(ack) if ack.through_cursor > protocol::MAX_CURSOR => {
             return Err(CoreError::InvalidSync)
         }
-        v1::client_frame::Body::Hello(_) | v1::client_frame::Body::WebRtcSignal(_) => {
+        v1::client_frame::Body::Hello(_)
+        | v1::client_frame::Body::WebRtcSignal(_)
+        | v1::client_frame::Body::MlsBootstrap(_) => {
             return Err(CoreError::Provider)
         }
         _ => {}

@@ -142,6 +142,12 @@ pub struct ForwardedWebRtcSignal {
     pub delivery: v1::WebRtcSignalDelivery,
 }
 
+#[derive(Clone)]
+pub struct ForwardedMlsBootstrap {
+    pub bootstrap: v1::MlsBootstrap,
+    pub request_id: String,
+}
+
 #[async_trait]
 pub trait RegionBus: Send + Sync {
     async fn forward(
@@ -259,6 +265,11 @@ pub enum GatewayAction {
     LocalWebRtcSignal {
         lease: SessionLease,
         delivery: v1::WebRtcSignalDelivery,
+    },
+    LocalMlsBootstrap {
+        lease: SessionLease,
+        request_id: String,
+        bootstrap: v1::MlsBootstrap,
     },
 }
 
@@ -474,7 +485,9 @@ where
         )?;
         match action {
             GatewayAction::Server(frame) => Ok(Some(frame)),
-            GatewayAction::LocalDelivery { .. } | GatewayAction::LocalWebRtcSignal { .. } => {
+            GatewayAction::LocalDelivery { .. }
+            | GatewayAction::LocalWebRtcSignal { .. }
+            | GatewayAction::LocalMlsBootstrap { .. } => {
                 Err(GatewayError::Unavailable)
             }
         }
@@ -649,6 +662,32 @@ where
                     Ok(Vec::new())
                 }
             }
+            v1::client_frame::Body::MlsBootstrap(bootstrap) => {
+                protocol::validate_id(&bootstrap.conversation_id)?;
+                protocol::validate_id(&bootstrap.recipient_device_id)?;
+                if bootstrap.commit.is_empty()
+                    || bootstrap.commit.len() > protocol::MAX_FRAME_BYTES
+                    || bootstrap.welcome.is_empty()
+                    || bootstrap.welcome.len() > protocol::MAX_FRAME_BYTES
+                {
+                    return Err(GatewayError::Invalid);
+                }
+                let Some(lease) = self
+                    .state
+                    .route(&bootstrap.recipient_device_id, now_ms)
+                    .await?
+                else {
+                    return Ok(vec![temporary_unavailable(request_id)]);
+                };
+                if lease.gateway_id != self.config.gateway_id {
+                    return Err(GatewayError::Unavailable);
+                }
+                Ok(vec![GatewayAction::LocalMlsBootstrap {
+                    lease,
+                    request_id,
+                    bootstrap,
+                }])
+            }
         }
     }
 }
@@ -720,6 +759,17 @@ fn validate_request(frame: &v1::ClientFrame) -> Result<(), GatewayError> {
         }
         v1::client_frame::Body::WebRtcSignal(signal) => {
             protocol::validate_webrtc_signal(signal)?;
+        }
+        v1::client_frame::Body::MlsBootstrap(bootstrap) => {
+            protocol::validate_id(&bootstrap.conversation_id)?;
+            protocol::validate_id(&bootstrap.recipient_device_id)?;
+            if bootstrap.commit.is_empty()
+                || bootstrap.welcome.is_empty()
+                || bootstrap.commit.len() > protocol::MAX_FRAME_BYTES
+                || bootstrap.welcome.len() > protocol::MAX_FRAME_BYTES
+            {
+                return Err(GatewayError::Invalid);
+            }
         }
     }
     Ok(())
