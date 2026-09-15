@@ -148,6 +148,11 @@ device fan-out, envelope sealing/decryption, cursor commit, and QueueAck. A
 host without the concrete Rust core or authenticated directory stays
 fail-closed and reports the missing integration.
 
+The macOS pre-key provider uses one profile-scoped Secure Enclave wrapping key
+for the inventory and stores each encrypted seed as a separate Keychain
+record. This avoids creating hundreds of Secure Enclave keys during first
+connect while keeping seed bytes out of files and the Rust state document.
+
 On background and application termination, the macOS delegate calls
 `IOSDirectMessaging.shutdown()`. This closes transport and releases the core;
 it does not clear the shared core's encrypted outbox or durable cursor. If the

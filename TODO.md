@@ -433,6 +433,9 @@ exchanging encrypted one-to-one text through the same local development stack.
   the concrete binding calls `prekeys::maintain_inventory`, verifies every
   `RecipientDevice`, and stages the two-user MLS commit before application
   messages are allowed.
+  The macOS Keychain provider uses one profile-scoped Secure Enclave wrapping
+  key for all inventory records, so the initial 100-curve/100-KEM batch does
+  not exhaust Secure Enclave key creation.
 
 ### Native networking and encrypted messaging
 

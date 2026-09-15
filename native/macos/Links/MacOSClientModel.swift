@@ -662,9 +662,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                             using: preKeyAPI)
                         self.preKeyStatus = "Ready: \(inventory.oneTimeCurvePreKeys) curve, "
                             + "\(inventory.oneTimeKEMPreKeys) KEM keys"
+                        self.publishProfileStatus()
                     } catch {
-                        self.preKeyStatus = "Pre-key setup failed"
-                        self.actionError = Self.preKeySetupErrorMessage(error)
+                        let message = Self.preKeySetupErrorMessage(error)
+                        self.preKeyStatus = message
+                        self.actionError = message
+                        self.publishProfileStatus()
                     }
                 }
             }
@@ -820,6 +823,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             actionError = "Configure an authenticated directory with MLS KeyPackages first."
             return
         }
+        guard preKeyStatus.hasPrefix("Ready:") else {
+            conversationSetupStatus = "Pre-key setup is not ready"
+            actionError = preKeyStatus == "Preparing pre-key inventory"
+                ? "Wait for pre-key setup to finish."
+                : preKeyStatus
+            return
+        }
         initializedConversationIDs.remove(conversation.id)
         conversationSetupStatus = "Claiming recipient pre-keys"
         Task { @MainActor [weak self] in
@@ -845,8 +855,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     self.actionError = "Connection dropped. Click Connect and try again."
                 } else {
                     self.conversationSetupStatus = "MLS conversation setup failed"
-                    self.actionError = "Recipient pre-key verification or MLS setup failed."
+                    self.actionError = "Recipient pre-key verification or MLS setup failed. "
+                        + "Check that the other profile is connected and its pre-keys are ready."
                 }
+                self.publishProfileStatus()
             }
         }
     }
