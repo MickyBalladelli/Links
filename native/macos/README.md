@@ -152,6 +152,8 @@ The macOS pre-key provider uses one profile-scoped Secure Enclave wrapping key
 for the inventory and stores each encrypted seed as a separate Keychain
 record. This avoids creating hundreds of Secure Enclave keys during first
 connect while keeping seed bytes out of files and the Rust state document.
+An empty server inventory may omit zero-valued protobuf counters; the client
+decodes those omitted counters as zero before generating the first batch.
 
 On background and application termination, the macOS delegate calls
 `IOSDirectMessaging.shutdown()`. This closes transport and releases the core;

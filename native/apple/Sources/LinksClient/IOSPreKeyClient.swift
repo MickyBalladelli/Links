@@ -337,9 +337,12 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
         var reader = IOSProtobufReader(data)
         var version: UInt32?
         var deviceID: String?
-        var revision: UInt64?
-        var curveCount: UInt32?
-        var kemCount: UInt32?
+        // Protobuf omits scalar fields whose value is zero. An account with
+        // no pre-key profile therefore returns only the version and device
+        // fields; the omitted inventory counters are valid zeroes.
+        var revision: UInt64 = 0
+        var curveCount: UInt32 = 0
+        var kemCount: UInt32 = 0
         while !reader.isAtEnd {
             let field = try reader.readField()
             switch field.number {
@@ -358,10 +361,7 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
             }
         }
         guard version == 1,
-              let deviceID,
-              let revision,
-              let curveCount,
-              let kemCount else {
+              let deviceID else {
             throw IOSPreKeyError.invalidResponse
         }
         return try IOSPreKeyInventory(

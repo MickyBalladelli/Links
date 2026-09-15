@@ -436,6 +436,8 @@ exchanging encrypted one-to-one text through the same local development stack.
   The macOS Keychain provider uses one profile-scoped Secure Enclave wrapping
   key for all inventory records, so the initial 100-curve/100-KEM batch does
   not exhaust Secure Enclave key creation.
+  The client also accepts the valid protobuf form where an empty inventory
+  omits zero-valued counters.
 
 ### Native networking and encrypted messaging
 
