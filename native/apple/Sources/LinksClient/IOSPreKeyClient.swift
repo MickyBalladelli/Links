@@ -46,6 +46,35 @@ public struct IOSPreKeyUpload: Sendable {
         self.uploadID = uploadID
         self.protobuf = protobuf
     }
+
+    public init(protobuf: Data) throws {
+        var reader = IOSProtobufReader(protobuf)
+        var version: UInt32?
+        var deviceID: String?
+        var revision: UInt64?
+        var uploadID: String?
+        while !reader.isAtEnd {
+            let field = try reader.readField()
+            switch field.number {
+            case 1 where field.wireType == 0:
+                version = try reader.readUInt32()
+            case 2 where field.wireType == 2:
+                deviceID = try reader.readString(maximum: 64)
+            case 3 where field.wireType == 0:
+                revision = try reader.readUInt64()
+            case 7 where field.wireType == 2:
+                uploadID = try reader.readString(maximum: 64)
+            default:
+                try reader.skip(wireType: field.wireType)
+            }
+        }
+        guard version == 1, let deviceID, let revision, let uploadID else {
+            throw IOSPreKeyError.invalidUpload
+        }
+        try self.init(
+            deviceID: deviceID, profileRevision: revision,
+            uploadID: uploadID, protobuf: protobuf)
+    }
 }
 
 /// Claimed protobuf bytes are verified by the shared Rust core. Swift never
