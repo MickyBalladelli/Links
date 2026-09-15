@@ -97,8 +97,10 @@ Run the full local composition with:
 bash scripts/local-dev.sh
 ```
 
-The script starts Docker PostgreSQL and `links-local-dev`. The process applies
-the migrations, starts account auth at `http://127.0.0.1:8080`, uses the
+The script starts or reuses PostgreSQL and `links-local-dev`. Docker is used
+when available; when Docker is absent, set `DATABASE_URL` to a host PostgreSQL
+database (or set `LINKS_USE_DOCKER=0`). The process applies the migrations,
+starts account auth at `http://127.0.0.1:8080`, uses the
 PostgreSQL `RelationalStore` for encrypted mailbox storage, keeps ephemeral
 session leases in bounded in-process state, and serves the gateway at
 `ws://127.0.0.1:8081/v1/connect`. Both local Debug clients must use that exact
