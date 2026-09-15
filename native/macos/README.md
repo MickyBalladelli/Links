@@ -191,28 +191,29 @@ public list of every account.
 Pass an explicit profile to run more than one local identity:
 
 ```sh
-open -n "/path/to/Links.app" --args \
-  --profile alice --profile-root "$HOME/Library/Application Support/Links/profiles"
-open -n "/path/to/Links.app" --args \
-  --profile bob --profile-root "$HOME/Library/Application Support/Links/profiles"
+open -n "/path/to/Links.app" --args --profile alice
+open -n "/path/to/Links.app" --args --profile bob
 ```
 
 Each `open -n` invocation creates its own app process, model, transport, and
-ephemeral bearer session. The macOS client has no process-wide app singleton,
-shared database, or cross-profile lock.
+ephemeral bearer session. With the app sandbox enabled, leave
+`--profile-root` unset so Application Support resolves inside the app
+container. An explicit root is supported only when it is writable by the app's
+sandbox. The macOS client has no process-wide app singleton, shared database,
+or cross-profile lock.
 
 Use the repository launcher to start both local clients:
 
 ```sh
 bash scripts/launch-macos-two-client.sh \
-  "/path/to/Links.app" \
-  "$HOME/Library/Application Support/Links/profiles"
+  "/path/to/Links.app"
 ```
 
 It runs the equivalent of two separate `open -n` commands for `alice` and
-`bob`. Pass different profile names as the third and fourth arguments when
-needed. `LINKS_AUTH_URL` selects the account-auth endpoint; it defaults to the
-loopback development service.
+`bob`. Pass an explicit writable profile root as the second argument, then
+different profile names as the third and fourth arguments when needed.
+`LINKS_AUTH_URL` selects the account-auth endpoint; it defaults to the loopback
+development service.
 
 ## Runner readiness
 

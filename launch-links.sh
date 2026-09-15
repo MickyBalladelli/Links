@@ -26,7 +26,7 @@ fi
 
 derived_data_path="${LINKS_DERIVED_DATA_PATH:-$repo_root/native/macos/DerivedData}"
 app_path="${LINKS_APP_PATH:-$derived_data_path/Build/Products/Debug/Links.app}"
-profile_root="${LINKS_PROFILE_ROOT:-$HOME/Library/Application Support/Links/profiles}"
+profile_root="${LINKS_PROFILE_ROOT:-}"
 auth_url="${LINKS_AUTH_URL:-http://127.0.0.1:8080}"
 
 if [[ "${LINKS_BUILD_APP:-1}" == "1" ]]; then
@@ -89,9 +89,15 @@ else
   fi
 fi
 
-LINKS_AUTH_URL="$auth_url" \
-  bash "$repo_root/scripts/launch-macos-two-client.sh" \
-  "$app_path" "$profile_root" "${LINKS_ALICE_PROFILE:-alice}" "${LINKS_BOB_PROFILE:-bob}"
+if [[ -n "$profile_root" ]]; then
+  LINKS_AUTH_URL="$auth_url" \
+    bash "$repo_root/scripts/launch-macos-two-client.sh" \
+    "$app_path" "$profile_root" "${LINKS_ALICE_PROFILE:-alice}" "${LINKS_BOB_PROFILE:-bob}"
+else
+  LINKS_AUTH_URL="$auth_url" \
+    bash "$repo_root/scripts/launch-macos-two-client.sh" \
+    "$app_path" "" "${LINKS_ALICE_PROFILE:-alice}" "${LINKS_BOB_PROFILE:-bob}"
+fi
 
 if [[ -n "$backend_pid" ]]; then
   wait "$backend_pid"

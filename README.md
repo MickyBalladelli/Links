@@ -87,7 +87,8 @@ bash launch-links.sh
 ```
 
 The launcher builds the signed Debug app, starts the local backend without
-Docker, and uses two `open -n` processes. Set `LINKS_BUILD_APP=0` with
+Docker, and uses two `open -n` processes. Profiles use the sandbox-safe
+Application Support root by default. Set `LINKS_BUILD_APP=0` with
 `LINKS_APP_PATH=/path/to/Links.app` to use an existing build. If Xcode has no
 team selected, pass your Apple Development Team ID:
 
