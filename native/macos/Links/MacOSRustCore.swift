@@ -218,7 +218,7 @@ private func coreError(for status: Int32) -> Error {
 private final class MacOSRustSharedCore: SharedClientCore {
     let userID: String
     let deviceID: String
-    private let pointer: UnsafeMutablePointer<LinksDesktopCore>
+    private let pointer: OpaquePointer
     private let callbacks: MacOSRustCoreCallbackBox
     private let lock = NSLock()
     private var currentIssue: IOSMessagingIssue?
@@ -230,6 +230,20 @@ private final class MacOSRustSharedCore: SharedClientCore {
         guard let credential = identity.mlsCredential else {
             throw IOSClientError.metadataUnavailable
         }
+        let publicKey = Array(identity.identity.publicKey)
+        guard publicKey.count == 32 else { throw IOSClientError.metadataUnavailable }
+        let publicKeyTuple: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
+                             UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
+                             UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
+                             UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = (
+            publicKey[0], publicKey[1], publicKey[2], publicKey[3],
+            publicKey[4], publicKey[5], publicKey[6], publicKey[7],
+            publicKey[8], publicKey[9], publicKey[10], publicKey[11],
+            publicKey[12], publicKey[13], publicKey[14], publicKey[15],
+            publicKey[16], publicKey[17], publicKey[18], publicKey[19],
+            publicKey[20], publicKey[21], publicKey[22], publicKey[23],
+            publicKey[24], publicKey[25], publicKey[26], publicKey[27],
+            publicKey[28], publicKey[29], publicKey[30], publicKey[31])
         let callbacks = MacOSRustCoreCallbackBox(
             signer: signer, secrets: secrets, stateStore: stateStore)
         var callbackTable = LinksDesktopCoreCallbacks(
@@ -243,16 +257,16 @@ private final class MacOSRustSharedCore: SharedClientCore {
             save_state: macOSRustSaveState,
             send_frame: macOSRustSendFrame,
             on_text: macOSRustText,
-            identity_public_key: Array(identity.identity.publicKey))
-        var created: UnsafeMutablePointer<LinksDesktopCore>?
+            identity_public_key: publicKeyTuple)
+        var created: OpaquePointer?
         let status = credential.withUnsafeBytes { credentialBytes in
             identity.userID.withCString { userBytes in
                 identity.deviceID.withCString { deviceBytes in
                     withUnsafeMutablePointer(to: &callbackTable) { callbackPointer in
                         links_desktop_core_create(
-                            userBytes.assumingMemoryBound(to: UInt8.self),
+                            UnsafeRawPointer(userBytes).assumingMemoryBound(to: UInt8.self),
                             identity.userID.utf8.count,
-                            deviceBytes.assumingMemoryBound(to: UInt8.self),
+                            UnsafeRawPointer(deviceBytes).assumingMemoryBound(to: UInt8.self),
                             identity.deviceID.utf8.count,
                             credentialBytes.bindMemory(to: UInt8.self).baseAddress!,
                             credential.count,
@@ -302,16 +316,17 @@ private final class MacOSRustSharedCore: SharedClientCore {
         lock.lock()
         defer { lock.unlock() }
         var buffer = Data(count: 1024 * 1024)
+        let capacity = buffer.count
         var length = 0
         let status = buffer.withUnsafeMutableBytes { output in
             accessToken.withCString { token in
                 links_desktop_core_create_hello(
                     pointer,
-                    token.assumingMemoryBound(to: UInt8.self),
+                    UnsafeRawPointer(token).assumingMemoryBound(to: UInt8.self),
                     accessToken.utf8.count,
                     lastSeenCursor,
                     output.bindMemory(to: UInt8.self).baseAddress!,
-                    buffer.count,
+                    capacity,
                     &length)
             }
         }
@@ -328,25 +343,27 @@ private final class MacOSRustSharedCore: SharedClientCore {
                            fullSync: Bool,
                            onTextMessage: (IOSReceivedTextMessage) -> Void)
         throws -> IOSCoreFrameResult {
-        lock.lock()
-        callbacks.transport = transport
-        callbacks.onText = onTextMessage
-        let status = frame.withUnsafeBytes { bytes in
-            links_desktop_core_handle_server_frame(
-                pointer,
-                bytes.bindMemory(to: UInt8.self).baseAddress!,
-                frame.count)
+        return try withoutActuallyEscaping(onTextMessage) { escapableMessageHandler in
+            lock.lock()
+            callbacks.transport = transport
+            callbacks.onText = escapableMessageHandler
+            let status = frame.withUnsafeBytes { bytes in
+                links_desktop_core_handle_server_frame(
+                    pointer,
+                    bytes.bindMemory(to: UInt8.self).baseAddress!,
+                    frame.count)
+            }
+            callbacks.transport = nil
+            callbacks.onText = nil
+            if status != Int32(LINKS_DESKTOP_OK) {
+                currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
+                    ? .staleCursor : status == Int32(LINKS_DESKTOP_AUTHENTICATION)
+                        ? .authenticationExpired : .dependencyOutage
+            }
+            lock.unlock()
+            guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+            return fullSync ? .recoveryComplete : .pending
         }
-        callbacks.transport = nil
-        callbacks.onText = nil
-        if status != Int32(LINKS_DESKTOP_OK) {
-            currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
-                ? .staleCursor : status == Int32(LINKS_DESKTOP_AUTHENTICATION)
-                    ? .authenticationExpired : .dependencyOutage
-        }
-        lock.unlock()
-        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
-        return fullSync ? .recoveryComplete : .pending
     }
 
     func retryOutbox(transport: any IOSCoreTransport) throws {
@@ -402,8 +419,8 @@ private final class MacOSRustSharedCore: SharedClientCore {
                                 recipient.mlsKeyPackage.withUnsafeBytes { package in
                                     links_desktop_core_set_recipient(
                                         pointer,
-                                        user.assumingMemoryBound(to: UInt8.self), recipient.userID.utf8.count,
-                                        device.assumingMemoryBound(to: UInt8.self), recipient.deviceID.utf8.count,
+                                        UnsafeRawPointer(user).assumingMemoryBound(to: UInt8.self), recipient.userID.utf8.count,
+                                        UnsafeRawPointer(device).assumingMemoryBound(to: UInt8.self), recipient.deviceID.utf8.count,
                                         identityKey.bindMemory(to: UInt8.self).baseAddress!, recipient.identityPublicKey.count,
                                         bundle.bindMemory(to: UInt8.self).baseAddress!, recipient.preKeyBundle.count,
                                         credential.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsCredential.count,
@@ -416,20 +433,35 @@ private final class MacOSRustSharedCore: SharedClientCore {
             }
             guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
         }
+        let status = conversationID.withCString { conversation in
+            recipientUserID.withCString { recipient in
+                links_desktop_core_initialize_direct(
+                    pointer,
+                    UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self),
+                    conversationID.utf8.count,
+                    UnsafeRawPointer(recipient).assumingMemoryBound(to: UInt8.self),
+                    recipientUserID.utf8.count)
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else {
+            currentIssue = .sendFailed
+            throw coreError(for: status)
+        }
     }
 
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws {
         lock.lock()
         callbacks.transport = transport
+        let textLength = text.utf8.count
         let status = conversationID.withCString { conversation in
             recipientUserID.withCString { recipient in
-                text.withCString { text in
+                text.withCString { textBytes in
                     links_desktop_core_send_text(
                         pointer,
-                        conversation.assumingMemoryBound(to: UInt8.self), conversationID.utf8.count,
-                        recipient.assumingMemoryBound(to: UInt8.self), recipientUserID.utf8.count,
-                        text.assumingMemoryBound(to: UInt8.self), text.utf8.count)
+                        UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self), conversationID.utf8.count,
+                        UnsafeRawPointer(recipient).assumingMemoryBound(to: UInt8.self), recipientUserID.utf8.count,
+                        UnsafeRawPointer(textBytes).assumingMemoryBound(to: UInt8.self), textLength)
                 }
             }
         }
@@ -439,13 +471,33 @@ private final class MacOSRustSharedCore: SharedClientCore {
         guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
     }
 
+    func encodeImageBlurHash(rgbPixels: Data, width: Int, height: Int) throws -> String {
+        throw IOSImageError.coreUnavailable
+    }
+
+    func encryptImage(_ image: Data, attachmentID: String, mimeType: String,
+                      width: Int, height: Int, blurHash: String) throws -> IOSEncryptedImage {
+        throw IOSImageError.coreUnavailable
+    }
+
+    func decryptImage(_ metadata: IOSImageMetadata, ciphertext: Data) throws -> Data {
+        throw IOSImageError.coreUnavailable
+    }
+
+    func sendImage(conversationID: String, recipientUserID: String,
+                   metadata: IOSImageMetadata, receipt: IOSImageUploadReceipt,
+                   transport: any IOSCoreTransport) throws {
+        throw IOSImageError.coreUnavailable
+    }
+
     private func generatePreKeyUpload(curve: UInt32, kem: UInt32) throws -> Data {
         var buffer = Data(count: 1024 * 1024)
+        let capacity = buffer.count
         var length = 0
         let status = buffer.withUnsafeMutableBytes { output in
             links_desktop_core_generate_prekey_upload(
                 pointer, curve, kem,
-                output.bindMemory(to: UInt8.self).baseAddress!, buffer.count, &length)
+                output.bindMemory(to: UInt8.self).baseAddress!, capacity, &length)
         }
         guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
         buffer.removeSubrange(length..<buffer.count)
@@ -454,11 +506,12 @@ private final class MacOSRustSharedCore: SharedClientCore {
 
     private func generateMLSKeyPackage() throws -> Data {
         var buffer = Data(count: 1024 * 1024)
+        let capacity = buffer.count
         var length = 0
         let status = buffer.withUnsafeMutableBytes { output in
             links_desktop_core_generate_mls_key_package(
                 pointer,
-                output.bindMemory(to: UInt8.self).baseAddress!, buffer.count, &length)
+                output.bindMemory(to: UInt8.self).baseAddress!, capacity, &length)
         }
         guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
         buffer.removeSubrange(length..<buffer.count)
@@ -523,6 +576,7 @@ final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
                 userID: directory.userID,
                 deviceID: device.deviceID,
                 identityPublicKey: device.identityPublicKey,
+                mlsCredential: device.mlsCredential,
                 mlsKeyPackage: package))
         }
         return descriptors

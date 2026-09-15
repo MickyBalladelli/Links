@@ -61,4 +61,6 @@ message MlsBootstrap {
   string recipient_device_id = 2;
   bytes commit = 3;
   bytes welcome = 4;
+  bytes sender_mls_credential = 5;
+  bytes sender_identity_public_key = 6;
 }

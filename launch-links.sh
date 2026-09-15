@@ -44,7 +44,10 @@ if [[ "${LINKS_BUILD_APP:-1}" == "1" ]]; then
     xcodebuild_args+=(-allowProvisioningUpdates)
   fi
 
-  MACOSX_DEPLOYMENT_TARGET=13.0 cargo build -p links-identity-ffi --locked
+  MACOSX_DEPLOYMENT_TARGET=13.0 cargo build \
+    -p links-identity-ffi \
+    -p links-desktop-client-ffi \
+    --locked
   MACOSX_DEPLOYMENT_TARGET=13.0 xcodebuild "${xcodebuild_args[@]}" build
 fi
 

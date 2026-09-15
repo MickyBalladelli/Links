@@ -10,7 +10,7 @@ use links_client_core::{
     crypto::{RecipientKeyDirectory, SealedSenderCrypto, SealedSenderKeyResolver},
     envelopes::{ClientCore, FanoutRecipient},
     identity::LocalIdentity,
-    mls::{MlsCredentialVerifier, MlsEngine, MlsIdentitySigner, OpenMlsEngine, RustCryptoProvider},
+    mls::{MlsCredentialVerifier, MlsEngine, OpenMlsEngine, RustCryptoProvider},
     prekeys::{generate_profile, generate_upload, LocalPreKeyProfile, PreKeySecretStore,
               PreKeySigner, SecretKind},
     protocol::{self, v1},
@@ -310,6 +310,7 @@ type Client = ClientCore<SealedSenderCrypto<CallbackResolver>, Mls>;
 pub struct LinksDesktopCore {
     callbacks: LinksDesktopCoreCallbacks,
     client: Client,
+    mls_credential: Vec<u8>,
     bindings: Arc<RwLock<HashMap<Uuid, links_identity::DeviceBinding>>>,
     secrets: CallbackSecrets,
     profile: Option<LocalPreKeyProfile>,
@@ -515,21 +516,65 @@ impl LinksDesktopCore {
 
     fn set_recipient(&mut self, record: RecipientRecord) -> Result<(), CoreError> {
         let binding = parse_binding_from_prekey_credential(&record)?;
+        let recipient = RecipientDevice::new(
+            record.user_id.clone(),
+            record.device_id.clone(),
+            record.identity_public_key,
+            record.prekey_bundle.clone(),
+            record.mls_key_package.clone(),
+        )?;
+        let sealed_key = recipient.verify()?;
         let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
         bindings.insert(binding.device_id, binding);
         self.client.crypto_mut().resolver_mut().install_recipient_public_key(
             &record.device_id,
-            record
-                .prekey_bundle
-                .profile
-                .as_ref()
-                .and_then(|profile| profile.identity.as_ref())
-                .and_then(|identity| identity.dh_key.as_slice().try_into().ok())
-                .ok_or(CoreError::Authentication)?,
+            sealed_key,
         )?;
         self.recipients.entry(record.user_id.clone()).or_default().retain(|item| item.device_id != record.device_id);
         self.recipients.entry(record.user_id.clone()).or_default().push(record);
         Ok(())
+    }
+
+    fn initialize_direct_group(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+    ) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        protocol::validate_id(recipient_user_id)?;
+        if recipient_user_id == self.client.user_id() {
+            return Err(CoreError::Authentication);
+        }
+        let records = self
+            .recipients
+            .get(recipient_user_id)
+            .ok_or(CoreError::Authentication)?;
+        if records.is_empty() || records.len() > protocol::MAX_FANOUT_DEVICES {
+            return Err(CoreError::Authentication);
+        }
+        let packages = records
+            .iter()
+            .map(|record| record.mls_key_package.as_slice())
+            .collect::<Vec<_>>();
+        let Some(pending) = self.client.mls_mut().ensure_direct_group(conversation_id, &packages)? else {
+            return Ok(());
+        };
+        let welcome = pending.welcome.as_ref().ok_or(CoreError::Provider)?;
+        for record in records {
+            let bootstrap = self.encode_client_frame(v1::client_frame::Body::MlsBootstrap(
+                v1::MlsBootstrap {
+                    conversation_id: conversation_id.to_owned(),
+                    recipient_device_id: record.device_id.clone(),
+                    commit: pending.commit.clone(),
+                    welcome: welcome.clone(),
+                    sender_mls_credential: self.mls_credential.clone(),
+                    sender_identity_public_key: self.callbacks.identity_public_key.to_vec(),
+                },
+            ))?;
+            self.send_frame(&bootstrap)?;
+        }
+        self.client.mls_mut().merge_pending_direct_commit(conversation_id)?;
+        self.save()
     }
 
     fn send_text(&mut self, conversation_id: &str, recipient_user_id: &str, text: &str) -> Result<(), CoreError> {
@@ -538,6 +583,7 @@ impl LinksDesktopCore {
         if recipient_user_id == self.client.user_id() || text.is_empty() || text.len() > protocol::MAX_MESSAGE_BYTES {
             return Err(CoreError::Authentication);
         }
+        self.initialize_direct_group(conversation_id, recipient_user_id)?;
         let records = self.recipients.get(recipient_user_id).ok_or(CoreError::Authentication)?;
         if records.is_empty() || records.len() > protocol::MAX_FANOUT_DEVICES {
             return Err(CoreError::Authentication);
@@ -554,21 +600,6 @@ impl LinksDesktopCore {
             self.client.crypto_mut().install_recipient_public_key(&record.device_id, sealed_key)?;
             Ok((FanoutRecipient::new(record.device_id.clone())?, record.mls_key_package.as_slice()))
         }).collect::<Result<Vec<_>, CoreError>>()?;
-        let packages = recipients.iter().map(|(_, package)| *package).collect::<Vec<_>>();
-        if let Some(pending) = self.client.mls_mut().ensure_direct_group(conversation_id, &packages)? {
-            self.save()?;
-            let welcome = pending.welcome.as_ref().ok_or(CoreError::Provider)?;
-            for record in records {
-                let bootstrap = self.encode_client_frame(v1::client_frame::Body::MlsBootstrap(v1::MlsBootstrap {
-                    conversation_id: conversation_id.to_owned(),
-                    recipient_device_id: record.device_id.clone(),
-                    commit: pending.commit.clone(),
-                    welcome: welcome.clone(),
-                }))?;
-                self.send_frame(&bootstrap)?;
-            }
-            self.client.mls_mut().merge_pending_direct_commit(conversation_id)?;
-        }
         let now_ms = now_ms();
         let message_id = Uuid::new_v4().to_string();
         let mut sequence = ConversationSequence::restore(
@@ -623,8 +654,32 @@ impl LinksDesktopCore {
                 _ => Err(CoreError::Provider),
             },
             v1::server_frame::Body::MlsBootstrap(bootstrap) => {
-                if bootstrap.recipient_device_id != self.client.device_id() || bootstrap.welcome.is_empty() {
+                if bootstrap.recipient_device_id != self.client.device_id()
+                    || bootstrap.welcome.is_empty()
+                    || bootstrap.sender_identity_public_key.len() != 32
+                {
                     return Err(CoreError::Authentication);
+                }
+                let binding = parse_binding(&bootstrap.sender_mls_credential)?;
+                let sender_public_key: [u8; 32] = bootstrap.sender_identity_public_key
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| CoreError::Authentication)?;
+                let local_device = self
+                    .client
+                    .device_id()
+                    .parse::<Uuid>()
+                    .map_err(|_| CoreError::Authentication)?;
+                if binding.device_id == local_device || binding.public_key != sender_public_key {
+                    return Err(CoreError::Authentication);
+                }
+                let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
+                if let Some(existing) = bindings.get(&binding.device_id) {
+                    if existing != &binding {
+                        return Err(CoreError::Authentication);
+                    }
+                } else {
+                    bindings.insert(binding.device_id, binding);
                 }
                 self.client.mls_mut().join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
                 self.save()
@@ -758,6 +813,7 @@ pub unsafe extern "C" fn links_desktop_core_create(
             let mut core = LinksDesktopCore {
                 callbacks,
                 client,
+                mls_credential: credential.to_vec(),
                 bindings,
                 secrets: CallbackSecrets { callbacks },
                 profile: None,
@@ -935,6 +991,37 @@ pub unsafe extern "C" fn links_desktop_core_set_recipient(
             let package = unsafe { input(mls_key_package, mls_key_package_length, protocol::MAX_FRAME_BYTES) }.map_err(|_| CoreError::Authentication)?.to_vec();
             let record = RecipientRecord { user_id: user, device_id: device, identity_public_key: public_key, prekey_bundle: bundle, mls_credential: credential, mls_key_package: package };
             unsafe { (&mut *core).set_recipient(record) }
+        })();
+        result.map_or_else(status, |_| LINKS_DESKTOP_OK)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_initialize_direct(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    recipient_user_id: *const u8,
+    recipient_user_id_length: usize,
+) -> i32 {
+    boundary(|| {
+        if core.is_null() {
+            return LINKS_DESKTOP_INVALID;
+        }
+        let result = (|| -> Result<(), CoreError> {
+            let conversation = String::from_utf8(
+                unsafe { input(conversation_id, conversation_id_length, 64) }
+                    .map_err(|_| CoreError::Authentication)?
+                    .to_vec(),
+            )
+            .map_err(|_| CoreError::Authentication)?;
+            let recipient = String::from_utf8(
+                unsafe { input(recipient_user_id, recipient_user_id_length, 64) }
+                    .map_err(|_| CoreError::Authentication)?
+                    .to_vec(),
+            )
+            .map_err(|_| CoreError::Authentication)?;
+            unsafe { (&mut *core).initialize_direct_group(&conversation, &recipient) }
         })();
         result.map_or_else(status, |_| LINKS_DESKTOP_OK)
     })

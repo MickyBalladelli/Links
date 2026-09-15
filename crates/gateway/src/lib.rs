@@ -669,6 +669,9 @@ where
                     || bootstrap.commit.len() > protocol::MAX_FRAME_BYTES
                     || bootstrap.welcome.is_empty()
                     || bootstrap.welcome.len() > protocol::MAX_FRAME_BYTES
+                    || bootstrap.sender_mls_credential.is_empty()
+                    || bootstrap.sender_mls_credential.len() > 1024
+                    || bootstrap.sender_identity_public_key.len() != 32
                 {
                     return Err(GatewayError::Invalid);
                 }
@@ -767,6 +770,9 @@ fn validate_request(frame: &v1::ClientFrame) -> Result<(), GatewayError> {
                 || bootstrap.welcome.is_empty()
                 || bootstrap.commit.len() > protocol::MAX_FRAME_BYTES
                 || bootstrap.welcome.len() > protocol::MAX_FRAME_BYTES
+                || bootstrap.sender_mls_credential.is_empty()
+                || bootstrap.sender_mls_credential.len() > 1024
+                || bootstrap.sender_identity_public_key.len() != 32
             {
                 return Err(GatewayError::Invalid);
             }

@@ -13,9 +13,10 @@ Intel support stays out of scope until an x86_64 Rust archive is built and
 validated.
 
 The shell creates the local identity on first run, shows account/device/
-connection state, and only sends through an installed `IOSDirectMessaging`
-host. Without concrete Rust-core and durable providers it remains in a safe
-"Core not configured" state.
+connection state, and sends through `IOSDirectMessaging` backed by the
+Rust `links-desktop-client-ffi` core. "Core not configured" means the app was
+built without the matching Rust static library or the profile could not open
+its encrypted state provider.
 
 The macOS messaging path uses `IOSConnectionManager` as its native socket
 adapter. Release builds accept only `wss://<host>/v1/connect`; Debug builds
@@ -30,7 +31,10 @@ Build the arm64 Rust library first with the same macOS deployment target, then
 build a signed Debug app after choosing an Apple Development team in Xcode:
 
 ```sh
-MACOSX_DEPLOYMENT_TARGET=13.0 cargo build -p links-identity-ffi --locked
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build \
+  -p links-identity-ffi \
+  -p links-desktop-client-ffi \
+  --locked
 xcodebuild \
   -project native/macos/Links.xcodeproj \
   -scheme Links-Debug \
@@ -44,7 +48,10 @@ Rust release archive:
 
 ```sh
 MACOSX_DEPLOYMENT_TARGET=13.0 \
-  cargo build -p links-identity-ffi --release --locked
+  cargo build \
+    -p links-identity-ffi \
+    -p links-desktop-client-ffi \
+    --release --locked
 LINKS_IDENTITY_LIB_DIR="$PWD/target/release" xcodebuild \
   -project native/macos/Links.xcodeproj \
   -scheme Links-Release \
@@ -63,7 +70,10 @@ release distribution.
 Use this path when no Apple signing team or certificate is available:
 
 ```sh
-MACOSX_DEPLOYMENT_TARGET=13.0 cargo build -p links-identity-ffi --locked
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build \
+  -p links-identity-ffi \
+  -p links-desktop-client-ffi \
+  --locked
 xcodebuild \
   -project native/macos/Links.xcodeproj \
   -scheme Links-Debug \

@@ -104,7 +104,7 @@ Set `LINKS_GATEWAY_ENDPOINT` to that value in both the macOS and Web client
 hosts. The auth URL is `http://127.0.0.1:8080`. The process applies the
 PostgreSQL migrations before serving and uses the Debug-only loopback username
 flow; no Twilio credentials are needed. Stop the Rust process with Ctrl-C;
-PostgreSQL remains in its Docker volume for the next run.
+PostgreSQL data stays in the PostgreSQL instance for the next run.
 
 For the real phone OTP flow, run the migration example and account-auth binary
 separately with the same `DATABASE_URL` and `AUTH_LOOKUP_KEY`, then supply all
@@ -131,8 +131,8 @@ account-auth mode rejects a non-loopback `AUTH_BIND`.
 ```sh
 cargo build --workspace --locked
 
-# The Apple Swift package links this Rust library.
-cargo build -p links-identity-ffi --locked
+# The Apple Swift package links these Rust libraries.
+cargo build -p links-identity-ffi -p links-desktop-client-ffi --locked
 swift build --package-path native/apple
 
 # Web/WASM client

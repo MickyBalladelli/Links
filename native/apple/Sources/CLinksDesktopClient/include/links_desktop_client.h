@@ -77,6 +77,11 @@ int32_t links_desktop_core_set_recipient(
     size_t identity_public_key_length, const uint8_t *prekey_bundle, size_t prekey_bundle_length,
     const uint8_t *mls_credential, size_t mls_credential_length, const uint8_t *mls_key_package,
     size_t mls_key_package_length);
+int32_t links_desktop_core_initialize_direct(LinksDesktopCore *core,
+                                             const uint8_t *conversation_id,
+                                             size_t conversation_id_length,
+                                             const uint8_t *recipient_user_id,
+                                             size_t recipient_user_id_length);
 int32_t links_desktop_core_send_text(LinksDesktopCore *core, const uint8_t *conversation_id,
                                      size_t conversation_id_length, const uint8_t *recipient_user_id,
                                      size_t recipient_user_id_length, const uint8_t *text,

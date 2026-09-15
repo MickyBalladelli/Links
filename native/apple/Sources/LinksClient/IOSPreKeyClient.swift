@@ -100,13 +100,16 @@ public struct IOSRecipientDeviceDescriptor: Sendable {
     public let userID: String
     public let deviceID: String
     public let identityPublicKey: Data
+    public let mlsCredential: Data
     public let mlsKeyPackage: Data
 
     public init(userID: String, deviceID: String, identityPublicKey: Data,
-                mlsKeyPackage: Data) throws {
+                mlsCredential: Data, mlsKeyPackage: Data) throws {
         guard IOSClient.isCanonicalUUID(userID),
               IOSClient.isCanonicalUUID(deviceID),
               identityPublicKey.count == 32,
+              !mlsCredential.isEmpty,
+              mlsCredential.count <= 1024,
               !mlsKeyPackage.isEmpty,
               mlsKeyPackage.count <= IOSConnectionManager.maximumFrameBytes else {
             throw IOSPreKeyError.invalidRecipient
@@ -114,6 +117,7 @@ public struct IOSRecipientDeviceDescriptor: Sendable {
         self.userID = userID
         self.deviceID = deviceID
         self.identityPublicKey = identityPublicKey
+        self.mlsCredential = mlsCredential
         self.mlsKeyPackage = mlsKeyPackage
     }
 }
@@ -181,6 +185,7 @@ public final class IOSUsernameDirectoryChatAdapter: IOSDirectChatDirectory {
                 userID: directory.userID,
                 deviceID: device.deviceID,
                 identityPublicKey: device.identityPublicKey,
+                mlsCredential: device.mlsCredential,
                 mlsKeyPackage: keyPackage))
         }
         return descriptors
