@@ -224,6 +224,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             profileName = profile.name
             client = loadedClient
             usernameInput = loadedClient.accountHandle ?? ""
+            authMode = loadedClient.accountHandle == nil ? .register : .login
             if let endpoint = try? Self.authEndpointFromArguments() {
                 let session = URLSession(configuration: .ephemeral)
                 authClient = try? IOSUsernameAuthClient(baseURL: endpoint, urlSession: session)
