@@ -349,6 +349,15 @@ fn status(error: CoreError) -> i32 {
     }
 }
 
+// Authentication from a received payload is local crypto/data validation.
+// Only a server unauthenticated error should make Swift clear the bearer session.
+fn local_frame_error(error: CoreError) -> CoreError {
+    match error {
+        CoreError::Authentication => CoreError::Provider,
+        error => error,
+    }
+}
+
 fn boundary(work: impl FnOnce() -> i32) -> i32 {
     match std::panic::catch_unwind(AssertUnwindSafe(work)) {
         Ok(code) => code,
@@ -691,11 +700,11 @@ impl LinksDesktopCore {
                 }
                 self.client.mls_mut().join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
                 self.save()
-            }
-            v1::server_frame::Body::Batch(batch) => self.handle_batch(batch),
+            }.map_err(local_frame_error),
+            v1::server_frame::Body::Batch(batch) => self.handle_batch(batch).map_err(local_frame_error),
             v1::server_frame::Body::CompressedBatch(batch) => {
                 let batch = protocol::decompress_sync_batch(&batch)?;
-                self.handle_batch(batch)
+                self.handle_batch(batch).map_err(local_frame_error)
             }
             v1::server_frame::Body::WebRtcSignal(_) => Err(CoreError::Provider),
         }

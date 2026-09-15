@@ -36,10 +36,8 @@ private func callbackKey(_ pointer: UnsafePointer<UInt8>?, _ length: Int) -> Str
     return key
 }
 
-private func callbackStatus(_ error: Error) -> Int32 {
-    if error is MacOSKeychainSecretProvider.SecretError {
-        return Int32(LINKS_DESKTOP_AUTHENTICATION)
-    }
+// Callback failures are local provider failures, not bearer-token expiry.
+private func callbackStatus(_: Error) -> Int32 {
     return Int32(LINKS_DESKTOP_PROVIDER)
 }
 
