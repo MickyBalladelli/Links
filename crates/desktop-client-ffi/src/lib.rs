@@ -18,9 +18,10 @@ use links_client_core::{
     sequences::ConversationSequence,
     CoreError,
 };
+use openmls::prelude::GroupId;
 use openmls_rust_crypto::MemoryStorage;
 use prost::Message;
-use std::{collections::HashMap, ffi::c_void, panic::AssertUnwindSafe, slice, sync::{Arc, RwLock}};
+use std::{collections::{HashMap, HashSet}, ffi::c_void, panic::AssertUnwindSafe, slice, sync::{Arc, RwLock}};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -103,6 +104,22 @@ struct PersistedState {
     prekey_profile: Option<Vec<u8>>,
     #[prost(bytes, repeated, tag = "5")]
     outbox: Vec<Vec<u8>>,
+    #[prost(message, repeated, tag = "6")]
+    bindings: Vec<PersistedBinding>,
+    #[prost(bytes, repeated, tag = "7")]
+    bootstrap_outbox: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct PersistedBinding {
+    #[prost(bytes, tag = "1")]
+    user_id: Vec<u8>,
+    #[prost(bytes, tag = "2")]
+    device_id: Vec<u8>,
+    #[prost(bytes, tag = "3")]
+    mls_node_id: Vec<u8>,
+    #[prost(bytes, tag = "4")]
+    public_key: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -317,7 +334,9 @@ pub struct LinksDesktopCore {
     cursor: u64,
     sequences: HashMap<String, u64>,
     outbox: Vec<Vec<u8>>,
+    bootstrap_outbox: Vec<Vec<u8>>,
     recipients: HashMap<String, Vec<RecipientRecord>>,
+    pending_batch: Option<v1::SyncBatch>,
 }
 
 unsafe fn input<'a>(pointer: *const u8, length: usize, maximum: usize) -> Result<&'a [u8], i32> {
@@ -415,6 +434,7 @@ impl LinksDesktopCore {
     fn snapshot(&self) -> Result<Vec<u8>, CoreError> {
         let storage = self.client.mls().provider().storage();
         let values = storage.values.read().map_err(|_| CoreError::Provider)?;
+        let bindings = self.bindings.read().map_err(|_| CoreError::Provider)?;
         let state = PersistedState {
             cursor: self.cursor,
             storage: values.iter().map(|(key, value)| StorageEntry {
@@ -427,6 +447,13 @@ impl LinksDesktopCore {
             }).collect(),
             prekey_profile: self.profile.as_ref().map(|profile| profile.profile.encode_to_vec()),
             outbox: self.outbox.clone(),
+            bootstrap_outbox: self.bootstrap_outbox.clone(),
+            bindings: bindings.values().map(|binding| PersistedBinding {
+                user_id: binding.user_id.as_bytes().to_vec(),
+                device_id: binding.device_id.as_bytes().to_vec(),
+                mls_node_id: binding.mls_node_id.as_bytes().to_vec(),
+                public_key: binding.public_key.to_vec(),
+            }).collect(),
         };
         Ok(state.encode_to_vec())
     }
@@ -438,7 +465,14 @@ impl LinksDesktopCore {
     }
 
     fn restore_state(&mut self, state: PersistedState) -> Result<(), CoreError> {
-        if state.cursor > protocol::MAX_CURSOR || state.storage.len() > 100_000 || state.outbox.len() > 100 {
+        if state.cursor > protocol::MAX_CURSOR
+            || state.storage.len() > 100_000
+            || state.outbox.len() > 100
+            || state.bootstrap_outbox.len() > 100
+            || state.outbox.iter().chain(state.bootstrap_outbox.iter()).any(|frame| {
+                frame.is_empty() || frame.len() > MAX_OUTPUT_BYTES
+            })
+        {
             return Err(CoreError::InvalidSync);
         }
         let storage = self.client.mls_mut().provider_mut().storage();
@@ -475,6 +509,66 @@ impl LinksDesktopCore {
         }).transpose()?;
         if let Some(profile) = &self.profile {
             self.client.crypto_mut().resolver_mut().identity_revision = profile.revision;
+        }
+        for persisted in state.bindings {
+            if persisted.user_id.len() != 16
+                || persisted.device_id.len() != 16
+                || persisted.mls_node_id.len() != 16
+                || persisted.public_key.len() != 32
+            {
+                return Err(CoreError::Authentication);
+            }
+            let binding = links_identity::DeviceBinding {
+                user_id: Uuid::from_slice(&persisted.user_id).map_err(|_| CoreError::Authentication)?,
+                device_id: Uuid::from_slice(&persisted.device_id).map_err(|_| CoreError::Authentication)?,
+                mls_node_id: Uuid::from_slice(&persisted.mls_node_id).map_err(|_| CoreError::Authentication)?,
+                public_key: persisted.public_key.as_slice().try_into().map_err(|_| CoreError::Authentication)?,
+            };
+            links_identity::validate_public_key(&binding.public_key)
+                .map_err(|_| CoreError::Authentication)?;
+            self.insert_binding(binding)?;
+        }
+        self.bootstrap_outbox = state.bootstrap_outbox;
+        self.recover_group_bindings()?;
+        Ok(())
+    }
+
+    fn insert_binding(&self, binding: links_identity::DeviceBinding) -> Result<(), CoreError> {
+        let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
+        if let Some(existing) = bindings.get(&binding.device_id) {
+            if existing != &binding {
+                return Err(CoreError::Authentication);
+            }
+        } else {
+            bindings.insert(binding.device_id, binding);
+        }
+        Ok(())
+    }
+
+    fn recover_group_bindings(&self) -> Result<(), CoreError> {
+        let storage = self.client.mls().provider().storage();
+        let values = storage.values.read().map_err(|_| CoreError::Provider)?;
+        let group_state_label = b"GroupState";
+        let mut group_ids = HashSet::new();
+        for key in values.keys() {
+            if key.len() <= group_state_label.len() + 2
+                || !key.starts_with(group_state_label)
+                || key[key.len() - 2..] != [0, 1]
+            {
+                continue;
+            }
+            let serialized = &key[group_state_label.len()..key.len() - 2];
+            let group_id = serde_json::from_slice::<GroupId>(serialized)
+                .map_err(|_| CoreError::Provider)?;
+            if group_id.as_slice().len() == 16 {
+                group_ids.insert(Uuid::from_slice(group_id.as_slice()).map_err(|_| CoreError::Provider)?.to_string());
+            }
+        }
+        drop(values);
+        for conversation_id in group_ids {
+            for binding in self.client.mls().group_member_bindings(&conversation_id)? {
+                self.insert_binding(binding)?;
+            }
         }
         Ok(())
     }
@@ -539,8 +633,7 @@ impl LinksDesktopCore {
             record.mls_key_package.clone(),
         )?;
         let sealed_key = recipient.verify()?;
-        let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
-        bindings.insert(binding.device_id, binding);
+        self.insert_binding(binding)?;
         self.client.crypto_mut().resolver_mut().install_recipient_public_key(
             &record.device_id,
             sealed_key,
@@ -575,6 +668,7 @@ impl LinksDesktopCore {
             return Ok(());
         };
         let welcome = pending.welcome.as_ref().ok_or(CoreError::Provider)?;
+        let mut bootstraps = Vec::with_capacity(records.len());
         for record in records {
             let bootstrap = self.encode_client_frame(v1::client_frame::Body::MlsBootstrap(
                 v1::MlsBootstrap {
@@ -586,6 +680,11 @@ impl LinksDesktopCore {
                     sender_identity_public_key: self.callbacks.identity_public_key.to_vec(),
                 },
             ))?;
+            bootstraps.push(bootstrap);
+        }
+        self.bootstrap_outbox.extend(bootstraps.iter().cloned());
+        self.save()?;
+        for bootstrap in bootstraps {
             self.send_frame(&bootstrap)?;
         }
         self.client.mls_mut().merge_pending_direct_commit(conversation_id)?;
@@ -666,10 +765,13 @@ impl LinksDesktopCore {
             v1::server_frame::Body::Error(error) => match error.code {
                 2 => Err(CoreError::Authentication),
                 5 => Err(CoreError::InvalidSync),
+                6 => Ok(()),
                 _ => Err(CoreError::Provider),
             },
             v1::server_frame::Body::MlsBootstrap(bootstrap) => {
+                protocol::validate_id(&bootstrap.conversation_id)?;
                 if bootstrap.recipient_device_id != self.client.device_id()
+                    || bootstrap.commit.is_empty()
                     || bootstrap.welcome.is_empty()
                     || bootstrap.sender_identity_public_key.len() != 32
                 {
@@ -688,18 +790,10 @@ impl LinksDesktopCore {
                 if binding.device_id == local_device || binding.public_key != sender_public_key {
                     return Err(CoreError::Authentication);
                 }
-                {
-                    let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
-                    if let Some(existing) = bindings.get(&binding.device_id) {
-                        if existing != &binding {
-                            return Err(CoreError::Authentication);
-                        }
-                    } else {
-                        bindings.insert(binding.device_id, binding);
-                    }
-                }
+                self.insert_binding(binding)?;
                 self.client.mls_mut().join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
-                self.save()
+                self.save()?;
+                self.retry_pending_batch()
             }.map_err(local_frame_error),
             v1::server_frame::Body::Batch(batch) => self.handle_batch(batch).map_err(local_frame_error),
             v1::server_frame::Body::CompressedBatch(batch) => {
@@ -715,6 +809,15 @@ impl LinksDesktopCore {
         if batch.recipient_device_id != self.client.device_id() || batch.after_cursor != self.cursor {
             return Err(CoreError::InvalidSync);
         }
+        let storage_backup = self
+            .client
+            .mls()
+            .provider()
+            .storage()
+            .values
+            .read()
+            .map_err(|_| CoreError::Provider)?
+            .clone();
         let mut rendered = Vec::new();
         for item in &batch.items {
             let Some(entry) = item.entry.as_ref() else { return Err(CoreError::InvalidSync) };
@@ -726,8 +829,11 @@ impl LinksDesktopCore {
                         }
                     }
                     Err(CoreError::Authentication) => {
-                        // An undecryptable envelope is permanently unusable. Ack it
-                        // so one stale message cannot wedge the whole mailbox.
+                        let storage = self.client.mls_mut().provider_mut().storage();
+                        let mut values = storage.values.write().map_err(|_| CoreError::Provider)?;
+                        *values = storage_backup;
+                        self.pending_batch = Some(batch);
+                        return Ok(())
                     }
                     Err(error) => return Err(error),
                 }
@@ -760,6 +866,17 @@ impl LinksDesktopCore {
             }
         }
         Ok(())
+    }
+
+    fn retry_pending_batch(&mut self) -> Result<(), CoreError> {
+        let Some(batch) = self.pending_batch.take() else { return Ok(()) };
+        match self.handle_batch(batch.clone()) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.pending_batch = Some(batch);
+                Err(error)
+            }
+        }
     }
 }
 
@@ -845,10 +962,13 @@ pub unsafe extern "C" fn links_desktop_core_create(
                 cursor: 0,
                 sequences: HashMap::new(),
                 outbox: Vec::new(),
+                bootstrap_outbox: Vec::new(),
                 recipients: HashMap::new(),
+                pending_batch: None,
             };
             if let Some(state) = load_state(callbacks).map_err(status)? {
                 core.restore_state(state).map_err(status)?;
+                core.save().map_err(status)?;
             }
             Ok(Box::into_raw(Box::new(core)))
         })();
@@ -940,7 +1060,8 @@ pub unsafe extern "C" fn links_desktop_core_retry_outbox(core: *mut LinksDesktop
     boundary(|| {
         if core.is_null() { return LINKS_DESKTOP_INVALID; }
         let result = (|| -> Result<(), CoreError> {
-            let frames = unsafe { (&*core).outbox.clone() };
+            let mut frames = unsafe { (&*core).outbox.clone() };
+            frames.extend(unsafe { (&*core).bootstrap_outbox.clone() });
             for frame in frames { unsafe { (&*core).send_frame(&frame)?; } }
             Ok(())
         })();

@@ -359,6 +359,31 @@ where
         Ok(self.load_group(&group_id)?.epoch().as_u64())
     }
 
+    /// Recover the device bindings already authenticated into a locally
+    /// persisted group. The encrypted MLS state is the source for this cache
+    /// migration; the caller still uses the normal directory verifier for new
+    /// credentials and group updates.
+    pub fn group_member_bindings(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<DeviceBinding>, CoreError> {
+        let group_id = group_id(conversation_id)?;
+        let group = self.load_group(&group_id)?;
+        group
+            .members()
+            .map(|member| {
+                let basic = BasicCredential::try_from(member.credential.clone())
+                    .map_err(|_| CoreError::Authentication)?;
+                let binding = links_identity::parse_mls_basic_identity(basic.identity())
+                    .map_err(|_| CoreError::Authentication)?;
+                if binding.public_key.as_slice() != member.signature_key.as_slice() {
+                    return Err(CoreError::Authentication);
+                }
+                Ok(binding)
+            })
+            .collect()
+    }
+
     /// Process one group commit against a caller-owned epoch checkpoint.
     /// OpenMLS performs the cryptographic validation and advances the epoch;
     /// the checkpoint prevents a replayed or concurrently applied update.
@@ -772,7 +797,14 @@ where
         conversation_id: &str,
         welcome: &[u8],
     ) -> Result<(), CoreError> {
-        self.join_group_with_id(group_id(conversation_id)?, welcome, DIRECT_MAX_USERS)
+        let group_id = group_id(conversation_id)?;
+        if let Some(group) = MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|_| CoreError::Provider)?
+        {
+            ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
+            return Ok(());
+        }
+        self.join_group_with_id(group_id, welcome, DIRECT_MAX_USERS)
     }
 
     fn process_commit(&mut self, conversation_id: &str, commit: &[u8]) -> Result<(), CoreError> {

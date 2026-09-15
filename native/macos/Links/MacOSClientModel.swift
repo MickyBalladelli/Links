@@ -18,6 +18,8 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     var title: String
     let recipientUserID: String
     var messages: [LinksMacOSMessage]
+
+    var isIncoming: Bool { recipientUserID.isEmpty }
 }
 
 struct LinksMacOSContact: Identifiable, Equatable, Codable {
@@ -321,7 +323,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     var isConnectionRequested: Bool { connectionRequested }
 
     var canInitializeSelectedConversation: Bool {
-        messaging?.state == .ready && messaging?.isConnected == true
+        guard let conversation = selectedConversation, !conversation.isIncoming else {
+            return false
+        }
+        return messaging?.state == .ready && messaging?.isConnected == true
+    }
+
+    var canSendSelectedConversation: Bool {
+        guard let conversation = selectedConversation,
+              !conversation.isIncoming else {
+            return false
+        }
+        return initializedConversationIDs.contains(conversation.id)
     }
 
     func clearLastError() {
@@ -851,6 +864,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             actionError = "Configure an authenticated directory with MLS KeyPackages first."
             return
         }
+        guard !conversation.isIncoming else {
+            conversationSetupStatus = "Secure two-user MLS conversation ready"
+            actionError = nil
+            clearLastError()
+            return
+        }
         guard messaging.state == .ready && messaging.isConnected else {
             conversationSetupStatus = "Connect before initializing MLS"
             actionError = "Click Connect and wait for Ready, then initialize secure chat."
@@ -1026,6 +1045,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 messages: [received]))
         }
         selectedConversationID = message.conversationID
+        if conversations.contains(where: {
+            $0.id == message.conversationID && $0.isIncoming
+        }) {
+            conversationSetupStatus = "Secure two-user MLS conversation ready"
+            actionError = nil
+            clearLastError()
+        }
         persistLocalState()
     }
 
@@ -1167,6 +1193,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             contacts = state.contacts
             selectedConversationID = state.selectedConversationID.flatMap { selectedID in
                 state.conversations.contains(where: { $0.id == selectedID }) ? selectedID : nil
+            }
+            if let selectedConversation,
+               selectedConversation.isIncoming,
+               !selectedConversation.messages.isEmpty {
+                conversationSetupStatus = "Secure two-user MLS conversation ready"
             }
         } catch {
             conversations = []

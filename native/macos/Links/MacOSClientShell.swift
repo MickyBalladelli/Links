@@ -427,6 +427,7 @@ private struct LinksConversationDetail: View {
                         model.initializeSelectedConversation()
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!model.canInitializeSelectedConversation)
                     Text(model.connectionStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -564,6 +565,7 @@ private struct ComposerView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
                 .onSubmit { model.sendMessage() }
+                .disabled(!model.canSendSelectedConversation)
             Button {
                 model.sendMessage()
             } label: {
@@ -573,6 +575,7 @@ private struct ComposerView: View {
             .buttonStyle(.borderless)
             .keyboardShortcut(.return, modifiers: [.command])
             .help("Send message")
+            .disabled(!model.canSendSelectedConversation)
         }
         .padding(16)
     }

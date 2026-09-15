@@ -1838,6 +1838,7 @@ dependencies = [
  "openmls_rust_crypto",
  "openmls_traits",
  "prost",
+ "serde_json",
  "uuid",
  "zeroize",
 ]
