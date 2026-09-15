@@ -88,18 +88,24 @@ lease, queue outage, push outage and reconnect acceptance checks before release.
 
 ## Loopback development socket
 
-Run the local transport adapter with:
+Run the full local composition with:
 
 ```sh
-cargo run -p links-gateway --bin links-gateway-local
+bash scripts/local-dev.sh
 ```
 
-It listens at `ws://127.0.0.1:8081/v1/connect`, requires the `links.v1`
-subprotocol, accepts binary protobuf frames only, and requires the local
-development access token `local-development-token`. `GATEWAY_BIND` may select
-another loopback port; non-loopback binds are rejected. The executable uses an
-in-memory ciphertext mailbox and authenticator so it is only a socket/core
-smoke adapter, not a production account or storage service.
+The script starts Docker PostgreSQL and `links-local-dev`. The process applies
+the migrations, starts account auth at `http://127.0.0.1:8080`, uses the
+PostgreSQL `RelationalStore` for encrypted mailbox storage, keeps ephemeral
+session leases in bounded in-process state, and serves the gateway at
+`ws://127.0.0.1:8081/v1/connect`. Both local Debug clients must use that exact
+WebSocket endpoint and the `links.v1` subprotocol; Release clients remain
+`wss://`-only. Account auth and the gateway share `DATABASE_URL` and
+`AUTH_LOOKUP_KEY`; the Debug-only username mode is enabled by the script and
+accepts only disposable `_test` handles.
+
+For a transport-only smoke process without PostgreSQL, use
+`cargo run -p links-gateway --bin links-gateway-local --locked`.
 
 WebRTC media uses the managed LiveKit Cloud deployment contract in
 `crates/gateway/src/sfu.rs` and `deploy/livekit/regions.example.yaml`. The

@@ -71,7 +71,14 @@ public final class IOSConnectionManager {
     public init(endpoint: URL, helloProvider: @escaping () throws -> Data,
                 delegate: IOSConnectionManagerDelegate,
                 callbackQueue: DispatchQueue = .main) throws {
-        guard endpoint.scheme?.lowercased() == "wss",
+        let scheme = endpoint.scheme?.lowercased()
+        #if DEBUG
+        let localDevelopmentSocket = scheme == "ws"
+            && ["localhost", "127.0.0.1", "::1"].contains(endpoint.host?.lowercased() ?? "")
+        #else
+        let localDevelopmentSocket = false
+        #endif
+        guard (scheme == "wss" || localDevelopmentSocket),
               endpoint.host?.isEmpty == false,
               endpoint.user == nil,
               endpoint.password == nil,

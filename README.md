@@ -35,9 +35,8 @@ particular:
   the macOS SwiftUI application target that embeds its `LinksClient` and
   `LinksKeyStore` products.
 - `web` contains a WASM host library, not a complete browser chat UI.
-- `links-gateway` includes a runnable loopback WebSocket adapter for local
-  transport development; the PostgreSQL/account-auth composition is still
-  needed for local two-client messaging.
+- `links-gateway` includes a runnable loopback WebSocket adapter and a
+  PostgreSQL/account-auth composition for local two-client messaging.
 - Durable host providers, UI integration, message TTL cleanup, physical-device
   acceptance, deployment, and the external crypto audit remain release work.
 
@@ -67,27 +66,28 @@ particular:
 - JDK, Android SDK, and Gradle for Android builds
 - Twilio Verify credentials when running phone OTP authentication
 
-### Start PostgreSQL and account auth
+### Start the local development composition
 
-Compose starts PostgreSQL only. Account auth is a separate loopback service and
-defaults to the real Twilio-backed flow. It also has an explicit debug-only
-username mode for disposable local accounts; that mode has no OTP bypass.
+The local composition uses Docker PostgreSQL and one Debug Rust process. That
+process starts account auth on `127.0.0.1:8080` and the encrypted-mailbox
+gateway on `127.0.0.1:8081`. Both clients use the same WebSocket endpoint:
+`ws://127.0.0.1:8081/v1/connect`.
 
 ```sh
 cp .env.example .env
 # Edit .env. Set AUTH_LOOKUP_KEY to a random 32-byte base64url secret.
-# Set all TWILIO_* values before using phone OTP routes.
-docker compose up -d --wait postgres
-set -a
-. ./.env
-set +a
-cargo run -p links-server-store --example migrate --locked
-cargo run -p links-account-auth --locked
+bash scripts/local-dev.sh
 ```
 
-The auth service listens at `http://127.0.0.1:8080`. The migration command and
-auth service must use the same `DATABASE_URL`. Never use the example credentials
-outside local development.
+Set `LINKS_GATEWAY_ENDPOINT` to that value in both the macOS and Web client
+hosts. The auth URL is `http://127.0.0.1:8080`. The process applies the
+PostgreSQL migrations before serving and uses the Debug-only `_test` username
+flow; no Twilio credentials are needed. Stop the Rust process with Ctrl-C;
+PostgreSQL remains in its Docker volume for the next run.
+
+For the real phone OTP flow, run the migration example and account-auth binary
+separately with the same `DATABASE_URL` and `AUTH_LOOKUP_KEY`, then supply all
+`TWILIO_*` values. Never use the example credentials outside local development.
 
 ### Disposable username development mode
 

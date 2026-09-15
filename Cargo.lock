@@ -1832,15 +1832,18 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "base64",
  "ed25519-dalek",
  "links-account-auth",
  "links-protocol",
  "links-server-store",
  "prost",
  "sha2 0.10.9",
+ "sqlx",
  "thiserror",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

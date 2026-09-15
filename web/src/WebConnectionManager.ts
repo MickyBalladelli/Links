@@ -39,7 +39,10 @@ function validateEndpoint(endpoint: string): string {
   } catch {
     throw new Error('Invalid WebSocket endpoint')
   }
-  if (parsed.protocol !== 'wss:' || parsed.hostname.length === 0 ||
+  const localDevelopmentSocket = parsed.protocol === 'ws:' &&
+    ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)
+  if ((!localDevelopmentSocket && parsed.protocol !== 'wss:') ||
+      parsed.hostname.length === 0 ||
       parsed.username.length !== 0 || parsed.password.length !== 0 ||
       parsed.search.length !== 0 || parsed.hash.length !== 0 ||
       parsed.pathname !== '/v1/connect') {

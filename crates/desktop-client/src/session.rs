@@ -1091,11 +1091,17 @@ impl<F: DesktopSocketFactory> DesktopFrameTransport for ManagerTransport<'_, F> 
 }
 
 fn validate_endpoint(endpoint: String) -> Result<String, CoreError> {
-    let rest = endpoint
-        .strip_prefix("wss://")
-        .ok_or(CoreError::Authentication)?;
+    let (scheme, rest) = if let Some(rest) = endpoint.strip_prefix("wss://") {
+        ("wss", rest)
+    } else if cfg!(debug_assertions) {
+        ("ws", endpoint.strip_prefix("ws://").ok_or(CoreError::Authentication)?)
+    } else {
+        return Err(CoreError::Authentication);
+    };
     let (authority, path) = rest.split_once('/').ok_or(CoreError::Authentication)?;
-    if authority.is_empty()
+    let local_development_socket = scheme == "ws" && valid_local_ws_authority(authority);
+    if (!local_development_socket && scheme != "wss")
+        || authority.is_empty()
         || authority.contains('@')
         || path != "v1/connect"
         || endpoint.contains('?')
@@ -1104,6 +1110,14 @@ fn validate_endpoint(endpoint: String) -> Result<String, CoreError> {
         return Err(CoreError::Authentication);
     }
     Ok(endpoint)
+}
+
+fn valid_local_ws_authority(authority: &str) -> bool {
+    matches!(authority, "localhost" | "[::1]")
+        || authority
+            .strip_prefix("127.0.0.1:")
+            .and_then(|port| port.parse::<u16>().ok())
+            .is_some()
 }
 
 fn validate_frame(frame: &[u8]) -> Result<(), CoreError> {
