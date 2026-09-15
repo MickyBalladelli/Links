@@ -86,6 +86,21 @@ Redis, bus, APNs and FCM adapters plus cloud load-balancer/IaC rollout are
 deployment work and must pass regional failover, duplicate delivery, stale
 lease, queue outage, push outage and reconnect acceptance checks before release.
 
+## Loopback development socket
+
+Run the local transport adapter with:
+
+```sh
+cargo run -p links-gateway --bin links-gateway-local
+```
+
+It listens at `ws://127.0.0.1:8081/v1/connect`, requires the `links.v1`
+subprotocol, accepts binary protobuf frames only, and requires the local
+development access token `local-development-token`. `GATEWAY_BIND` may select
+another loopback port; non-loopback binds are rejected. The executable uses an
+in-memory ciphertext mailbox and authenticator so it is only a socket/core
+smoke adapter, not a production account or storage service.
+
 WebRTC media uses the managed LiveKit Cloud deployment contract in
 `crates/gateway/src/sfu.rs` and `deploy/livekit/regions.example.yaml`. The
 gateway-side registry selects a healthy regional endpoint for an opaque room;

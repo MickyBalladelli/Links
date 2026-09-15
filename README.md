@@ -35,8 +35,9 @@ particular:
   the macOS SwiftUI application target that embeds its `LinksClient` and
   `LinksKeyStore` products.
 - `web` contains a WASM host library, not a complete browser chat UI.
-- `links-gateway` is a transport-neutral library; a runnable WebSocket adapter
-  is still needed for local two-client messaging.
+- `links-gateway` includes a runnable loopback WebSocket adapter for local
+  transport development; the PostgreSQL/account-auth composition is still
+  needed for local two-client messaging.
 - Durable host providers, UI integration, message TTL cleanup, physical-device
   acceptance, deployment, and the external crypto audit remain release work.
 

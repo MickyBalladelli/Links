@@ -21,6 +21,7 @@ pub mod sfu;
 pub mod sfu_discovery;
 pub mod media_relay;
 pub mod webtransport;
+pub mod websocket;
 
 pub const HELLO_DEADLINE_MS: u64 = 5_000;
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30_000;
@@ -420,6 +421,63 @@ where
             .state
             .unbind(&session.device_id.to_string(), &session.session_id)
             .await?)
+    }
+
+    /// Build the ordered mailbox frame for a local socket delivery. The
+    /// adapter calls this on the recipient connection so its current durable
+    /// acknowledgement cursor is used as the batch checkpoint.
+    pub async fn local_delivery(
+        &self,
+        session: &GatewaySession,
+        lease: SessionLease,
+        delivery: ForwardedEnvelope,
+        now_ms: u64,
+    ) -> Result<Option<v1::ServerFrame>, GatewayError> {
+        if lease.session_id != session.session_id
+            || lease.device_id != session.device_id.to_string()
+            || lease.expires_at_ms <= now_ms
+        {
+            return Err(GatewayError::Authentication);
+        }
+        let active = self
+            .state
+            .route(&session.device_id.to_string(), now_ms)
+            .await?
+            .is_some_and(|active| {
+                active.session_id == session.session_id && active.gateway_id == lease.gateway_id
+            });
+        if !active {
+            return Err(GatewayError::Authentication);
+        }
+        protocol::validate_envelope(&delivery.envelope)?;
+        if delivery.envelope.recipient_device_id != session.device_id.to_string()
+            || delivery.envelope.expires_at_ms <= now_ms
+        {
+            return Ok(None);
+        }
+        let batch = self
+            .queue
+            .read(ReadRequest::new(
+                session.device_id.to_string(),
+                session.last_ack_cursor,
+                protocol::MAX_BATCH_ITEMS as u32,
+                now_ms,
+            )?)
+            .await?;
+        if !batch.items.iter().any(|item| item.cursor == delivery.cursor) {
+            return Ok(None);
+        }
+        let action = sync_batch_action(
+            delivery.envelope.envelope_id.clone(),
+            batch,
+            session.sync_compression,
+        )?;
+        match action {
+            GatewayAction::Server(frame) => Ok(Some(frame)),
+            GatewayAction::LocalDelivery { .. } | GatewayAction::LocalWebRtcSignal { .. } => {
+                Err(GatewayError::Unavailable)
+            }
+        }
     }
 
     /// Deliver an envelope received from another region. The bus adapter must
