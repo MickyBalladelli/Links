@@ -402,6 +402,7 @@ fn encode_client_frame(body: v1::client_frame::Body) -> Result<Vec<u8>, CoreErro
 fn server_error(error: &v1::ProtocolError) -> CoreError {
     match error.code {
         2 => CoreError::Authentication,
+        7 => CoreError::SessionConflict,
         5 => CoreError::InvalidSync,
         _ => CoreError::Provider,
     }

@@ -127,10 +127,24 @@ where
             Ok(frame) => frame,
             Err(_) => return,
         };
+        let request_id = frame.request_id.clone();
         let opened_at_ms = now_ms();
         let (mut session, actions) = match self.gateway.open(frame, opened_at_ms).await {
             Ok(result) => result,
-            Err(_) => return,
+            Err(error) => {
+                let frame = v1::ServerFrame {
+                    request_id,
+                    body: Some(v1::server_frame::Body::Error(v1::ProtocolError {
+                        code: open_error_code(&error),
+                        retry_after_ms: 0,
+                    })),
+                };
+                if let Ok(bytes) = encode_server_frame(&frame) {
+                    let _ = socket.send(Message::Binary(bytes.into())).await;
+                }
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
         };
         let session_id = session.session_id().to_owned();
         self.connections
@@ -297,6 +311,23 @@ where
 
     async fn unregister(&self, session_id: &str) {
         self.connections.lock().await.remove(session_id);
+    }
+}
+
+fn open_error_code(error: &GatewayError) -> i32 {
+    match error {
+        GatewayError::Authentication => v1::protocol_error::Code::Unauthenticated as i32,
+        GatewayError::UnsupportedVersion
+        | GatewayError::Protocol(links_protocol::ProtocolError::UnsupportedVersion) => {
+            v1::protocol_error::Code::UnsupportedVersion as i32
+        }
+        GatewayError::Conflict => v1::protocol_error::Code::SessionConflict as i32,
+        GatewayError::Unavailable | GatewayError::Sfu(_) => {
+            v1::protocol_error::Code::TemporarilyUnavailable as i32
+        }
+        GatewayError::Invalid | GatewayError::Protocol(_) => {
+            v1::protocol_error::Code::InvalidArgument as i32
+        }
     }
 }
 

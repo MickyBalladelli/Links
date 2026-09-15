@@ -56,6 +56,8 @@ pub enum CoreError {
     CryptoUnavailable,
     #[error("authentication failed")]
     Authentication,
+    #[error("another active session uses this device")]
+    SessionConflict,
     #[error("invalid sync batch or checkpoint")]
     InvalidSync,
     #[error("invalid conversation sequence")]

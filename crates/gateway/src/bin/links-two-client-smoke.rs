@@ -77,6 +77,7 @@ struct AuthSession {
 struct Timings {
     auth_ms: u64,
     connect_ms: u64,
+    duplicate_device_ms: u64,
     alice_to_bob_ms: u64,
     bob_to_alice_ms: u64,
 }
@@ -87,6 +88,7 @@ struct SmokeReport {
     total_ms: u64,
     auth_ms: u64,
     connect_ms: u64,
+    duplicate_device_ms: u64,
     alice_to_bob_ms: u64,
     bob_to_alice_ms: u64,
 }
@@ -101,6 +103,7 @@ async fn main() {
         total_ms: elapsed_ms(started),
         auth_ms: timings.auth_ms,
         connect_ms: timings.connect_ms,
+        duplicate_device_ms: timings.duplicate_device_ms,
         alice_to_bob_ms: timings.alice_to_bob_ms,
         bob_to_alice_ms: timings.bob_to_alice_ms,
     };
@@ -151,6 +154,10 @@ async fn run(timings: &mut Timings) -> Result<(), SmokeFailure> {
     let mut alice_socket = alice_socket?;
     let mut bob_socket = bob_socket?;
     timings.connect_ms = elapsed_ms(connect_started);
+
+    let duplicate_started = Instant::now();
+    verify_reused_device(&gateway_url, &alice).await?;
+    timings.duplicate_device_ms = elapsed_ms(duplicate_started);
 
     let direction_started = Instant::now();
     send_and_receive(&mut alice_socket, &mut bob_socket, bob.device_id).await?;
@@ -250,6 +257,46 @@ async fn connect_account(endpoint: &str, account: &Account) -> Result<Socket, Sm
         Some(v1::server_frame::Body::Welcome(welcome))
             if welcome.protocol_version == protocol::VERSION => Ok(socket),
         _ => Err(SmokeFailure),
+    }
+}
+
+async fn verify_reused_device(endpoint: &str, account: &Account) -> Result<(), SmokeFailure> {
+    let request = Request::builder()
+        .uri(endpoint)
+        .header("Sec-WebSocket-Protocol", "links.v1")
+        .body(())
+        .map_err(|_| SmokeFailure)?;
+    let (mut socket, response) = connect_async(request).await.map_err(|_| SmokeFailure)?;
+    let negotiated = response
+        .headers()
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok());
+    if negotiated != Some("links.v1") {
+        return Err(SmokeFailure);
+    }
+
+    let hello = v1::ClientFrame {
+        request_id: Uuid::new_v4().to_string(),
+        body: Some(v1::client_frame::Body::Hello(v1::Hello {
+            protocol_version: protocol::VERSION,
+            device_id: account.device_id.to_string(),
+            device_access_token: account.access_token.as_bytes().to_vec(),
+            last_seen_cursor: 0,
+            supported_sync_compression: Vec::new(),
+        })),
+    };
+    send_client_frame(&mut socket, hello).await?;
+    let frame = next_server_frame(&mut socket).await?;
+    let conflict = matches!(
+        frame.body,
+        Some(v1::server_frame::Body::Error(error))
+            if error.code == v1::protocol_error::Code::SessionConflict as i32
+    );
+    let _ = socket.close(None).await;
+    if conflict {
+        Ok(())
+    } else {
+        Err(SmokeFailure)
     }
 }
 

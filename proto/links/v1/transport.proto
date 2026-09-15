@@ -45,6 +45,7 @@ message ProtocolError {
     CODE_RATE_LIMITED = 4;
     CODE_CURSOR_EXPIRED = 5;
     CODE_TEMPORARILY_UNAVAILABLE = 6;
+    CODE_SESSION_CONFLICT = 7;
   }
   Code code = 1;
   uint32 retry_after_ms = 2;

@@ -161,10 +161,11 @@ inbound queue reads and acks may only target the authenticated local device.
 Heartbeat interval is 30 seconds; close after 90 seconds without liveness. Native
 clients may use ping/pong; browser clients rely on server-originated ping/pong.
 Retry connections with exponential backoff and full jitter, initially 1 second,
-capped at 30 seconds. A new session replaces the old route; renewal and disconnect
-use compare-and-swap on the session ID so an old socket cannot clear the new one.
-Session routing expires after at most 120 seconds without renewal. Reject or
-backpressure sends when a dependency is unavailable; do not silently drop them.
+capped at 30 seconds. An active device route cannot be replaced; a duplicate
+bind returns `CODE_SESSION_CONFLICT` and leaves the existing route in place.
+Renewal and disconnect use compare-and-swap on the session ID, and session
+routing expires after at most 120 seconds without renewal. Reject or backpressure
+sends when a dependency is unavailable; do not silently drop them.
 
 Limits: 64 KiB encoded Message, 256 KiB encoded Envelope, 1 MiB complete transport
 frame, at most 100 entries per sync batch. Batch producers must also fit a byte

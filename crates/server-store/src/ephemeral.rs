@@ -28,10 +28,12 @@ pub struct RateDecision {
 
 #[async_trait]
 pub trait EphemeralState: Send + Sync {
-    /// Atomically replace the device route. Latest session wins; caller fences
-    /// the old socket. Redis implementation must use one key/hash slot per device.
+    /// Atomically claim the device route. An active lease cannot be replaced;
+    /// duplicate device binds return [`StoreError::Conflict`]. Redis
+    /// implementation must use one key/hash slot per device.
     async fn bind(&self, lease: SessionLease, now_ms: u64) -> Result<(), StoreError>;
-    /// CAS by session ID; cannot resurrect expired leases or replace a newer socket.
+    /// CAS by session ID; cannot resurrect expired leases or alter another
+    /// active lease.
     async fn renew(
         &self,
         device_id: &str,
@@ -109,9 +111,10 @@ impl EphemeralState for MemoryEphemeralState {
         state
             .sessions
             .retain(|_, lease| lease.expires_at_ms > now_ms);
-        if !state.sessions.contains_key(&lease.device_id)
-            && state.sessions.len() >= self.max_entries
-        {
+        if state.sessions.contains_key(&lease.device_id) {
+            return Err(StoreError::Conflict);
+        }
+        if state.sessions.len() >= self.max_entries {
             return Err(StoreError::Unavailable);
         }
         state.sessions.insert(lease.device_id.clone(), lease);
@@ -231,26 +234,26 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn reconnect_fences_old_session_and_honors_ttl() {
+    async fn duplicate_active_session_conflicts_without_replacing_route() {
         let state = MemoryEphemeralState::new(10).unwrap();
         let a = lease(2);
         let b = lease(3);
         state.bind(a.clone(), 1).await.unwrap();
-        state.bind(b.clone(), 2).await.unwrap();
-        assert!(!state.unbind(&a.device_id, &a.session_id).await.unwrap());
-        assert!(!state
-            .renew(&a.device_id, &a.session_id, 1100, 100)
-            .await
-            .unwrap());
+        assert!(matches!(
+            state.bind(b.clone(), 2).await,
+            Err(StoreError::Conflict)
+        ));
         assert_eq!(
-            state.route(&b.device_id, 999).await.unwrap(),
-            Some(b.clone())
+            state.route(&a.device_id, 999).await.unwrap(),
+            Some(a.clone())
         );
-        assert!(state.route(&b.device_id, 1000).await.unwrap().is_none());
+        assert!(!state.unbind(&a.device_id, &b.session_id).await.unwrap());
         assert!(!state
-            .renew(&b.device_id, &b.session_id, 2000, 1000)
+            .renew(&b.device_id, &b.session_id, 1100, 100)
             .await
             .unwrap());
+        assert!(state.renew(&a.device_id, &a.session_id, 999, 100).await.unwrap());
+        assert!(state.route(&b.device_id, 1000).await.unwrap().is_none());
     }
     #[tokio::test]
     async fn refill_retry_rounding_and_backwards_clock() {

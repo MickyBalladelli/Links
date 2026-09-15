@@ -491,8 +491,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   `scripts/smoke-two-client.sh` runs the Debug-only Rust harness against the
   local composition. It creates fresh signed test devices, waits for Welcome
   on both binary `links.v1` sockets, routes opaque envelopes in both
-  directions, and emits only a pass/fail JSON result with phase timings.
-- [ ] Verify that two profiles can use the same gateway endpoint concurrently without session fencing; a reused `device_id` must fail clearly instead of silently replacing another client.
+  directions, rejects active device-session reuse, and emits only a pass/fail
+  JSON result with phase timings.
+- [x] Verify that two profiles can use the same gateway endpoint concurrently without session fencing; a reused `device_id` must fail clearly instead of silently replacing another client.
+  Active duplicate binds now return a typed session conflict, leave the first
+  lease untouched, and the smoke harness verifies both original sessions still
+  route messages after the rejected reuse attempt.
 
 ### macOS two-client acceptance gate
 

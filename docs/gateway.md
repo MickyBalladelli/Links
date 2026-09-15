@@ -13,11 +13,14 @@ or decrypts sealed message bytes.
 ## Regional flow
 
 Each gateway instance has an explicit `GatewayConfig { gateway_id, region }`.
-The gateway authenticates the first `Hello`, binds a random session lease in
-the shared `EphemeralState`, and replaces any previous lease for that device.
-The lease contains only device ID, session ID, gateway locator and a 120-second
-expiry. Renew and close are compare-and-swap operations; an old socket cannot
-clear or use a newer connection after a cross-region reconnect.
+The gateway authenticates the first `Hello` and claims a random session lease
+in the shared `EphemeralState`. An active lease for the same device cannot be
+replaced: the second bind returns a session conflict and the first socket
+remains authoritative. The lease contains only device ID, session ID, gateway
+locator and a 120-second expiry. Renew and close are compare-and-swap
+operations; stale socket actions cannot clear or use another lease. Clean
+reconnects unbind first; a crashed client waits for its lease to expire before
+reusing that device ID.
 
 Sending follows this order for each envelope in a client-side fanout:
 

@@ -126,11 +126,13 @@ mutex; it has no network connection and loses all data on restart.
 Session values contain gateway locators, not socket objects or bearer tokens.
 Only the gateway process owns a socket; the shared route identifies its owner.
 
-One device has one current connection. A new session replaces its route, old
-renew/disconnect operations compare session IDs, and expiration is enforced on
-lookup. Callers must authenticate the device and use fresh unpredictable session
-IDs; delayed binds must be fenced by the connection manager. Renewals cannot
-resurrect an expired lease. The maximum lease lifetime is 120 seconds.
+One device has one current connection. An active lease cannot be replaced: a
+new bind for the same device returns `Conflict` and leaves the current route
+untouched. Renew/disconnect operations compare session IDs, and expiration is
+enforced on lookup. A clean reconnect unbinds first; after a crash, the
+120-second lease expiry is the recovery boundary. Callers must authenticate the
+device and use fresh unpredictable session IDs. Renewals cannot resurrect an
+expired lease.
 
 Rate buckets use integer fractional tokens, atomic consume, upward-rounded retry
 delays, no refill on clock rollback, and expiration after enough idle time to fully

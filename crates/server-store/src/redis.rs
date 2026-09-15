@@ -18,6 +18,12 @@ local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local expiry = tonumber(ARGV[4])
 if not expiry or expiry <= now or expiry - now > 120000 then return -1 end
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  local current_expiry = tonumber(redis.call('HGET', KEYS[1], 'expires_at_ms'))
+  if not current_expiry then return -3 end
+  if current_expiry > now then return -2 end
+  redis.call('DEL', KEYS[1])
+end
 redis.call('HSET', KEYS[1],
   'device_id', ARGV[1],
   'session_id', ARGV[2],
@@ -182,6 +188,7 @@ where
         match integer(&reply)? {
             1 => Ok(()),
             -1 => Err(StoreError::Invalid),
+            -2 => Err(StoreError::Conflict),
             _ => Err(StoreError::Unavailable),
         }
     }

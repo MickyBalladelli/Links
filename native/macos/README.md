@@ -234,7 +234,10 @@ bash scripts/smoke-two-client.sh
 The harness creates disposable `@alice-test` and `@bob-test` accounts using
 the loopback service's canonical `alice_test` and `bob_test` handles, opens two
 concurrent `links.v1` sessions, and routes one opaque envelope in each
-direction. It prints one JSON record containing only `result` and timing fields.
+direction. It then tries to reuse Alice's active `device_id`; that connection
+must receive a session-conflict error while the original Alice and Bob
+connections remain usable. It prints one JSON record containing only `result`
+and timing fields.
 Set `SMOKE_RESULT_PATH` to save that same record, or override the local
 endpoints with `SMOKE_AUTH_URL` and `SMOKE_GATEWAY_URL`. Use a fresh disposable
 database when the fixed test handles have already been registered.
