@@ -248,6 +248,7 @@ private struct LinksSidebar: View {
                 StateRow(title: "Profile", value: model.profileName)
                 StateRow(title: "Profile root", value: model.profileRootPath)
                 StateRow(title: "Profile logs", value: model.profileLogPath)
+                StateRow(title: "Profile status", value: model.profileStatusPath)
                 StateRow(title: "Account", value: model.accountStatus)
                 StateRow(title: "Device", value: model.deviceStatus)
                 StateRow(title: "Connection", value: model.connectionStatus)

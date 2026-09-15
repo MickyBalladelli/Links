@@ -472,7 +472,11 @@ exchanging encrypted one-to-one text through the same local development stack.
   stores, locks, transports, and root-scoped profile paths keep two clients
   independent; the macOS client has no process-global singleton or shared
   database. The README includes the two-process `open -n` command.
-- [ ] Add readiness/status output for each profile so the runner can wait for both clients to authenticate and connect before sending a message.
+- [x] Add readiness/status output for each profile so the runner can wait for both clients to authenticate and connect before sending a message.
+  Each profile writes a machine-readable `status.json` with only profile,
+  lifecycle state, authentication/connection booleans, PID, and timestamp.
+  The file is atomically replaced under the profile root and reaches
+  `state=ready` only after authentication and the live WebSocket are ready.
 - [ ] Add a documented two-client launcher, for example:
 
   ```sh

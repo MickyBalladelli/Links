@@ -192,6 +192,24 @@ Each `open -n` invocation creates its own app process, model, transport, and
 ephemeral bearer session. The macOS client has no process-wide app singleton,
 shared database, or cross-profile lock.
 
+## Runner readiness
+
+Each profile writes `<profile-root>/<profile>/status.json`. The JSON contains
+only the profile name, lifecycle state, authentication and connection booleans,
+process ID, and an ISO-8601 update time. A runner can wait for both clients
+without reading logs or client data:
+
+```sh
+jq -e '(.state == "ready") and .authenticated and .connected' \
+  "$PROFILE_ROOT/alice/status.json"
+jq -e '(.state == "ready") and .authenticated and .connected' \
+  "$PROFILE_ROOT/bob/status.json"
+```
+
+The file is atomically replaced on every lifecycle transition. `ready` means
+the account is authenticated and the `links.v1` WebSocket is live; startup,
+retry, recovery, and failure states remain non-ready.
+
 `--profile-root` (or `LINKS_PROFILE_ROOT`) selects the directory containing
 profile directories. The active profile is stored below
 `<profile-root>/<profile>/`; the default is

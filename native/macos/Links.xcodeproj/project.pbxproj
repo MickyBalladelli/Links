@@ -14,6 +14,7 @@
 		A10000010000000000000005 /* MacOSClientShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000004 /* MacOSClientShell.swift */; };
 		A10000010000000000000006 /* LinksMacOSApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */; };
 		A10000010000000000000007 /* LinksMacOSProfileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000008 /* LinksMacOSProfileLogger.swift */; };
+		A10000010000000000000008 /* LinksMacOSProfileStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000009 /* LinksMacOSProfileStatus.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +26,7 @@
 		A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSApplicationDelegate.swift; sourceTree = "<group>"; };
 		A10000020000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000020000000000000008 /* LinksMacOSProfileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSProfileLogger.swift; sourceTree = "<group>"; };
+		A10000020000000000000009 /* LinksMacOSProfileStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSProfileStatus.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +60,7 @@
 				A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */,
 				A10000020000000000000007 /* Info.plist */,
 				A10000020000000000000008 /* LinksMacOSProfileLogger.swift */,
+				A10000020000000000000009 /* LinksMacOSProfileStatus.swift */,
 			);
 			path = Links;
 			sourceTree = "<group>";
@@ -145,6 +148,7 @@
 				A10000010000000000000005 /* MacOSClientShell.swift in Sources */,
 				A10000010000000000000006 /* LinksMacOSApplicationDelegate.swift in Sources */,
 				A10000010000000000000007 /* LinksMacOSProfileLogger.swift in Sources */,
+				A10000010000000000000008 /* LinksMacOSProfileStatus.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -125,6 +125,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var profileName = ClientProfile.default.name
     @Published private(set) var profileRootPath = ""
     @Published private(set) var profileLogPath = ""
+    @Published private(set) var profileStatusPath = ""
     @Published var usernameInput = ""
     @Published var authMode: LinksMacOSAuthMode = .register
     @Published private(set) var authEndpointText = "http://127.0.0.1:8080"
@@ -152,10 +153,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var messaging: IOSDirectMessaging?
     private var directChatDirectory: (any IOSDirectChatDirectory)?
     private var profileLogger: LinksMacOSProfileLogger?
+    private var profileStatus: LinksMacOSProfileStatus?
     private let identityQueue = DispatchQueue(
         label: "ai.links.macos.identity", qos: .userInitiated)
     private var connectionRequested = false
     private var reconnectAfterBackground = false
+    private var isTerminating = false
 
     init() {
         do {
@@ -164,6 +167,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             profileRootPath = profileRoot.url.path
             profileLogPath = profileRoot.logsURL
                 .appendingPathComponent("client.log", isDirectory: false).path
+            profileStatus = try? LinksMacOSProfileStatus(root: profileRoot)
+            profileStatusPath = profileStatus?.url.path
+                ?? profileRoot.url.appendingPathComponent("status.json").path
+            profileStatus?.write(.launching, authenticated: false, connected: false)
             profileLogger = try? LinksMacOSProfileLogger(root: profileRoot)
             encryptedStateStore = try? MacOSEncryptedStateStore(
                 profile: profile,
@@ -213,8 +220,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             encryptedStateStore = nil
             durableMessagingStore = nil
             profileLogger = nil
+            profileStatus?.write(.failed, authenticated: false, connected: false)
+            profileStatus = nil
             profileRootPath = "Invalid profile root"
             profileLogPath = "Unavailable"
+            profileStatusPath = "Unavailable"
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
@@ -263,6 +273,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             messaging?.shutdown()
             connectionStatus = "Offline"
             deliveryState = .offline
+            publishProfileStatus()
         @unknown default:
             lifecycleStatus = "Unknown"
         }
@@ -472,6 +483,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         deliveryState = .offline
         pendingOutboxCount = 0
         actionError = nil
+        publishProfileStatus()
     }
 
     func connect() {
@@ -479,11 +491,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             connectionStatus = "Core not configured"
             deliveryState = .notConfigured
             actionError = "Messaging host is not configured yet."
+            publishProfileStatus()
             return
         }
         connectionRequested = true
         deliveryState = .connecting
         connectionStatus = deliveryState.title
+        publishProfileStatus()
         do {
             try messaging.start()
             profileLogger?.record(.connectionStarted)
@@ -510,6 +524,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deliveryState = .dependencyOutage
             connectionStatus = deliveryState.title
             actionError = "Connection could not start."
+            publishProfileStatus()
         }
     }
 
@@ -520,17 +535,20 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         profileLogger?.record(.connectionStopped)
         deliveryState = .offline
         connectionStatus = deliveryState.title
+        publishProfileStatus()
     }
 
     func recoverStaleCursor() {
         guard let messaging else {
             deliveryState = .notConfigured
             connectionStatus = deliveryState.title
+            publishProfileStatus()
             return
         }
         guard deliveryState == .staleCursor else { return }
         deliveryState = .connecting
         connectionStatus = deliveryState.title
+        publishProfileStatus()
         do {
             try messaging.recoverFromStaleCursor()
             actionError = nil
@@ -538,6 +556,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deliveryState = .staleCursor
             connectionStatus = deliveryState.title
             actionError = "Full mailbox recovery is unavailable on this host."
+            publishProfileStatus()
         }
     }
 
@@ -547,11 +566,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     func shutdownForTermination() {
         connectionRequested = false
         reconnectAfterBackground = false
+        isTerminating = true
         lifecycleStatus = "Stopping"
         profileLogger?.record(.stopping)
         messaging?.shutdown()
         deliveryState = .offline
         connectionStatus = deliveryState.title
+        publishProfileStatus()
     }
 
     func createConversation(title: String, recipientUserID: String) -> Bool {
@@ -654,6 +675,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 connectionStatus = deliveryState.title
                 actionError = "Message was not sent. Check the connection."
             }
+            publishProfileStatus()
         }
     }
 
@@ -693,6 +715,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deliveryState = .dependencyOutage
         }
         connectionStatus = deliveryState.title
+        publishProfileStatus()
     }
 
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
@@ -753,6 +776,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         connectionStatus = deliveryState.title
         actionError = deliveryState.detail
+        publishProfileStatus()
     }
 
     private func refreshClientState() {
@@ -764,6 +788,37 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         } else {
             deviceStatus = "No device enrolled"
         }
+        publishProfileStatus()
+    }
+
+    private func publishProfileStatus() {
+        guard let profileStatus else { return }
+        let authenticated = client?.isAuthenticated == true
+        let connected = messaging?.isConnected == true
+        let state: LinksMacOSProfileStatus.State
+        if isTerminating {
+            state = .stopped
+        } else if client == nil {
+            state = .failed
+        } else if client?.isEnrolled != true {
+            state = .identityRequired
+        } else if !authenticated {
+            state = .authenticationRequired
+        } else {
+            switch deliveryState {
+            case .notConfigured: state = .notConfigured
+            case .offline: state = .offline
+            case .connecting: state = .connecting
+            case .ready: state = connected ? .ready : .connecting
+            case .reconnecting: state = .reconnecting
+            case .offlineOutboxRetry: state = .retryingOutbox
+            case .staleCursor: state = .staleCursor
+            case .authenticationExpired: state = .authenticationExpired
+            case .sendFailed: state = .sendFailed
+            case .dependencyOutage: state = .dependencyOutage
+            }
+        }
+        profileStatus.write(state, authenticated: authenticated, connected: connected)
     }
 
     private func restoreLocalState() {
