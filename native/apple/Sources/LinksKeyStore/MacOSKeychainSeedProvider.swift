@@ -7,10 +7,12 @@ import Foundation
 public final class MacOSKeychainSeedProvider: SeedVault {
     private let vault: HardwareSeedVault
     public let profile: ClientProfile
+    public let keychainNamespace: String?
 
-    public init(profile: ClientProfile = .default) {
+    public init(profile: ClientProfile = .default, keychainNamespace: String? = nil) {
         self.profile = profile
-        vault = HardwareSeedVault(profile: profile)
+        self.keychainNamespace = keychainNamespace
+        vault = HardwareSeedVault(profile: profile, keychainNamespace: keychainNamespace)
     }
 
     func storeSeed(_ seed: Data) throws -> String {

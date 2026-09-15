@@ -182,14 +182,26 @@ analytics.
 Pass an explicit profile to run more than one local identity:
 
 ```sh
-open -n "/path/to/Links.app" --args --profile alice
-open -n "/path/to/Links.app" --args --profile bob
+open -n "/path/to/Links.app" --args \
+  --profile alice --profile-root "$HOME/Library/Application Support/Links/profiles"
+open -n "/path/to/Links.app" --args \
+  --profile bob --profile-root "$HOME/Library/Application Support/Links/profiles"
 ```
 
-Profile names are canonical lower-case ASCII names. Each non-default profile
-uses its own Keychain service and public metadata key. A mismatched provider
-and client profile is rejected before metadata is opened, so one local client
+`--profile-root` (or `LINKS_PROFILE_ROOT`) selects the directory containing
+profile directories. The active profile is stored below
+`<profile-root>/<profile>/`; the default is
+`~/Library/Application Support/Links/profiles/<profile>`. Each profile has
+its own encrypted Application Support state, `logs/client.log`, Keychain
+namespace, public metadata suite, bearer session, device ID, and MLS node ID.
+Profile names are canonical lower-case ASCII names. A mismatched provider and
+client profile is rejected before metadata is opened, so one local client
 cannot accidentally validate or overwrite another client's identity.
+
+The app creates one ephemeral URL session and one in-memory bearer session per
+process/profile. Bearer tokens are never written to the profile root, logs,
+Keychain, URLs, or UserDefaults. The profile logger accepts fixed status event
+names only and never records message text, IDs, or payloads.
 
 New profiles generate distinct non-nil device and MLS-node UUIDs. The account
 service generates the user UUID during username or phone registration. After a

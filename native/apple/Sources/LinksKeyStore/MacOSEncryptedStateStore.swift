@@ -27,27 +27,44 @@ public final class MacOSEncryptedStateStore {
     private let keychainAccount: String
     private let associatedDataPrefix: String
 
-    public init(profile: ClientProfile = .default,
+    /// `rootURL` is the already-resolved active profile directory. When nil,
+    /// the default Application Support profile root is used.
+    public init(profile: ClientProfile = .default, rootURL: URL? = nil,
+                keychainNamespace: String? = nil,
                 namespace: String = "state",
                 fileManager: FileManager = .default) throws {
         self.profile = profile
         self.fileManager = fileManager
         guard Self.isValidNamespace(namespace) else { throw StateError.unavailable }
-        guard let applicationSupport = fileManager.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            throw StateError.unavailable
+        let profileURL: URL
+        let resolvedKeychainNamespace: String?
+        if let rootURL {
+            guard rootURL.isFileURL, rootURL.path.hasPrefix("/"), !rootURL.path.isEmpty,
+                  rootURL.standardizedFileURL.path != "/" else {
+                throw StateError.unavailable
+            }
+            profileURL = rootURL.standardizedFileURL.resolvingSymlinksInPath()
+            resolvedKeychainNamespace = keychainNamespace
+        } else {
+            let defaultRoot = try MacOSProfileRoot(profile: profile,
+                                                   fileManager: fileManager)
+            profileURL = defaultRoot.url
+            resolvedKeychainNamespace = keychainNamespace
+                ?? (profile == .default ? nil : defaultRoot.keychainNamespace)
         }
-        directoryURL = applicationSupport
-            .appendingPathComponent("Links", isDirectory: true)
-            .appendingPathComponent("profiles", isDirectory: true)
-            .appendingPathComponent(profile.name, isDirectory: true)
-            .appendingPathComponent("state", isDirectory: true)
+        directoryURL = profileURL.appendingPathComponent("state", isDirectory: true)
         stateURL = directoryURL.appendingPathComponent(
             namespace == "state" ? "state-v1.bin" : "\(namespace)-v1.bin",
             isDirectory: false)
-        keychainService = namespace == "state"
-            ? "ai.links.local-state.v1.\(profile.name)"
-            : "ai.links.local-state.v1.\(profile.name).\(namespace)"
+        if let resolvedKeychainNamespace {
+            keychainService = namespace == "state"
+                ? "ai.links.local-state.v1.\(profile.name).\(resolvedKeychainNamespace)"
+                : "ai.links.local-state.v1.\(profile.name).\(resolvedKeychainNamespace).\(namespace)"
+        } else {
+            keychainService = namespace == "state"
+                ? "ai.links.local-state.v1.\(profile.name)"
+                : "ai.links.local-state.v1.\(profile.name).\(namespace)"
+        }
         keychainAccount = namespace == "state" ? "state-key" : "state-key.\(namespace)"
         associatedDataPrefix = namespace == "state"
             ? "links/macos-state/v1\0"

@@ -13,6 +13,7 @@
 		A10000010000000000000004 /* MacOSClientModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000003 /* MacOSClientModel.swift */; };
 		A10000010000000000000005 /* MacOSClientShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000004 /* MacOSClientShell.swift */; };
 		A10000010000000000000006 /* LinksMacOSApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */; };
+		A10000010000000000000007 /* LinksMacOSProfileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000008 /* LinksMacOSProfileLogger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,6 +24,7 @@
 		A10000020000000000000005 /* Links.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Links.entitlements; sourceTree = "<group>"; };
 		A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSApplicationDelegate.swift; sourceTree = "<group>"; };
 		A10000020000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000020000000000000008 /* LinksMacOSProfileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksMacOSProfileLogger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +57,7 @@
 				A10000020000000000000005 /* Links.entitlements */,
 				A10000020000000000000006 /* LinksMacOSApplicationDelegate.swift */,
 				A10000020000000000000007 /* Info.plist */,
+				A10000020000000000000008 /* LinksMacOSProfileLogger.swift */,
 			);
 			path = Links;
 			sourceTree = "<group>";
@@ -141,6 +144,7 @@
 				A10000010000000000000004 /* MacOSClientModel.swift in Sources */,
 				A10000010000000000000005 /* MacOSClientShell.swift in Sources */,
 				A10000010000000000000006 /* LinksMacOSApplicationDelegate.swift in Sources */,
+				A10000010000000000000007 /* LinksMacOSProfileLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

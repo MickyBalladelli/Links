@@ -28,14 +28,17 @@ public final class HardwareIdentityStore {
     private let vault: SeedVault
     private static let workerLock = NSLock()
     public let profile: ClientProfile
+    public let keychainNamespace: String?
     public init() {
 #if os(macOS)
         let provider = MacOSKeychainSeedProvider()
         vault = provider
         profile = provider.profile
+        keychainNamespace = provider.keychainNamespace
 #else
         vault = HardwareSeedVault()
         profile = .default
+        keychainNamespace = nil
 #endif
     }
 #if os(macOS)
@@ -43,11 +46,18 @@ public final class HardwareIdentityStore {
     public init(seedProvider: MacOSKeychainSeedProvider) {
         vault = seedProvider
         profile = seedProvider.profile
+        keychainNamespace = seedProvider.keychainNamespace
     }
 #endif
     internal init(vault: SeedVault) {
         self.vault = vault
-        profile = .default
+        if let provider = vault as? HardwareSeedVault {
+            profile = provider.profile
+            keychainNamespace = provider.keychainNamespace
+        } else {
+            profile = .default
+            keychainNamespace = nil
+        }
     }
 
     private func withVault<T>(_ operation: (UnsafePointer<LinksVaultCallbacks>) throws -> T) rethrows -> T {

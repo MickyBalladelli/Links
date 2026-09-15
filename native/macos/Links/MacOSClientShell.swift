@@ -246,6 +246,8 @@ private struct LinksSidebar: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 StateRow(title: "Profile", value: model.profileName)
+                StateRow(title: "Profile root", value: model.profileRootPath)
+                StateRow(title: "Profile logs", value: model.profileLogPath)
                 StateRow(title: "Account", value: model.accountStatus)
                 StateRow(title: "Device", value: model.deviceStatus)
                 StateRow(title: "Connection", value: model.connectionStatus)

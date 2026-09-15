@@ -12,13 +12,19 @@ public final class HardwareSeedVault {
     }
     private static let baseService = "ai.links.identity.seed.v1"
     public let profile: ClientProfile
+    public let keychainNamespace: String?
     private let service: String
     private let algorithm = SecKeyAlgorithm.eciesEncryptionCofactorX963SHA256AESGCM
-    public init(profile: ClientProfile = .default) {
+    public init(profile: ClientProfile = .default, keychainNamespace: String? = nil) {
         self.profile = profile
-        service = profile == .default
-            ? Self.baseService
-            : "\(Self.baseService).\(profile.name)"
+        self.keychainNamespace = keychainNamespace
+        if let keychainNamespace {
+            service = "\(Self.baseService).\(profile.name).\(keychainNamespace)"
+        } else {
+            service = profile == .default
+                ? Self.baseService
+                : "\(Self.baseService).\(profile.name)"
+        }
     }
 
     /// Caller generates a random 32-byte seed and wipes its buffers after wrapping.
@@ -116,6 +122,9 @@ public final class HardwareSeedVault {
         return Data("\(service).\(handle)".utf8)
     }
     private func context(_ handle: String) -> Data {
+        if let keychainNamespace {
+            return Data("links/seed/v1\0\(profile.name)\0\(keychainNamespace)\0\(handle)".utf8)
+        }
         if profile == .default {
             return Data("links/seed/v1\0\(handle)".utf8)
         }

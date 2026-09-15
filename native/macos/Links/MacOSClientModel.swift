@@ -123,6 +123,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published var actionError: String?
     @Published private(set) var isEnrolling = false
     @Published private(set) var profileName = ClientProfile.default.name
+    @Published private(set) var profileRootPath = ""
+    @Published private(set) var profileLogPath = ""
     @Published var usernameInput = ""
     @Published var authMode: LinksMacOSAuthMode = .register
     @Published private(set) var authEndpointText = "http://127.0.0.1:8080"
@@ -149,6 +151,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
     private var directChatDirectory: (any IOSDirectChatDirectory)?
+    private var profileLogger: LinksMacOSProfileLogger?
     private let identityQueue = DispatchQueue(
         label: "ai.links.macos.identity", qos: .userInitiated)
     private var connectionRequested = false
@@ -157,22 +160,42 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     init() {
         do {
             let profile = try Self.profileFromArguments()
-            encryptedStateStore = try? MacOSEncryptedStateStore(profile: profile)
-            durableMessagingStore = try? MacOSDurableMessagingStore(profile: profile)
-            let provider = MacOSKeychainSeedProvider(profile: profile)
+            let (profileRoot, hasExplicitRoot) = try Self.profileRootFromArguments(profile: profile)
+            profileRootPath = profileRoot.url.path
+            profileLogPath = profileRoot.logsURL
+                .appendingPathComponent("client.log", isDirectory: false).path
+            profileLogger = try? LinksMacOSProfileLogger(root: profileRoot)
+            encryptedStateStore = try? MacOSEncryptedStateStore(
+                profile: profile,
+                rootURL: profileRoot.url,
+                keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
+            durableMessagingStore = try? MacOSDurableMessagingStore(
+                profile: profile,
+                rootURL: profileRoot.url,
+                keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
+            let provider = MacOSKeychainSeedProvider(
+                profile: profile,
+                keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
             let identityStore = HardwareIdentityStore(seedProvider: provider)
+            let metadataDefaults = try Self.metadataDefaults(
+                for: profileRoot, hasExplicitRoot: hasExplicitRoot)
             let loadedClient = try IOSClient(
                 identityStore: identityStore,
+                defaults: metadataDefaults,
                 profile: profile)
             profileName = profile.name
             client = loadedClient
             usernameInput = loadedClient.accountHandle ?? ""
-            if let endpoint = try? Self.authEndpointFromArguments(),
-               let loadedAuthClient = try? IOSUsernameAuthClient(baseURL: endpoint) {
-                authClient = loadedAuthClient
-                otpClient = try? IOSOTPClient(baseURL: endpoint)
-                preKeyAPI = try? IOSPreKeyHTTPClient(baseURL: endpoint)
-                authEndpointText = endpoint.absoluteString
+            if let endpoint = try? Self.authEndpointFromArguments() {
+                let session = URLSession(configuration: .ephemeral)
+                authClient = try? IOSUsernameAuthClient(baseURL: endpoint, urlSession: session)
+                otpClient = try? IOSOTPClient(baseURL: endpoint, urlSession: session)
+                preKeyAPI = try? IOSPreKeyHTTPClient(baseURL: endpoint, urlSession: session)
+                if authClient != nil {
+                    authEndpointText = endpoint.absoluteString
+                } else {
+                    authEndpointText = "Invalid local auth endpoint"
+                }
             } else {
                 authClient = nil
                 otpClient = nil
@@ -181,6 +204,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             }
             restoreLocalState()
             refreshClientState()
+            profileLogger?.record(.launched)
         } catch {
             client = nil
             authClient = nil
@@ -188,6 +212,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             preKeyAPI = nil
             encryptedStateStore = nil
             durableMessagingStore = nil
+            profileLogger = nil
+            profileRootPath = "Invalid profile root"
+            profileLogPath = "Unavailable"
             profileName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
@@ -220,14 +247,17 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     func scenePhaseDidChange(_ phase: ScenePhase) {
         switch phase {
         case .active:
+            profileLogger?.record(.active)
             lifecycleStatus = "Active"
             if reconnectAfterBackground {
                 reconnectAfterBackground = false
                 connect()
             }
         case .inactive:
+            profileLogger?.record(.inactive)
             lifecycleStatus = "Inactive"
         case .background:
+            profileLogger?.record(.background)
             lifecycleStatus = "Background"
             reconnectAfterBackground = connectionRequested && messaging != nil
             messaging?.shutdown()
@@ -456,6 +486,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         connectionStatus = deliveryState.title
         do {
             try messaging.start()
+            profileLogger?.record(.connectionStarted)
             pendingOutboxCount = messaging.pendingOutboxCount
             actionError = nil
             if let preKeyAPI {
@@ -474,6 +505,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 }
             }
         } catch {
+            profileLogger?.record(.connectionFailed)
             connectionRequested = false
             deliveryState = .dependencyOutage
             connectionStatus = deliveryState.title
@@ -485,6 +517,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         connectionRequested = false
         reconnectAfterBackground = false
         messaging?.stop()
+        profileLogger?.record(.connectionStopped)
         deliveryState = .offline
         connectionStatus = deliveryState.title
     }
@@ -515,6 +548,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         connectionRequested = false
         reconnectAfterBackground = false
         lifecycleStatus = "Stopping"
+        profileLogger?.record(.stopping)
         messaging?.shutdown()
         deliveryState = .offline
         connectionStatus = deliveryState.title
@@ -797,6 +831,41 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             throw ClientProfileError.invalidName
         }
         return try ClientProfile(name: arguments[arguments.index(after: marker)])
+    }
+
+    private static func profileRootFromArguments(profile: ClientProfile)
+        throws -> (MacOSProfileRoot, Bool) {
+        let arguments = CommandLine.arguments
+        let argumentRoot: String?
+        if let marker = arguments.firstIndex(of: "--profile-root") {
+            guard arguments.index(after: marker) < arguments.endIndex else {
+                throw MacOSProfileRoot.RootError.invalidPath
+            }
+            argumentRoot = arguments[arguments.index(after: marker)]
+        } else {
+            argumentRoot = nil
+        }
+        let rawRoot = argumentRoot ?? ProcessInfo.processInfo.environment["LINKS_PROFILE_ROOT"]
+        guard let rawRoot else {
+            return (try MacOSProfileRoot(profile: profile), false)
+        }
+        let expandedRoot = (rawRoot as NSString).expandingTildeInPath
+        guard !expandedRoot.isEmpty, expandedRoot.hasPrefix("/") else {
+            throw MacOSProfileRoot.RootError.invalidPath
+        }
+        let baseURL = URL(fileURLWithPath: expandedRoot, isDirectory: true)
+        return (try MacOSProfileRoot(profile: profile, baseURL: baseURL), true)
+    }
+
+    private static func metadataDefaults(for profileRoot: MacOSProfileRoot,
+                                         hasExplicitRoot: Bool) throws -> UserDefaults {
+        if !hasExplicitRoot && profileRoot.profile == .default {
+            return .standard
+        }
+        guard let defaults = UserDefaults(suiteName: profileRoot.metadataSuiteName) else {
+            throw MacOSProfileRoot.RootError.metadataUnavailable
+        }
+        return defaults
     }
 
     private static func authEndpointFromArguments() throws -> URL {

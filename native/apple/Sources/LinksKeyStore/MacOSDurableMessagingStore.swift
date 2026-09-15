@@ -231,11 +231,15 @@ public final class MacOSDurableMessagingStore: @unchecked Sendable {
     private let stateStore: MacOSEncryptedStateStore
     private let lock = NSLock()
 
-    public init(profile: ClientProfile = .default,
+    /// `rootURL` is the already-resolved active profile directory.
+    public init(profile: ClientProfile = .default, rootURL: URL? = nil,
+                keychainNamespace: String? = nil,
                 fileManager: FileManager = .default) throws {
         self.profile = profile
         stateStore = try MacOSEncryptedStateStore(
-            profile: profile, namespace: "messaging", fileManager: fileManager)
+            profile: profile, rootURL: rootURL,
+            keychainNamespace: keychainNamespace,
+            namespace: "messaging", fileManager: fileManager)
     }
 
     public func withTransaction(

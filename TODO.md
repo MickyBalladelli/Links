@@ -461,7 +461,11 @@ exchanging encrypted one-to-one text through the same local development stack.
 - [x] Add an explicit loopback-only username development mode that can create disposable test accounts without Twilio; keep OTP disabled in this mode and prevent the mode from binding outside loopback or being enabled in Release builds. `AUTH_DEV_USERNAME_MODE=1` is Debug-only, requires loopback binding, accepts signed `*_test` handles, and removes the phone OTP routes.
 - [x] Add a runnable local WebSocket adapter around `links-gateway` that wires `decode_client_frame`, `Gateway::open`, `Gateway::handle`, and `encode_server_frame` to a real socket. `links-gateway-local` serves the binary `links.v1` protocol on loopback with bounded frames, Hello timeout, session-fenced local delivery, and graceful shutdown.
 - [x] Add a local development composition for PostgreSQL, account auth, encrypted mailbox storage, ephemeral session state, and the WebSocket gateway using one documented endpoint shared by both clients. `bash scripts/local-dev.sh` starts PostgreSQL plus `links-local-dev`; both clients use `ws://127.0.0.1:8081/v1/connect`.
-- [ ] Add a client launch option such as `--profile <name>` and an explicit profile root. Each profile must have separate Application Support data, Keychain namespace, logs, bearer token, and device/node IDs.
+- [x] Add a client launch option such as `--profile <name>` and an explicit profile root. Each profile must have separate Application Support data, Keychain namespace, logs, bearer token, and device/node IDs.
+  `--profile <name>` plus `--profile-root <path>` (or `LINKS_PROFILE_ROOT)`
+  resolve an active `MacOSProfileRoot`. Encrypted state, status logs, metadata
+  suites, Keychain records, in-memory bearer sessions, and fresh device/node
+  IDs are isolated per profile.
 - [ ] Ensure the app supports two independent processes launched with macOS `open -n`; do not use a process-global singleton, shared lock, or shared database that prevents the second client from starting.
 - [ ] Add readiness/status output for each profile so the runner can wait for both clients to authenticate and connect before sending a message.
 - [ ] Add a documented two-client launcher, for example:
