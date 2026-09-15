@@ -30,6 +30,11 @@ profile_root="${LINKS_PROFILE_ROOT:-$HOME/Library/Application Support/Links/prof
 auth_url="${LINKS_AUTH_URL:-http://127.0.0.1:8080}"
 
 if [[ "${LINKS_BUILD_APP:-1}" == "1" ]]; then
+  xcode_signing_args=()
+  if [[ -n "${LINKS_DEVELOPMENT_TEAM:-}" ]]; then
+    xcode_signing_args+=("DEVELOPMENT_TEAM=$LINKS_DEVELOPMENT_TEAM")
+  fi
+
   MACOSX_DEPLOYMENT_TARGET=13.0 cargo build -p links-identity-ffi --locked
   MACOSX_DEPLOYMENT_TARGET=13.0 xcodebuild \
     -project native/macos/Links.xcodeproj \
@@ -37,6 +42,7 @@ if [[ "${LINKS_BUILD_APP:-1}" == "1" ]]; then
     -configuration Debug \
     -sdk macosx \
     -derivedDataPath "$derived_data_path" \
+    "${xcode_signing_args[@]}" \
     build
 fi
 

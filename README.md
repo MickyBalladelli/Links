@@ -88,7 +88,12 @@ bash launch-links.sh
 
 The launcher builds the signed Debug app, starts the local backend without
 Docker, and uses two `open -n` processes. Set `LINKS_BUILD_APP=0` with
-`LINKS_APP_PATH=/path/to/Links.app` to use an existing build.
+`LINKS_APP_PATH=/path/to/Links.app` to use an existing build. If Xcode has no
+team selected, pass your Apple Development Team ID:
+
+```sh
+LINKS_DEVELOPMENT_TEAM=ABCDE12345 bash launch-links.sh
+```
 
 Set `LINKS_GATEWAY_ENDPOINT` to that value in both the macOS and Web client
 hosts. The auth URL is `http://127.0.0.1:8080`. The process applies the
