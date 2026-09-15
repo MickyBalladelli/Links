@@ -148,8 +148,21 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var contacts: [LinksMacOSContact] = []
     @Published var selectedConversationID: String?
     @Published var composerText = ""
-    @Published private(set) var onboardingError: String?
-    @Published var actionError: String?
+    @Published private(set) var lastError: String?
+    @Published private(set) var onboardingError: String? {
+        didSet {
+            if let onboardingError, !onboardingError.isEmpty {
+                lastError = onboardingError
+            }
+        }
+    }
+    @Published var actionError: String? {
+        didSet {
+            if let actionError, !actionError.isEmpty {
+                lastError = actionError
+            }
+        }
+    }
     @Published private(set) var isEnrolling = false
     @Published private(set) var profileName = ClientProfile.default.name
     @Published private(set) var profileRootPath = ""
@@ -309,6 +322,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     var canInitializeSelectedConversation: Bool {
         messaging?.state == .ready && messaging?.isConnected == true
+    }
+
+    func clearLastError() {
+        lastError = nil
     }
 
     func scenePhaseDidChange(_ phase: ScenePhase) {

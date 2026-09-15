@@ -19,12 +19,44 @@ struct LinksRootView: View {
         } message: {
             Text(model.actionError ?? "")
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let error = model.lastError {
+                PersistentErrorBanner(error: error) {
+                    model.clearLastError()
+                }
+            }
+        }
     }
 
     private var actionErrorBinding: Binding<Bool> {
         Binding(
             get: { model.actionError != nil },
             set: { if !$0 { model.actionError = nil } })
+    }
+}
+
+private struct PersistentErrorBanner: View {
+    let error: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Last error")
+                    .font(.headline)
+                Text(error)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 12)
+            Button("Dismiss", action: dismiss)
+                .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.red.opacity(0.12))
     }
 }
 
