@@ -301,6 +301,10 @@ where
         &self.provider
     }
 
+    pub fn provider_mut(&mut self) -> &mut P {
+        &mut self.provider
+    }
+
     pub fn local_binding(&self) -> &DeviceBinding {
         &self.local_binding
     }

@@ -229,6 +229,38 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
         return try IOSClaimedPreKeyBundle(deviceID: deviceID, protobuf: response)
     }
 
+    /// MLS KeyPackages are public bootstrap material, bound to the device by
+    /// the signed MLS credential. The package itself remains opaque to Swift.
+    public func uploadMLSKeyPackage(accessToken: String, keyPackage: Data) async throws {
+        guard !keyPackage.isEmpty, keyPackage.count <= Self.maximumResponseBytes else {
+            throw IOSPreKeyError.invalidUpload
+        }
+        let request = try makeRequest(
+            path: "v1/mls/key-package", method: "PUT",
+            accessToken: accessToken, body: keyPackage)
+        do {
+            let (_, response) = try await urlSession.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  http.statusCode == 204 else {
+                throw IOSPreKeyError.serviceRejected
+            }
+        } catch let error as IOSPreKeyError {
+            throw error
+        } catch {
+            throw IOSPreKeyError.serviceRejected
+        }
+    }
+
+    public func downloadMLSKeyPackage(accessToken: String, deviceID: String) async throws -> Data {
+        guard IOSClient.isCanonicalUUID(deviceID) else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        let request = try makeRequest(
+            path: "v1/mls/key-package/\(deviceID)", method: "GET",
+            accessToken: accessToken)
+        return try await requestData(request)
+    }
+
     private func makeRequest(path: String, method: String, accessToken: String,
                              body: Data? = nil) throws -> URLRequest {
         guard !accessToken.isEmpty, accessToken.utf8.count <= 4096 else {
@@ -314,6 +346,24 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
 
     private static func isLoopback(_ host: String) -> Bool {
         host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+}
+
+/// Authenticated recipient KeyPackage fetcher used by directory adapters.
+public final class IOSHTTPMLSKeyPackageProvider: IOSMLSKeyPackageProvider, Sendable {
+    private let api: IOSPreKeyHTTPClient
+
+    public init(api: IOSPreKeyHTTPClient) {
+        self.api = api
+    }
+
+    public func keyPackage(accessToken: String, userID: String, deviceID: String,
+                           mlsNodeID: String, mlsCredential: Data) async throws -> Data {
+        guard IOSClient.isCanonicalUUID(userID), IOSClient.isCanonicalUUID(deviceID),
+              IOSClient.isCanonicalUUID(mlsNodeID), !mlsCredential.isEmpty else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        return try await api.downloadMLSKeyPackage(accessToken: accessToken, deviceID: deviceID)
     }
 }
 
@@ -431,6 +481,7 @@ public struct IOSClaimedRecipientDevice: Sendable {
     public let deviceID: String
     public let identityPublicKey: Data
     public let preKeyBundle: Data
+    public let mlsCredential: Data
     public let mlsKeyPackage: Data
 
     public init(descriptor: IOSRecipientDeviceDescriptor,
@@ -442,6 +493,7 @@ public struct IOSClaimedRecipientDevice: Sendable {
         self.deviceID = descriptor.deviceID
         self.identityPublicKey = descriptor.identityPublicKey
         self.preKeyBundle = bundle.protobuf
+        self.mlsCredential = descriptor.mlsCredential
         self.mlsKeyPackage = descriptor.mlsKeyPackage
     }
 }

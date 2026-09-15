@@ -1,0 +1,4 @@
+module CLinksDesktopClient {
+    header "links_desktop_client.h"
+    export *
+}

@@ -14,12 +14,16 @@ let package = Package(
     ],
     targets: [
         .systemLibrary(name: "CLinksIdentity"),
+        .systemLibrary(name: "CLinksDesktopClient"),
         .target(name: "LinksKeyStore", dependencies: ["CLinksIdentity"], linkerSettings: [
             .unsafeFlags(["-L", rustLibraryDirectory]),
             .linkedLibrary("links_identity_ffi"),
             .linkedFramework("Security")
         ]),
-        .target(name: "LinksClient", dependencies: ["LinksKeyStore", "CLinksIdentity"]),
+        .target(name: "LinksClient", dependencies: ["LinksKeyStore", "CLinksIdentity", "CLinksDesktopClient"], linkerSettings: [
+            .unsafeFlags(["-L", rustLibraryDirectory]),
+            .linkedLibrary("links_desktop_client_ffi")
+        ]),
         .testTarget(name: "LinksKeyStoreTests", dependencies: ["LinksKeyStore"])
     ]
 )

@@ -1827,6 +1827,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "links-desktop-client-ffi"
+version = "0.1.0"
+dependencies = [
+ "links-client-core",
+ "links-desktop-client",
+ "links-identity",
+ "links-protocol",
+ "openmls",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "prost",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "links-gateway"
 version = "0.1.0"
 dependencies = [
