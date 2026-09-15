@@ -26,7 +26,7 @@ public struct IdentityKeyReference: Equatable {
 public final class HardwareIdentityStore {
     public enum IdentityError: Error { case invalidInput, hardwareUnavailable, authenticationFailed, providerFailure }
     private let vault: SeedVault
-    private static let workerLock = NSLock()
+    private let workerLock = NSLock()
     public let profile: ClientProfile
     public let keychainNamespace: String?
     public init() {
@@ -61,8 +61,8 @@ public final class HardwareIdentityStore {
     }
 
     private func withVault<T>(_ operation: (UnsafePointer<LinksVaultCallbacks>) throws -> T) rethrows -> T {
-        Self.workerLock.lock()
-        defer { Self.workerLock.unlock() }
+        workerLock.lock()
+        defer { workerLock.unlock() }
         // A box keeps the existential and context alive for synchronous callbacks.
         let box = VaultBox(vault)
         var callbacks = LinksVaultCallbacks(

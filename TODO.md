@@ -466,7 +466,12 @@ exchanging encrypted one-to-one text through the same local development stack.
   resolve an active `MacOSProfileRoot`. Encrypted state, status logs, metadata
   suites, Keychain records, in-memory bearer sessions, and fresh device/node
   IDs are isolated per profile.
-- [ ] Ensure the app supports two independent processes launched with macOS `open -n`; do not use a process-global singleton, shared lock, or shared database that prevents the second client from starting.
+- [x] Ensure the app supports two independent processes launched with macOS `open -n`; do not use a process-global singleton, shared lock, or shared database that prevents the second client from starting.
+
+  `LinksMacOSApp` owns one `LinksMacOSAppModel` per process. Per-instance
+  stores, locks, transports, and root-scoped profile paths keep two clients
+  independent; the macOS client has no process-global singleton or shared
+  database. The README includes the two-process `open -n` command.
 - [ ] Add readiness/status output for each profile so the runner can wait for both clients to authenticate and connect before sending a message.
 - [ ] Add a documented two-client launcher, for example:
 

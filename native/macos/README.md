@@ -188,6 +188,10 @@ open -n "/path/to/Links.app" --args \
   --profile bob --profile-root "$HOME/Library/Application Support/Links/profiles"
 ```
 
+Each `open -n` invocation creates its own app process, model, transport, and
+ephemeral bearer session. The macOS client has no process-wide app singleton,
+shared database, or cross-profile lock.
+
 `--profile-root` (or `LINKS_PROFILE_ROOT`) selects the directory containing
 profile directories. The active profile is stored below
 `<profile-root>/<profile>/`; the default is
