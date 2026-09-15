@@ -296,9 +296,23 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.isEnrolling = false
-                    self.onboardingError = "Secure identity creation failed on this Mac."
+                    self.onboardingError = Self.identityCreationErrorMessage(error)
                 }
             }
+        }
+    }
+
+    private static func identityCreationErrorMessage(_ error: Error) -> String {
+        guard let identityError = error as? HardwareIdentityStore.IdentityError else {
+            return "Secure identity creation failed on this Mac."
+        }
+        switch identityError {
+        case .hardwareUnavailable, .providerFailure:
+            return "Secure Enclave unavailable. Use a signed Debug build with Keychain entitlements on a physical Mac."
+        case .authenticationFailed:
+            return "Keychain authentication failed. Unlock this Mac and try again."
+        case .invalidInput:
+            return "Secure identity request was invalid. Try again."
         }
     }
 
