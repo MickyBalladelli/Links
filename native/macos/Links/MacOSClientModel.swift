@@ -179,6 +179,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private let otpClient: IOSOTPClient?
     private let preKeyAPI: IOSPreKeyHTTPClient?
     private var encryptedStateStore: MacOSEncryptedStateStore?
+    private var coreStateStore: MacOSEncryptedStateStore?
     private(set) var durableMessagingStore: MacOSDurableMessagingStore?
     private var coreFactory: MacOSRustCoreFactory?
     private var keychainSecretProvider: MacOSKeychainSecretProvider?
@@ -210,6 +211,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 profile: profile,
                 rootURL: profileRoot.url,
                 keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
+            coreStateStore = try? MacOSEncryptedStateStore(
+                profile: profile,
+                rootURL: profileRoot.url,
+                keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil,
+                namespace: "core")
             durableMessagingStore = try? MacOSDurableMessagingStore(
                 profile: profile,
                 rootURL: profileRoot.url,
@@ -220,9 +226,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             keychainSecretProvider = MacOSKeychainSecretProvider(
                 profile: profile,
                 keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
-            if let encryptedStateStore, let keychainSecretProvider {
+            if let coreStateStore, let keychainSecretProvider {
                 coreFactory = MacOSRustCoreFactory(
-                    stateStore: encryptedStateStore,
+                    stateStore: coreStateStore,
                     secrets: keychainSecretProvider)
             }
             let identityStore = HardwareIdentityStore(seedProvider: provider)
@@ -261,6 +267,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             otpClient = nil
             preKeyAPI = nil
             encryptedStateStore = nil
+            coreStateStore = nil
             durableMessagingStore = nil
             coreFactory = nil
             keychainSecretProvider = nil

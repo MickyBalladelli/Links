@@ -179,6 +179,11 @@ encrypted document; `withTransaction` commits MLS state, inbox, outbox,
 sequence, and cursor changes together. The store is constructed by
 `LinksMacOSAppModel` and can be passed to the concrete Rust-core host factory.
 
+The SwiftUI shell state, Rust core state, and durable messaging host state use
+different encrypted files: `state-v1.bin`, `core-v1.bin`, and
+`messaging-v1.bin`. They must not share a file because each format has a
+different decoder.
+
 ## Identity seed custody
 
 The macOS client passes `MacOSKeychainSeedProvider` into

@@ -442,6 +442,9 @@ exchanging encrypted one-to-one text through the same local development stack.
   subprotocol, rejects redirects and text frames, bounds every binary frame at
   1 MiB, and keeps ping/reconnect/Hello-deadline handling on the socket queue.
 - [x] Bind the adapter to `DesktopTextSession` and a concrete `DesktopMessagingCore` implementation backed by the shared Rust core. `bind_desktop_text_session()` now wraps `ClientCore` in `RustDesktopMessagingCore`, validates server protobuf frames, builds fresh Hello frames, and exposes the durable host boundary through `DesktopCoreHost`.
+  The desktop FFI also decodes the RFC 9420 TLS variable-length MLS
+  credential prefix correctly, so server-issued 96-byte device credentials
+  are accepted during core startup.
 - [x] Implement durable macOS providers for MLS state, inbox, outbox, message IDs, conversation sequences, and replay cursor under the profile's Application Support directory. `MacOSDurableMessagingStore` keeps a profile-scoped encrypted `messaging-v1` document under Application Support and commits related records through atomic transactions; the macOS model creates it for the active client profile.
 - [x] Implement directory lookup, pre-key claim, message fan-out, Sealed Sender envelope creation, decrypt, durable commit, and QueueAck in the host integration.
   `DesktopCoreHostAdapter` now drives the full shared-core send/receive order:
