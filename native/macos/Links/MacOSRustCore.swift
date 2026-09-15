@@ -210,12 +210,12 @@ private func macOSRustText(
     }
 }
 
+enum MacOSRustCoreError: Error {
+    case status(Int32)
+}
+
 private func coreError(for status: Int32) -> Error {
-    switch status {
-    case Int32(LINKS_DESKTOP_AUTHENTICATION): return IOSMessagingError.notConnected
-    case Int32(LINKS_DESKTOP_STALE_CURSOR): return IOSMessagingError.staleCursorRecoveryUnavailable
-    default: return IOSMessagingError.notConnected
-    }
+    MacOSRustCoreError.status(status)
 }
 
 private final class MacOSRustSharedCore: SharedClientCore {

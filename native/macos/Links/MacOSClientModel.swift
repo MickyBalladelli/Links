@@ -414,6 +414,42 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         return "Username auth failed. Check the handle and local auth service."
     }
 
+    private static func connectionStartErrorMessage(_ error: Error) -> String {
+        if let coreError = error as? MacOSRustCoreError {
+            switch coreError {
+            case .status(let status):
+                switch status {
+                case 1:
+                    return "Rust core rejected profile data (code 1). Log in again."
+                case 2:
+                    return "Crypto provider unavailable (code 2). Unlock this Mac and try again."
+                case 3:
+                    return "Identity and MLS credential do not match (code 3). Log in again."
+                case 4:
+                    return "Profile state or Keychain provider failed (code 4)."
+                case 5:
+                    return "Saved mailbox cursor is stale (code 5). Use recovery."
+                default:
+                    return "Rust core could not start (code \(status))."
+                }
+            }
+        }
+        if error is IOSConnectionError {
+            return "Gateway endpoint is invalid. Use ws://127.0.0.1:8081/v1/connect in Debug."
+        }
+        if let clientError = error as? IOSClientError {
+            switch clientError {
+            case .authenticatedSessionRequired, .metadataUnavailable:
+                return "Account session metadata is incomplete. Log in again."
+            case .coreIdentityMismatch, .identityReuse:
+                return "This profile identity does not match its account. Use the correct profile."
+            default:
+                break
+            }
+        }
+        return "Connection could not start. Check the local gateway and profile state."
+    }
+
     func startOTPEnrollment() {
         guard let client, let otpClient, client.isEnrolled, !isOTPWorking else {
             otpStatus = "Use an HTTPS account-auth endpoint for phone OTP"
@@ -606,7 +642,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             connectionRequested = false
             deliveryState = .dependencyOutage
             connectionStatus = deliveryState.title
-            actionError = "Connection could not start."
+            actionError = Self.connectionStartErrorMessage(error)
             publishProfileStatus()
         }
     }
@@ -941,7 +977,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private func refreshClientState() {
         guard let client else { return }
         identityStatus = client.isEnrolled ? "Identity enrolled" : "Identity not enrolled"
-        accountStatus = client.isAuthenticated ? "Authenticated" : "Signed out"
+        if let handle = client.accountHandle {
+            accountStatus = client.isAuthenticated
+                ? "@\(handle) · Authenticated"
+                : "@\(handle) · Sign in required"
+        } else {
+            accountStatus = client.isAuthenticated ? "Authenticated" : "Signed out"
+        }
         if let deviceID = client.deviceID, let mlsNodeID = client.mlsNodeID {
             deviceStatus = "Device \(shortID(deviceID)) · Node \(shortID(mlsNodeID))"
         } else {
