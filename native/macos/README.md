@@ -223,6 +223,22 @@ The file is atomically replaced on every lifecycle transition. `ready` means
 the account is authenticated and the `links.v1` WebSocket is live; startup,
 retry, recovery, and failure states remain non-ready.
 
+## Two-client smoke harness
+
+With the local composition already running, execute:
+
+```sh
+bash scripts/smoke-two-client.sh
+```
+
+The harness creates disposable `@alice-test` and `@bob-test` accounts using
+the loopback service's canonical `alice_test` and `bob_test` handles, opens two
+concurrent `links.v1` sessions, and routes one opaque envelope in each
+direction. It prints one JSON record containing only `result` and timing fields.
+Set `SMOKE_RESULT_PATH` to save that same record, or override the local
+endpoints with `SMOKE_AUTH_URL` and `SMOKE_GATEWAY_URL`. Use a fresh disposable
+database when the fixed test handles have already been registered.
+
 `--profile-root` (or `LINKS_PROFILE_ROOT`) selects the directory containing
 profile directories. The active profile is stored below
 `<profile-root>/<profile>/`; the default is

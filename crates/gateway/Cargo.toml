@@ -9,13 +9,19 @@ axum = { version = "0.8", features = ["ws"] }
 async-trait.workspace = true
 base64.workspace = true
 ed25519-dalek = { version = "2", features = ["zeroize"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+links-identity = { path = "../identity" }
 links-protocol.workspace = true
 links-server-store.workspace = true
 links-account-auth = { path = "../account-auth" }
 prost.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sqlx.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time"] }
-uuid = { workspace = true, features = ["v4"] }
+tokio-tungstenite = "0.29"
+uuid = { workspace = true, features = ["serde", "v4"] }
 zeroize.workspace = true

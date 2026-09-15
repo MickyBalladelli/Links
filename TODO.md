@@ -487,7 +487,11 @@ exchanging encrypted one-to-one text through the same local development stack.
   `scripts/launch-macos-two-client.sh` starts both profiles with an explicit
   profile root and prints their profile-local readiness file paths.
 
-- [ ] Add a disposable two-client smoke harness that creates `@alice-test` and `@bob-test`, waits for two live `links.v1` sessions, sends a message in both directions, and records only pass/fail and timing metadata.
+- [x] Add a disposable two-client smoke harness that creates `@alice-test` and `@bob-test`, waits for two live `links.v1` sessions, sends a message in both directions, and records only pass/fail and timing metadata.
+  `scripts/smoke-two-client.sh` runs the Debug-only Rust harness against the
+  local composition. It creates fresh signed test devices, waits for Welcome
+  on both binary `links.v1` sockets, routes opaque envelopes in both
+  directions, and emits only a pass/fail JSON result with phase timings.
 - [ ] Verify that two profiles can use the same gateway endpoint concurrently without session fencing; a reused `device_id` must fail clearly instead of silently replacing another client.
 
 ### macOS two-client acceptance gate
