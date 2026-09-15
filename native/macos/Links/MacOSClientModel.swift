@@ -187,6 +187,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var messaging: IOSDirectMessaging?
     private var directChatDirectory: (any IOSDirectChatDirectory)?
     private var initializedConversationIDs = Set<String>()
+    private var initializingConversationIDs = Set<String>()
     private var profileLogger: LinksMacOSProfileLogger?
     private var profileStatus: LinksMacOSProfileStatus?
     private let identityQueue = DispatchQueue(
@@ -844,10 +845,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 : preKeyStatus
             return
         }
+        guard initializingConversationIDs.insert(conversation.id).inserted else {
+            return
+        }
         initializedConversationIDs.remove(conversation.id)
         conversationSetupStatus = "Claiming recipient pre-keys"
         Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.initializingConversationIDs.remove(conversation.id) }
             do {
                 try await messaging.initializeFirstDirectConversation(
                     conversationID: conversation.id,

@@ -679,13 +679,15 @@ impl LinksDesktopCore {
                 if binding.device_id == local_device || binding.public_key != sender_public_key {
                     return Err(CoreError::Authentication);
                 }
-                let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
-                if let Some(existing) = bindings.get(&binding.device_id) {
-                    if existing != &binding {
-                        return Err(CoreError::Authentication);
+                {
+                    let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
+                    if let Some(existing) = bindings.get(&binding.device_id) {
+                        if existing != &binding {
+                            return Err(CoreError::Authentication);
+                        }
+                    } else {
+                        bindings.insert(binding.device_id, binding);
                     }
-                } else {
-                    bindings.insert(binding.device_id, binding);
                 }
                 self.client.mls_mut().join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
                 self.save()

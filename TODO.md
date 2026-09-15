@@ -456,7 +456,9 @@ exchanging encrypted one-to-one text through the same local development stack.
   its `DesktopCoreServices` boundary performs directory/pre-key I/O and
   encrypted durable storage, while the adapter verifies claims, fans out one
   MLS-sealed ciphertext per device, commits replay items and the cursor, then
-  sends QueueAck.
+  sends QueueAck. MLS bootstrap releases the device-binding write lock before
+  OpenMLS verifies the Welcome, preventing a core-queue self-deadlock during
+  two-client setup.
 - [x] Render a message only after the shared core has committed the decrypted message and cursor transaction.
   `IOSDirectMessaging` and background replay buffer core callbacks until the
   shared-core call returns, after its durable inbox/cursor commit and QueueAck
