@@ -95,6 +95,9 @@ team selected, pass your Apple Development Team ID:
 LINKS_DEVELOPMENT_TEAM=ABCDE12345 bash launch-links.sh
 ```
 
+The launcher allows Xcode to create or download the matching development
+profile. Set `LINKS_ALLOW_PROVISIONING_UPDATES=0` to disable that behavior.
+
 Set `LINKS_GATEWAY_ENDPOINT` to that value in both the macOS and Web client
 hosts. The auth URL is `http://127.0.0.1:8080`. The process applies the
 PostgreSQL migrations before serving and uses the Debug-only `_test` username
