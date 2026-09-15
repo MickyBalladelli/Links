@@ -191,6 +191,7 @@ public final class IOSClient: SharedCoreIdentitySigner {
     private let defaults: UserDefaults
     public let profile: ClientProfile
     private let metadataKey: String
+    private let sessionLock = NSLock()
     private var authenticated: AuthenticatedSession?
 
     public private(set) var identity: IdentityKeyReference?
@@ -216,6 +217,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
     public var isEnrolled: Bool { identity != nil }
 
     public var isAuthenticated: Bool {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
         guard let authenticated else { return false }
         return authenticated.expiresAtMs > Self.nowMs()
     }
@@ -272,7 +275,9 @@ public final class IOSClient: SharedCoreIdentitySigner {
         userID = nil
         accountHandle = nil
         mlsCredential = nil
+        sessionLock.lock()
         authenticated = nil
+        sessionLock.unlock()
         return created
     }
 
@@ -319,12 +324,16 @@ public final class IOSClient: SharedCoreIdentitySigner {
         self.userID = userID
         self.accountHandle = accountHandle ?? self.accountHandle
         self.mlsCredential = mlsCredential ?? self.mlsCredential
+        sessionLock.lock()
         authenticated = AuthenticatedSession(
             userID: userID, accessToken: accessToken, expiresAtMs: expiresAtMs)
+        sessionLock.unlock()
     }
 
     public func accessToken() throws -> String {
-        guard isAuthenticated, let authenticated else {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        guard let authenticated, authenticated.expiresAtMs > Self.nowMs() else {
             throw IOSClientError.authenticatedSessionRequired
         }
         return authenticated.accessToken
@@ -481,7 +490,9 @@ public final class IOSClient: SharedCoreIdentitySigner {
     /// Drop only the memory bearer. Persisted identity and account binding
     /// remain so a returning-device auth flow can validate them.
     public func clearAuthenticatedSession() {
+        sessionLock.lock()
         authenticated = nil
+        sessionLock.unlock()
     }
 
     public static func isCanonicalUUID(_ value: String) -> Bool {

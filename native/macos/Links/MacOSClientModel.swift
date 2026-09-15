@@ -939,12 +939,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
                                     didChange state: IOSDirectMessaging.State) {
         Task { @MainActor [weak self] in
-            self?.handleMessagingStateChange(state, messaging: messaging)
+            guard let self, self.messaging === messaging else { return }
+            self.handleMessagingStateChange(state, messaging: messaging)
         }
     }
 
     private func handleMessagingStateChange(_ state: IOSDirectMessaging.State,
                                             messaging: IOSDirectMessaging) {
+        guard self.messaging === messaging else { return }
         pendingOutboxCount = messaging.pendingOutboxCount
         switch state {
         case .stopped:
@@ -962,6 +964,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deliveryState = .staleCursor
         case .authenticationRequired:
             deliveryState = .authenticationExpired
+            discardMessaging()
             client?.clearAuthenticatedSession()
             connectionRequested = false
         case .dependencyOutage:
@@ -978,7 +981,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
                                     didReceive message: IOSReceivedTextMessage) {
         Task { @MainActor [weak self] in
-            self?.renderReceivedMessage(message)
+            guard let self, self.messaging === messaging else { return }
+            self.renderReceivedMessage(message)
         }
     }
 
@@ -1004,25 +1008,29 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging) {
         Task { @MainActor [weak self] in
-            self?.handleMessagingFailure(.dependencyOutage, messaging: messaging)
+            guard let self, self.messaging === messaging else { return }
+            self.handleMessagingFailure(.dependencyOutage, messaging: messaging)
         }
     }
 
     nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging,
                                             reason: IOSMessagingIssue) {
         Task { @MainActor [weak self] in
-            self?.handleMessagingFailure(reason, messaging: messaging)
+            guard let self, self.messaging === messaging else { return }
+            self.handleMessagingFailure(reason, messaging: messaging)
         }
     }
 
     private func handleMessagingFailure(_ reason: IOSMessagingIssue,
                                         messaging: IOSDirectMessaging) {
+        guard self.messaging === messaging else { return }
         pendingOutboxCount = messaging.pendingOutboxCount
         switch reason {
         case .staleCursor:
             deliveryState = .staleCursor
         case .authenticationExpired:
             deliveryState = .authenticationExpired
+            discardMessaging()
             client?.clearAuthenticatedSession()
             connectionRequested = false
         case .dependencyOutage:
@@ -1034,6 +1042,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         connectionStatus = deliveryState.title
         actionError = deliveryState.detail
         publishProfileStatus()
+    }
+
+    private func discardMessaging() {
+        let previous = messaging
+        messaging = nil
+        directChatDirectory = nil
+        previous?.shutdown()
     }
 
     private func refreshClientState() {

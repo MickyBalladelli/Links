@@ -334,8 +334,14 @@ private final class MacOSRustSharedCore: SharedClientCore {
             }
         }
         guard status == Int32(LINKS_DESKTOP_OK) else {
-            currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
-                ? .staleCursor : .authenticationExpired
+            switch status {
+            case Int32(LINKS_DESKTOP_STALE_CURSOR):
+                currentIssue = .staleCursor
+            case Int32(LINKS_DESKTOP_AUTHENTICATION):
+                currentIssue = .authenticationExpired
+            default:
+                currentIssue = .dependencyOutage
+            }
             throw coreError(for: status)
         }
         buffer.removeSubrange(length..<buffer.count)
