@@ -83,7 +83,7 @@ private struct LinksAccountOnboardingView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 520, alignment: .center)
-                Text("Loopback development uses lowercase handles ending in _test, such as alice_test.")
+                Text("Loopback development uses lowercase handles, such as alice or karine.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -95,7 +95,7 @@ private struct LinksAccountOnboardingView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                TextField("Username, for example alice_test", text: $model.usernameInput)
+                TextField("Username, for example alice", text: $model.usernameInput)
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.username)
                 Button(model.authMode == .register ? "Register username" : "Log in") {
@@ -599,7 +599,7 @@ private struct AddContactView: View {
             Text("Find someone by their username. Only public handle, account ID, and active-device count are saved in this profile.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("Username, for example alice_test", text: $handle)
+            TextField("Username, for example alice", text: $handle)
                 .textFieldStyle(.roundedBorder)
                 .textContentType(.username)
             Text(model.contactStatus)

@@ -676,7 +676,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 self.contactStatus = "Added @\(contact.handle)"
                 self.isAddingContact = false
             } catch {
-                self.contactStatus = "Contact not found. Use a valid username, such as alice_test."
+                self.contactStatus = "Contact not found. Use a valid lowercase username."
                 self.isAddingContact = false
             }
         }

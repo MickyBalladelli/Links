@@ -116,7 +116,7 @@ session leases in bounded in-process state, and serves the gateway at
 WebSocket endpoint and the `links.v1` subprotocol; Release clients remain
 `wss://`-only. Account auth and the gateway share `DATABASE_URL` and
 `AUTH_LOOKUP_KEY`; the Debug-only username mode is enabled by the script and
-accepts only disposable `_test` handles.
+accepts canonical lowercase handles only on loopback.
 
 For a transport-only smoke process without PostgreSQL, use
 `cargo run -p links-gateway --bin links-gateway-local --locked`.

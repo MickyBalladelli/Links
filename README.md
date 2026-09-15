@@ -102,7 +102,7 @@ profile. Set `LINKS_ALLOW_PROVISIONING_UPDATES=0` to disable that behavior.
 
 Set `LINKS_GATEWAY_ENDPOINT` to that value in both the macOS and Web client
 hosts. The auth URL is `http://127.0.0.1:8080`. The process applies the
-PostgreSQL migrations before serving and uses the Debug-only `_test` username
+PostgreSQL migrations before serving and uses the Debug-only loopback username
 flow; no Twilio credentials are needed. Stop the Rust process with Ctrl-C;
 PostgreSQL remains in its Docker volume for the next run.
 
@@ -120,9 +120,9 @@ AUTH_DEV_USERNAME_MODE=1 AUTH_BIND=127.0.0.1:8080 \
   cargo run -p links-account-auth --locked
 ```
 
-Register signed usernames ending in `_test`, such as `alice_test` and
-`bob_test`. This mode does not read Twilio credentials, removes the phone OTP
-routes, and rejects non-test handles. `AUTH_LOOKUP_KEY` is still required.
+Register signed lowercase usernames such as `alice` and `bob`. This mode does
+not read Twilio credentials, removes the phone OTP routes, and remains limited
+to loopback Debug builds. `AUTH_LOOKUP_KEY` is still required.
 `AUTH_DEV_USERNAME_MODE=1` is rejected by `cargo run --release`, and every
 account-auth mode rejects a non-loopback `AUTH_BIND`.
 

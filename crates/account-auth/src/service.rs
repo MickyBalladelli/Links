@@ -27,8 +27,6 @@ pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
 pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PRIVACY_PASS_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
-pub const DEV_USERNAME_SUFFIX: &str = "_test";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountAuthMode {
     Production,
@@ -878,9 +876,6 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<UsernameAuthResponse, AuthError> {
         validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
-        if self.is_loopback_username_dev() && !request.handle.ends_with(DEV_USERNAME_SUFFIX) {
-            return Err(AuthError::Invalid);
-        }
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
         }
@@ -945,9 +940,6 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<UsernameAuthResponse, AuthError> {
         validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
-        if self.is_loopback_username_dev() && !request.handle.ends_with(DEV_USERNAME_SUFFIX) {
-            return Err(AuthError::Invalid);
-        }
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
         }
@@ -1011,9 +1003,6 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<Option<UsernameDirectoryResponse>, AuthError> {
         validate_handle(handle).map_err(|_| AuthError::Invalid)?;
-        if self.is_loopback_username_dev() && !handle.ends_with(DEV_USERNAME_SUFFIX) {
-            return Err(AuthError::Invalid);
-        }
         let now = self.now()?;
         self.enforce_directory_rate_limits(handle, peer_ip, now)
             .await?;
