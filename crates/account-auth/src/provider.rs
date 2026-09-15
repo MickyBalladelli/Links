@@ -26,6 +26,21 @@ pub trait OtpProvider: Send + Sync {
     async fn check(&self, verification_sid: &str, code: &str) -> Result<bool, AuthError>;
 }
 
+/// Explicit no-OTP provider for the loopback username development service.
+/// It has no phone or provider credentials and cannot approve a challenge.
+pub struct DisabledOtpProvider;
+
+#[async_trait]
+impl OtpProvider for DisabledOtpProvider {
+    async fn start(&self, _phone: &str, _channel: Channel) -> Result<String, AuthError> {
+        Err(AuthError::Unavailable)
+    }
+
+    async fn check(&self, _verification_sid: &str, _code: &str) -> Result<bool, AuthError> {
+        Err(AuthError::Unavailable)
+    }
+}
+
 /// Live provider; no network requests occur until start/check is invoked.
 /// WhatsApp requires an approved/configured Verify sender at Twilio.
 pub struct TwilioVerify {

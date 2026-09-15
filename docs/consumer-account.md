@@ -23,6 +23,12 @@ both sign a domain-separated transcript with a fresh 32-byte client nonce. The
 server creates the account, unique handle, device, MLS credential, and first
 session in one transaction. Handle and IP rate limits run before that write.
 
+For local two-client work, the Debug-only `AUTH_DEV_USERNAME_MODE=1` service
+accepts only signed handles ending in `_test` (for example `alice_test`) and
+uses no Twilio provider. Its phone OTP routes are absent and the service still
+requires `AUTH_BIND` to be loopback. Release builds reject this mode. Use a
+separate disposable PostgreSQL database or volume for these accounts.
+
 `links-identity` generates 32-byte random Ed25519 seeds, derives public keys, signs
 phone, username, and device-enrollment transcripts, verifies signatures strictly,
 and produces an RFC 9420 basic credential using TLS codec serialization. The core
@@ -255,6 +261,7 @@ these variables through a secret manager or a private local environment:
 | `TWILIO_AUTH_TOKEN` | Provider credential; never commit or log it. |
 | `TWILIO_VERIFY_SERVICE_SID` | Verify service with SMS and, when needed, WhatsApp sender enabled. |
 | `AUTH_BIND` | Defaults to `127.0.0.1:8080`; non-loopback HTTP binding is rejected. |
+| `AUTH_DEV_USERNAME_MODE` | Debug-only `1` enables loopback username-only accounts whose handles end in `_test`; disables OTP and does not read Twilio credentials. |
 | `PASSKEY_RP_ID` | WebAuthn relying-party ID; must be paired with `PASSKEY_ORIGIN`. |
 | `PASSKEY_ORIGIN` | Exact web origin used by WebAuthn client data; must be paired with `PASSKEY_RP_ID`. |
 
@@ -262,6 +269,18 @@ these variables through a secret manager or a private local environment:
 cargo run -p links-server-store --example migrate --locked
 cargo run -p links-account-auth --locked
 ```
+
+For disposable local username accounts, omit the `TWILIO_*` variables and use
+the explicit Debug-only mode:
+
+```sh
+AUTH_DEV_USERNAME_MODE=1 AUTH_BIND=127.0.0.1:8080 \
+  cargo run -p links-account-auth --locked
+```
+
+The username registration and login routes remain available for signed
+`*_test` handles. Phone `/v1/auth/start` and `/v1/auth/finish` are not mounted.
+Do not expose this service beyond loopback or use the mode in a Release build.
 
 The binary is not a TLS server: terminate TLS in a trusted local proxy before
 external access. It deliberately ignores `X-Forwarded-For`; the IP limit is based

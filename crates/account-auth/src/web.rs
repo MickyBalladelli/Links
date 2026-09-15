@@ -23,9 +23,7 @@ use prost::Message;
 use std::{net::SocketAddr, sync::Arc};
 
 pub fn router(auth: Arc<AccountAuth>) -> Router {
-    let auth_routes = Router::new()
-        .route("/v1/auth/start", post(start))
-        .route("/v1/auth/finish", post(finish))
+    let mut auth_routes = Router::new()
         .route("/v1/auth/username/register", post(username_register))
         .route("/v1/auth/username/login", post(username_login))
         .route("/v1/auth/me", get(me))
@@ -35,8 +33,13 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         )
         .route("/v1/devices", post(register_device))
         .route("/v1/devices/delegated", post(register_delegated_device))
-        .route("/v1/devices/{device_id}", delete(revoke_device))
-        .layer(DefaultBodyLimit::max(4096));
+        .route("/v1/devices/{device_id}", delete(revoke_device));
+    if !auth.is_loopback_username_dev() {
+        auth_routes = auth_routes
+            .route("/v1/auth/start", post(start))
+            .route("/v1/auth/finish", post(finish));
+    }
+    let auth_routes = auth_routes.layer(DefaultBodyLimit::max(4096));
     let group_routes = Router::new()
         .route("/v1/groups", post(create_group))
         .route("/v1/groups/{group_id}/members", get(group_members))

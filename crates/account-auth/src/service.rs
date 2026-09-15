@@ -27,6 +27,13 @@ pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
 pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PRIVACY_PASS_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
+pub const DEV_USERNAME_SUFFIX: &str = "_test";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountAuthMode {
+    Production,
+    LoopbackUsernameDev,
+}
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
 }
@@ -478,6 +485,7 @@ pub struct AccountAuth {
     privacy_pass_key: Zeroizing<[u8; 32]>,
     clock: Arc<dyn Clock>,
     passkey: Option<PasskeyConfig>,
+    mode: AccountAuthMode,
 }
 impl AccountAuth {
     pub fn new(
@@ -485,6 +493,74 @@ impl AccountAuth {
         provider: Arc<dyn OtpProvider>,
         phone_lookup_key: Zeroizing<[u8; 32]>,
         clock: Arc<dyn Clock>,
+    ) -> Result<Self, AuthError> {
+        Self::new_with_mode(
+            pool,
+            provider,
+            phone_lookup_key,
+            clock,
+            None,
+            AccountAuthMode::Production,
+        )
+    }
+
+    pub fn new_with_passkey(
+        pool: PgPool,
+        provider: Arc<dyn OtpProvider>,
+        phone_lookup_key: Zeroizing<[u8; 32]>,
+        clock: Arc<dyn Clock>,
+        passkey: PasskeyConfig,
+    ) -> Result<Self, AuthError> {
+        Self::new_with_mode(
+            pool,
+            provider,
+            phone_lookup_key,
+            clock,
+            Some(passkey),
+            AccountAuthMode::Production,
+        )
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn new_loopback_username_dev(
+        pool: PgPool,
+        phone_lookup_key: Zeroizing<[u8; 32]>,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, AuthError> {
+        Self::new_with_mode(
+            pool,
+            Arc::new(crate::provider::DisabledOtpProvider),
+            phone_lookup_key,
+            clock,
+            None,
+            AccountAuthMode::LoopbackUsernameDev,
+        )
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn new_loopback_username_dev_with_passkey(
+        pool: PgPool,
+        phone_lookup_key: Zeroizing<[u8; 32]>,
+        clock: Arc<dyn Clock>,
+        passkey: PasskeyConfig,
+    ) -> Result<Self, AuthError> {
+        Self::new_with_mode(
+            pool,
+            Arc::new(crate::provider::DisabledOtpProvider),
+            phone_lookup_key,
+            clock,
+            Some(passkey),
+            AccountAuthMode::LoopbackUsernameDev,
+        )
+    }
+
+    fn new_with_mode(
+        pool: PgPool,
+        provider: Arc<dyn OtpProvider>,
+        phone_lookup_key: Zeroizing<[u8; 32]>,
+        clock: Arc<dyn Clock>,
+        passkey: Option<PasskeyConfig>,
+        mode: AccountAuthMode,
     ) -> Result<Self, AuthError> {
         if *phone_lookup_key == [0; 32] {
             return Err(AuthError::Invalid);
@@ -496,20 +572,17 @@ impl AccountAuth {
             phone_lookup_key,
             privacy_pass_key,
             clock,
-            passkey: None,
+            passkey,
+            mode,
         })
     }
 
-    pub fn new_with_passkey(
-        pool: PgPool,
-        provider: Arc<dyn OtpProvider>,
-        phone_lookup_key: Zeroizing<[u8; 32]>,
-        clock: Arc<dyn Clock>,
-        passkey: PasskeyConfig,
-    ) -> Result<Self, AuthError> {
-        let mut auth = Self::new(pool, provider, phone_lookup_key, clock)?;
-        auth.passkey = Some(passkey);
-        Ok(auth)
+    pub fn mode(&self) -> AccountAuthMode {
+        self.mode
+    }
+
+    pub fn is_loopback_username_dev(&self) -> bool {
+        self.mode == AccountAuthMode::LoopbackUsernameDev
     }
 
     fn passkey_config(&self) -> Result<&PasskeyConfig, AuthError> {
@@ -805,6 +878,9 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<UsernameAuthResponse, AuthError> {
         validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
+        if self.is_loopback_username_dev() && !request.handle.ends_with(DEV_USERNAME_SUFFIX) {
+            return Err(AuthError::Invalid);
+        }
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
         }
@@ -869,6 +945,9 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<UsernameAuthResponse, AuthError> {
         validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
+        if self.is_loopback_username_dev() && !request.handle.ends_with(DEV_USERNAME_SUFFIX) {
+            return Err(AuthError::Invalid);
+        }
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
         }
@@ -932,6 +1011,9 @@ impl AccountAuth {
         peer_ip: IpAddr,
     ) -> Result<Option<UsernameDirectoryResponse>, AuthError> {
         validate_handle(handle).map_err(|_| AuthError::Invalid)?;
+        if self.is_loopback_username_dev() && !handle.ends_with(DEV_USERNAME_SUFFIX) {
+            return Err(AuthError::Invalid);
+        }
         let now = self.now()?;
         self.enforce_directory_rate_limits(handle, peer_ip, now)
             .await?;
@@ -1061,6 +1143,9 @@ impl AccountAuth {
         request: StartRequest,
         peer_ip: IpAddr,
     ) -> Result<Challenge, AuthError> {
+        if self.is_loopback_username_dev() {
+            return Err(AuthError::Unavailable);
+        }
         validate_phone(&request.phone)?;
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
@@ -1157,6 +1242,9 @@ impl AccountAuth {
         Ok(())
     }
     pub async fn finish(&self, request: FinishRequest) -> Result<Session, AuthError> {
+        if self.is_loopback_username_dev() {
+            return Err(AuthError::Unavailable);
+        }
         if !(6..=10).contains(&request.code.len())
             || !request.code.bytes().all(|b| b.is_ascii_digit())
         {

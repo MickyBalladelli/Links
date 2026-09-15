@@ -69,7 +69,8 @@ particular:
 ### Start PostgreSQL and account auth
 
 Compose starts PostgreSQL only. Account auth is a separate loopback service and
-has no development OTP bypass.
+defaults to the real Twilio-backed flow. It also has an explicit debug-only
+username mode for disposable local accounts; that mode has no OTP bypass.
 
 ```sh
 cp .env.example .env
@@ -86,6 +87,22 @@ cargo run -p links-account-auth --locked
 The auth service listens at `http://127.0.0.1:8080`. The migration command and
 auth service must use the same `DATABASE_URL`. Never use the example credentials
 outside local development.
+
+### Disposable username development mode
+
+For a throwaway local database, run the account service in a Debug build with
+the explicit loopback-only mode:
+
+```sh
+AUTH_DEV_USERNAME_MODE=1 AUTH_BIND=127.0.0.1:8080 \
+  cargo run -p links-account-auth --locked
+```
+
+Register signed usernames ending in `_test`, such as `alice_test` and
+`bob_test`. This mode does not read Twilio credentials, removes the phone OTP
+routes, and rejects non-test handles. `AUTH_LOOKUP_KEY` is still required.
+`AUTH_DEV_USERNAME_MODE=1` is rejected by `cargo run --release`, and every
+account-auth mode rejects a non-loopback `AUTH_BIND`.
 
 ### Build the libraries
 

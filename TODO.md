@@ -458,7 +458,7 @@ exchanging encrypted one-to-one text through the same local development stack.
 
 ### Local development backend and two-client runner
 
-- [ ] Add an explicit loopback-only username development mode that can create disposable test accounts without Twilio; keep OTP disabled in this mode and prevent the mode from binding outside loopback or being enabled in Release builds.
+- [x] Add an explicit loopback-only username development mode that can create disposable test accounts without Twilio; keep OTP disabled in this mode and prevent the mode from binding outside loopback or being enabled in Release builds. `AUTH_DEV_USERNAME_MODE=1` is Debug-only, requires loopback binding, accepts signed `*_test` handles, and removes the phone OTP routes.
 - [ ] Add a runnable local WebSocket adapter around `links-gateway` that wires `decode_client_frame`, `Gateway::open`, `Gateway::handle`, and `encode_server_frame` to a real socket.
 - [ ] Add a local development composition for PostgreSQL, account auth, encrypted mailbox storage, ephemeral session state, and the WebSocket gateway using one documented endpoint shared by both clients.
 - [ ] Add a client launch option such as `--profile <name>` and an explicit profile root. Each profile must have separate Application Support data, Keychain namespace, logs, bearer token, and device/node IDs.
