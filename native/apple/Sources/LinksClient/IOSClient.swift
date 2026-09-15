@@ -59,6 +59,13 @@ public protocol SharedClientCore: AnyObject {
     /// Reset only an expired replay cursor before an explicit full recovery.
     /// The binding must preserve encrypted inbox data and MLS state.
     func resetReplayCursorForRecovery() throws
+    func maintainPreKeyInventory(accessToken: String, api: any IOSPreKeyAPI)
+        async throws -> IOSPreKeyInventory
+    func initializeDirectConversation(
+        conversationID: String,
+        recipientUserID: String,
+        recipientDevices: [IOSClaimedRecipientDevice],
+        transport: any IOSCoreTransport) throws
     func sendText(conversationID: String, recipientUserID: String, text: String,
                   transport: any IOSCoreTransport) throws
     /// Surface-aware route. Channel publishers can implement this with the
