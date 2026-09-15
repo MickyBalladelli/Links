@@ -137,9 +137,12 @@ private func macOSRustLoadState(
             return Int32(LINKS_DESKTOP_OK)
         }
         outputLength.pointee = state.count
-        guard let output, capacity >= state.count else {
+        // The Rust bridge probes the required size before supplying a buffer.
+        // A nil output is valid for that first call.
+        guard output == nil || capacity >= state.count else {
             return Int32(LINKS_DESKTOP_INVALID)
         }
+        guard let output else { return Int32(LINKS_DESKTOP_OK) }
         state.withUnsafeBytes { raw in
             output.initialize(from: raw.bindMemory(to: UInt8.self).baseAddress!, count: state.count)
         }
