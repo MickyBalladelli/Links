@@ -477,12 +477,15 @@ exchanging encrypted one-to-one text through the same local development stack.
   lifecycle state, authentication/connection booleans, PID, and timestamp.
   The file is atomically replaced under the profile root and reaches
   `state=ready` only after authentication and the live WebSocket are ready.
-- [ ] Add a documented two-client launcher, for example:
+- [x] Add a documented two-client launcher, for example:
 
   ```sh
   open -n "/path/to/Links.app" --args --profile alice
   open -n "/path/to/Links.app" --args --profile bob
   ```
+
+  `scripts/launch-macos-two-client.sh` starts both profiles with an explicit
+  profile root and prints their profile-local readiness file paths.
 
 - [ ] Add a disposable two-client smoke harness that creates `@alice-test` and `@bob-test`, waits for two live `links.v1` sessions, sends a message in both directions, and records only pass/fail and timing metadata.
 - [ ] Verify that two profiles can use the same gateway endpoint concurrently without session fencing; a reused `device_id` must fail clearly instead of silently replacing another client.

@@ -192,6 +192,19 @@ Each `open -n` invocation creates its own app process, model, transport, and
 ephemeral bearer session. The macOS client has no process-wide app singleton,
 shared database, or cross-profile lock.
 
+Use the repository launcher to start both local clients:
+
+```sh
+bash scripts/launch-macos-two-client.sh \
+  "/path/to/Links.app" \
+  "$HOME/Library/Application Support/Links/profiles"
+```
+
+It runs the equivalent of two separate `open -n` commands for `alice` and
+`bob`. Pass different profile names as the third and fourth arguments when
+needed. `LINKS_AUTH_URL` selects the account-auth endpoint; it defaults to the
+loopback development service.
+
 ## Runner readiness
 
 Each profile writes `<profile-root>/<profile>/status.json`. The JSON contains
