@@ -372,7 +372,13 @@ fn parse_binding(credential: &[u8]) -> Result<links_identity::DeviceBinding, Cor
     if credential.len() < 4 {
         return Err(CoreError::Authentication);
     }
-    let length = usize::from(u16::from_be_bytes([credential[2], credential[3]]));
+    // TLS variable-length vectors reserve the top two bits of a two-byte
+    // length prefix for the encoded-width marker. A 96-byte MLS identity is
+    // therefore encoded as 0x4060, not the literal integer 0x4060.
+    if credential[2] & 0xc0 != 0x40 {
+        return Err(CoreError::Authentication);
+    }
+    let length = usize::from(u16::from_be_bytes([credential[2], credential[3]]) & 0x3fff);
     if credential.len() != length + 4 {
         return Err(CoreError::Authentication);
     }
