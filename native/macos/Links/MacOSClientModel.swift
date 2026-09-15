@@ -180,6 +180,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private let preKeyAPI: IOSPreKeyHTTPClient?
     private var encryptedStateStore: MacOSEncryptedStateStore?
     private(set) var durableMessagingStore: MacOSDurableMessagingStore?
+    private var coreFactory: MacOSRustCoreFactory?
+    private var keychainSecretProvider: MacOSKeychainSecretProvider?
     private var otpChallenge: IOSOTPChallenge?
     private var messaging: IOSDirectMessaging?
     private var directChatDirectory: (any IOSDirectChatDirectory)?
@@ -214,6 +216,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             let provider = MacOSKeychainSeedProvider(
                 profile: profile,
                 keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
+            keychainSecretProvider = MacOSKeychainSecretProvider(
+                profile: profile,
+                keychainNamespace: hasExplicitRoot ? profileRoot.keychainNamespace : nil)
+            if let encryptedStateStore, let keychainSecretProvider {
+                coreFactory = MacOSRustCoreFactory(
+                    stateStore: encryptedStateStore,
+                    secrets: keychainSecretProvider)
+            }
             let identityStore = HardwareIdentityStore(seedProvider: provider)
             let metadataDefaults = try Self.metadataDefaults(
                 for: profileRoot, hasExplicitRoot: hasExplicitRoot)
@@ -251,6 +261,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             preKeyAPI = nil
             encryptedStateStore = nil
             durableMessagingStore = nil
+            coreFactory = nil
+            keychainSecretProvider = nil
             profileLogger = nil
             profileStatus?.write(.failed, authenticated: false, connected: false)
             profileStatus = nil
@@ -905,7 +917,36 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         } else {
             deviceStatus = "No device enrolled"
         }
+        configureMessagingIfPossible()
         publishProfileStatus()
+    }
+
+    private func configureMessagingIfPossible() {
+        guard messaging == nil,
+              let client,
+              client.isAuthenticated,
+              let factory = coreFactory,
+              let authClient,
+              let preKeyAPI,
+              let endpoint = try? Self.gatewayEndpointFromArguments() else {
+            return
+        }
+        let keyPackageProvider = IOSHTTPMLSKeyPackageProvider(api: preKeyAPI)
+        let directory = MacOSDirectoryChatAdapter(
+            directoryClient: authClient,
+            keyPackageProvider: keyPackageProvider) { [weak self] in
+                guard let self else { return [:] }
+                return Dictionary(uniqueKeysWithValues: self.contacts.map {
+                    ($0.userID, $0.handle)
+                })
+            }
+        do {
+            try installMessaging(factory: factory, endpoint: endpoint, directory: directory)
+        } catch {
+            connectionStatus = "Core unavailable"
+            deliveryState = .dependencyOutage
+            actionError = "Shared Rust core could not be opened for this profile."
+        }
     }
 
     private func publishProfileStatus() {
@@ -1061,6 +1102,22 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         guard let endpoint = URL(string: raw) else {
             throw IOSUsernameAuthError.invalidEndpoint
+        }
+        return endpoint
+    }
+
+    private static func gatewayEndpointFromArguments() throws -> URL {
+        let arguments = CommandLine.arguments
+        let raw: String
+        if let marker = arguments.firstIndex(of: "--gateway-url"),
+           arguments.index(after: marker) < arguments.endIndex {
+            raw = arguments[arguments.index(after: marker)]
+        } else {
+            raw = ProcessInfo.processInfo.environment["LINKS_GATEWAY_ENDPOINT"]
+                ?? "ws://127.0.0.1:8081/v1/connect"
+        }
+        guard let endpoint = URL(string: raw) else {
+            throw IOSConnectionError.invalidEndpoint
         }
         return endpoint
     }

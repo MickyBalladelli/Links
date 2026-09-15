@@ -1,0 +1,530 @@
+import Foundation
+import CLinksDesktopClient
+import LinksClient
+import LinksKeyStore
+
+private final class MacOSRustCoreCallbackBox: @unchecked Sendable {
+    let signer: any SharedCoreIdentitySigner
+    let secrets: MacOSKeychainSecretProvider
+    let stateStore: MacOSEncryptedStateStore
+    var transport: (any IOSCoreTransport)?
+    var onText: ((IOSReceivedTextMessage) -> Void)?
+
+    init(signer: any SharedCoreIdentitySigner,
+         secrets: MacOSKeychainSecretProvider,
+         stateStore: MacOSEncryptedStateStore) {
+        self.signer = signer
+        self.secrets = secrets
+        self.stateStore = stateStore
+    }
+}
+
+private func callbackBox(_ pointer: UnsafeMutableRawPointer?) -> MacOSRustCoreCallbackBox? {
+    guard let pointer else { return nil }
+    return Unmanaged<MacOSRustCoreCallbackBox>.fromOpaque(pointer).takeUnretainedValue()
+}
+
+private func callbackData(_ pointer: UnsafePointer<UInt8>?, _ length: Int) -> Data? {
+    guard length >= 0, (length == 0 || pointer != nil) else { return nil }
+    guard let pointer else { return Data() }
+    return Data(bytes: pointer, count: length)
+}
+
+private func callbackKey(_ pointer: UnsafePointer<UInt8>?, _ length: Int) -> String? {
+    guard let data = callbackData(pointer, length),
+          let key = String(data: data, encoding: .utf8) else { return nil }
+    return key
+}
+
+private func callbackStatus(_ error: Error) -> Int32 {
+    if error is MacOSKeychainSecretProvider.SecretError {
+        return Int32(LINKS_DESKTOP_AUTHENTICATION)
+    }
+    return Int32(LINKS_DESKTOP_PROVIDER)
+}
+
+private func macOSRustSign(
+    _ context: UnsafeMutableRawPointer?,
+    _ bytes: UnsafePointer<UInt8>?,
+    _ length: Int,
+    _ output: UnsafeMutablePointer<UInt8>?) -> Int32 {
+    guard let box = callbackBox(context),
+          let bytes = callbackData(bytes, length),
+          let output else { return Int32(LINKS_DESKTOP_INVALID) }
+    do {
+        let signature = try box.signer.sign(bytes)
+        guard signature.count == 64 else { return Int32(LINKS_DESKTOP_AUTHENTICATION) }
+        signature.withUnsafeBytes { raw in
+            output.initialize(from: raw.bindMemory(to: UInt8.self).baseAddress!, count: 64)
+        }
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return callbackStatus(error)
+    }
+}
+
+private func macOSRustStoreSecret(
+    _ context: UnsafeMutableRawPointer?,
+    _ key: UnsafePointer<UInt8>?,
+    _ keyLength: Int,
+    _ secret: UnsafePointer<UInt8>?,
+    _ secretLength: Int) -> Int32 {
+    guard let box = callbackBox(context),
+          let key = callbackKey(key, keyLength),
+          let secret = callbackData(secret, secretLength) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        try box.secrets.store(secret, for: key)
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return callbackStatus(error)
+    }
+}
+
+private func macOSRustLoadSecret(
+    _ context: UnsafeMutableRawPointer?,
+    _ key: UnsafePointer<UInt8>?,
+    _ keyLength: Int,
+    _ output: UnsafeMutablePointer<UInt8>?,
+    _ capacity: Int,
+    _ outputLength: UnsafeMutablePointer<Int>?) -> Int32 {
+    guard let box = callbackBox(context),
+          let key = callbackKey(key, keyLength),
+          let outputLength else { return Int32(LINKS_DESKTOP_INVALID) }
+    do {
+        let secret = try box.secrets.load(for: key)
+        outputLength.pointee = secret.count
+        guard let output, capacity >= secret.count else {
+            return Int32(LINKS_DESKTOP_INVALID)
+        }
+        secret.withUnsafeBytes { raw in
+            output.initialize(from: raw.bindMemory(to: UInt8.self).baseAddress!, count: secret.count)
+        }
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        outputLength.pointee = 0
+        return callbackStatus(error)
+    }
+}
+
+private func macOSRustDeleteSecret(
+    _ context: UnsafeMutableRawPointer?,
+    _ key: UnsafePointer<UInt8>?,
+    _ keyLength: Int) -> Int32 {
+    guard let box = callbackBox(context), let key = callbackKey(key, keyLength) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        try box.secrets.delete(key)
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return callbackStatus(error)
+    }
+}
+
+private func macOSRustLoadState(
+    _ context: UnsafeMutableRawPointer?,
+    _ output: UnsafeMutablePointer<UInt8>?,
+    _ capacity: Int,
+    _ outputLength: UnsafeMutablePointer<Int>?) -> Int32 {
+    guard let box = callbackBox(context), let outputLength else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        guard let state = try box.stateStore.read() else {
+            outputLength.pointee = 0
+            return Int32(LINKS_DESKTOP_OK)
+        }
+        outputLength.pointee = state.count
+        guard let output, capacity >= state.count else {
+            return Int32(LINKS_DESKTOP_INVALID)
+        }
+        state.withUnsafeBytes { raw in
+            output.initialize(from: raw.bindMemory(to: UInt8.self).baseAddress!, count: state.count)
+        }
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        outputLength.pointee = 0
+        return Int32(LINKS_DESKTOP_PROVIDER)
+    }
+}
+
+private func macOSRustSaveState(
+    _ context: UnsafeMutableRawPointer?,
+    _ bytes: UnsafePointer<UInt8>?,
+    _ length: Int) -> Int32 {
+    guard let box = callbackBox(context), let bytes = callbackData(bytes, length) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        try box.stateStore.write(bytes)
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return Int32(LINKS_DESKTOP_PROVIDER)
+    }
+}
+
+private func macOSRustSendFrame(
+    _ context: UnsafeMutableRawPointer?,
+    _ bytes: UnsafePointer<UInt8>?,
+    _ length: Int) -> Int32 {
+    guard let box = callbackBox(context), let bytes = callbackData(bytes, length),
+          let transport = box.transport else { return Int32(LINKS_DESKTOP_PROVIDER) }
+    return transport.send(bytes) ? Int32(LINKS_DESKTOP_OK) : Int32(LINKS_DESKTOP_PROVIDER)
+}
+
+private func macOSRustText(
+    _ context: UnsafeMutableRawPointer?,
+    _ conversation: UnsafePointer<UInt8>?,
+    _ conversationLength: Int,
+    _ sender: UnsafePointer<UInt8>?,
+    _ senderLength: Int,
+    _ text: UnsafePointer<UInt8>?,
+    _ textLength: Int,
+    _ sequenceID: UInt64,
+    _ sentAtMs: UInt64) -> Int32 {
+    guard let box = callbackBox(context),
+          let conversation = callbackData(conversation, conversationLength),
+          let sender = callbackData(sender, senderLength),
+          let text = callbackData(text, textLength),
+          let conversationID = String(data: conversation, encoding: .utf8),
+          let senderDeviceID = String(data: sender, encoding: .utf8),
+          let text = String(data: text, encoding: .utf8) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        let message = try IOSReceivedTextMessage(
+            conversationID: conversationID,
+            senderDeviceID: senderDeviceID,
+            text: text,
+            sequenceID: sequenceID,
+            sentAtMs: sentAtMs)
+        box.onText?(message)
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+}
+
+private func coreError(for status: Int32) -> Error {
+    switch status {
+    case Int32(LINKS_DESKTOP_AUTHENTICATION): return IOSMessagingError.notConnected
+    case Int32(LINKS_DESKTOP_STALE_CURSOR): return IOSMessagingError.staleCursorRecoveryUnavailable
+    default: return IOSMessagingError.notConnected
+    }
+}
+
+private final class MacOSRustSharedCore: SharedClientCore {
+    let userID: String
+    let deviceID: String
+    private let pointer: UnsafeMutablePointer<LinksDesktopCore>
+    private let callbacks: MacOSRustCoreCallbackBox
+    private let lock = NSLock()
+    private var currentIssue: IOSMessagingIssue?
+
+    init(identity: SharedCoreIdentity,
+         signer: any SharedCoreIdentitySigner,
+         stateStore: MacOSEncryptedStateStore,
+         secrets: MacOSKeychainSecretProvider) throws {
+        guard let credential = identity.mlsCredential else {
+            throw IOSClientError.metadataUnavailable
+        }
+        let callbacks = MacOSRustCoreCallbackBox(
+            signer: signer, secrets: secrets, stateStore: stateStore)
+        var callbackTable = LinksDesktopCoreCallbacks(
+            abi_version: 1,
+            context: Unmanaged.passUnretained(callbacks).toOpaque(),
+            sign: macOSRustSign,
+            store_secret: macOSRustStoreSecret,
+            load_secret: macOSRustLoadSecret,
+            delete_secret: macOSRustDeleteSecret,
+            load_state: macOSRustLoadState,
+            save_state: macOSRustSaveState,
+            send_frame: macOSRustSendFrame,
+            on_text: macOSRustText,
+            identity_public_key: Array(identity.identity.publicKey))
+        var created: UnsafeMutablePointer<LinksDesktopCore>?
+        let status = credential.withUnsafeBytes { credentialBytes in
+            identity.userID.withCString { userBytes in
+                identity.deviceID.withCString { deviceBytes in
+                    withUnsafeMutablePointer(to: &callbackTable) { callbackPointer in
+                        links_desktop_core_create(
+                            userBytes.assumingMemoryBound(to: UInt8.self),
+                            identity.userID.utf8.count,
+                            deviceBytes.assumingMemoryBound(to: UInt8.self),
+                            identity.deviceID.utf8.count,
+                            credentialBytes.bindMemory(to: UInt8.self).baseAddress!,
+                            credential.count,
+                            callbackPointer,
+                            &created)
+                    }
+                }
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK), let created else {
+            throw coreError(for: status)
+        }
+        userID = identity.userID
+        deviceID = identity.deviceID
+        pointer = created
+        self.callbacks = callbacks
+    }
+
+    deinit {
+        links_desktop_core_destroy(pointer)
+    }
+
+    var messagingIssue: IOSMessagingIssue? {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentIssue
+    }
+
+    var pendingOutboxCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        var count = 0
+        _ = links_desktop_core_pending_outbox_count(pointer, &count)
+        return count
+    }
+
+    func durableCursor() throws -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        var cursor: UInt64 = 0
+        let status = links_desktop_core_durable_cursor(pointer, &cursor)
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        return cursor
+    }
+
+    func createHello(accessToken: String, lastSeenCursor: UInt64) throws -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        var buffer = Data(count: 1024 * 1024)
+        var length = 0
+        let status = buffer.withUnsafeMutableBytes { output in
+            accessToken.withCString { token in
+                links_desktop_core_create_hello(
+                    pointer,
+                    token.assumingMemoryBound(to: UInt8.self),
+                    accessToken.utf8.count,
+                    lastSeenCursor,
+                    output.bindMemory(to: UInt8.self).baseAddress!,
+                    buffer.count,
+                    &length)
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else {
+            currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
+                ? .staleCursor : .authenticationExpired
+            throw coreError(for: status)
+        }
+        buffer.removeSubrange(length..<buffer.count)
+        return buffer
+    }
+
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           fullSync: Bool,
+                           onTextMessage: (IOSReceivedTextMessage) -> Void)
+        throws -> IOSCoreFrameResult {
+        lock.lock()
+        callbacks.transport = transport
+        callbacks.onText = onTextMessage
+        let status = frame.withUnsafeBytes { bytes in
+            links_desktop_core_handle_server_frame(
+                pointer,
+                bytes.bindMemory(to: UInt8.self).baseAddress!,
+                frame.count)
+        }
+        callbacks.transport = nil
+        callbacks.onText = nil
+        if status != Int32(LINKS_DESKTOP_OK) {
+            currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
+                ? .staleCursor : status == Int32(LINKS_DESKTOP_AUTHENTICATION)
+                    ? .authenticationExpired : .dependencyOutage
+        }
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        return fullSync ? .recoveryComplete : .pending
+    }
+
+    func retryOutbox(transport: any IOSCoreTransport) throws {
+        lock.lock()
+        callbacks.transport = transport
+        let status = links_desktop_core_retry_outbox(pointer)
+        callbacks.transport = nil
+        if status != Int32(LINKS_DESKTOP_OK) { currentIssue = .sendFailed }
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+    }
+
+    func resetReplayCursorForRecovery() throws {
+        lock.lock()
+        let status = links_desktop_core_reset_replay_cursor(pointer)
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        currentIssue = nil
+    }
+
+    func maintainPreKeyInventory(accessToken: String, api: any IOSPreKeyAPI)
+        async throws -> IOSPreKeyInventory {
+        let existing = try await api.inventory(accessToken: accessToken)
+        let curve = max(0, 100 - Int(existing.oneTimeCurvePreKeys))
+        let kem = max(0, 100 - Int(existing.oneTimeKEMPreKeys))
+        let uploadBytes = try generatePreKeyUpload(curve: UInt32(curve), kem: UInt32(kem))
+        let upload = try IOSPreKeyUpload(protobuf: uploadBytes)
+        let inventory = try await api.upload(accessToken: accessToken, upload: upload)
+        let package = try generateMLSKeyPackage()
+        if let api = api as? IOSPreKeyHTTPClient {
+            try await api.uploadMLSKeyPackage(accessToken: accessToken, keyPackage: package)
+        }
+        return inventory
+    }
+
+    func initializeDirectConversation(
+        conversationID: String,
+        recipientUserID: String,
+        recipientDevices: [IOSClaimedRecipientDevice],
+        transport: any IOSCoreTransport) throws {
+        lock.lock()
+        callbacks.transport = transport
+        defer {
+            callbacks.transport = nil
+            lock.unlock()
+        }
+        for recipient in recipientDevices {
+            let status = recipient.userID.withCString { user in
+                recipient.deviceID.withCString { device in
+                    recipient.identityPublicKey.withUnsafeBytes { identityKey in
+                        recipient.preKeyBundle.withUnsafeBytes { bundle in
+                            recipient.mlsCredential.withUnsafeBytes { credential in
+                                recipient.mlsKeyPackage.withUnsafeBytes { package in
+                                    links_desktop_core_set_recipient(
+                                        pointer,
+                                        user.assumingMemoryBound(to: UInt8.self), recipient.userID.utf8.count,
+                                        device.assumingMemoryBound(to: UInt8.self), recipient.deviceID.utf8.count,
+                                        identityKey.bindMemory(to: UInt8.self).baseAddress!, recipient.identityPublicKey.count,
+                                        bundle.bindMemory(to: UInt8.self).baseAddress!, recipient.preKeyBundle.count,
+                                        credential.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsCredential.count,
+                                        package.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsKeyPackage.count)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        }
+    }
+
+    func sendText(conversationID: String, recipientUserID: String, text: String,
+                  transport: any IOSCoreTransport) throws {
+        lock.lock()
+        callbacks.transport = transport
+        let status = conversationID.withCString { conversation in
+            recipientUserID.withCString { recipient in
+                text.withCString { text in
+                    links_desktop_core_send_text(
+                        pointer,
+                        conversation.assumingMemoryBound(to: UInt8.self), conversationID.utf8.count,
+                        recipient.assumingMemoryBound(to: UInt8.self), recipientUserID.utf8.count,
+                        text.assumingMemoryBound(to: UInt8.self), text.utf8.count)
+                }
+            }
+        }
+        callbacks.transport = nil
+        if status != Int32(LINKS_DESKTOP_OK) { currentIssue = .sendFailed }
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+    }
+
+    private func generatePreKeyUpload(curve: UInt32, kem: UInt32) throws -> Data {
+        var buffer = Data(count: 1024 * 1024)
+        var length = 0
+        let status = buffer.withUnsafeMutableBytes { output in
+            links_desktop_core_generate_prekey_upload(
+                pointer, curve, kem,
+                output.bindMemory(to: UInt8.self).baseAddress!, buffer.count, &length)
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        buffer.removeSubrange(length..<buffer.count)
+        return buffer
+    }
+
+    private func generateMLSKeyPackage() throws -> Data {
+        var buffer = Data(count: 1024 * 1024)
+        var length = 0
+        let status = buffer.withUnsafeMutableBytes { output in
+            links_desktop_core_generate_mls_key_package(
+                pointer,
+                output.bindMemory(to: UInt8.self).baseAddress!, buffer.count, &length)
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        buffer.removeSubrange(length..<buffer.count)
+        return buffer
+    }
+}
+
+final class MacOSRustCoreFactory: SharedClientCoreFactory {
+    private let stateStore: MacOSEncryptedStateStore
+    private let secrets: MacOSKeychainSecretProvider
+
+    init(stateStore: MacOSEncryptedStateStore,
+         secrets: MacOSKeychainSecretProvider) {
+        self.stateStore = stateStore
+        self.secrets = secrets
+    }
+
+    func makeCore(identity: SharedCoreIdentity,
+                  signer: any SharedCoreIdentitySigner) throws -> any SharedClientCore {
+        try MacOSRustSharedCore(
+            identity: identity,
+            signer: signer,
+            stateStore: stateStore,
+            secrets: secrets)
+    }
+}
+
+final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
+    private let directoryClient: IOSUsernameAuthClient
+    private let keyPackageProvider: IOSHTTPMLSKeyPackageProvider
+    private let handles: () -> [String: String]
+
+    init(directoryClient: IOSUsernameAuthClient,
+         keyPackageProvider: IOSHTTPMLSKeyPackageProvider,
+         handles: @escaping () -> [String: String]) {
+        self.directoryClient = directoryClient
+        self.keyPackageProvider = keyPackageProvider
+        self.handles = handles
+    }
+
+    func queryRecipientDevices(accessToken: String, recipientUserID: String)
+        async throws -> [IOSRecipientDeviceDescriptor] {
+        guard let handle = handles()[recipientUserID] else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        let directory = try await directoryClient.lookup(handle: handle)
+        guard directory.userID == recipientUserID,
+              !directory.devices.isEmpty,
+              directory.devices.count <= 100 else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        var descriptors = [IOSRecipientDeviceDescriptor]()
+        descriptors.reserveCapacity(directory.devices.count)
+        for device in directory.devices {
+            let package = try await keyPackageProvider.keyPackage(
+                accessToken: accessToken,
+                userID: directory.userID,
+                deviceID: device.deviceID,
+                mlsNodeID: device.mlsNodeID,
+                mlsCredential: device.mlsCredential)
+            descriptors.append(try IOSRecipientDeviceDescriptor(
+                userID: directory.userID,
+                deviceID: device.deviceID,
+                identityPublicKey: device.identityPublicKey,
+                mlsKeyPackage: package))
+        }
+        return descriptors
+    }
+}
