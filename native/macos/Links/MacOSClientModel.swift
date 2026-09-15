@@ -372,9 +372,29 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             } catch {
                 guard let self else { return }
                 self.isAuthenticating = false
-                self.onboardingError = "Username auth failed. Check the handle and local auth service."
+                self.onboardingError = Self.usernameAuthenticationErrorMessage(error)
             }
         }
+    }
+
+    private static func usernameAuthenticationErrorMessage(_ error: Error) -> String {
+        if let clientError = error as? IOSClientError {
+            switch clientError {
+            case .identityReuse:
+                return "This profile is already linked to another account. Use Log in or start a new profile."
+            default:
+                break
+            }
+        }
+        if let authError = error as? IOSUsernameAuthError {
+            switch authError {
+            case .invalidHandle:
+                return "Use a valid lowercase username."
+            default:
+                break
+            }
+        }
+        return "Username auth failed. Check the handle and local auth service."
     }
 
     func startOTPEnrollment() {
