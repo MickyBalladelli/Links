@@ -410,6 +410,7 @@ private struct StateRow: View {
 
 private struct LinksConversationDetail: View {
     @ObservedObject var model: LinksMacOSAppModel
+    @State private var repairConfirmationPresented = false
 
     var body: some View {
         if let conversation = model.selectedConversation {
@@ -423,11 +424,18 @@ private struct LinksConversationDetail: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Initialize secure chat") {
-                        model.initializeSelectedConversation()
+                    HStack(spacing: 8) {
+                        Button("Initialize secure chat") {
+                            model.initializeSelectedConversation()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.canInitializeSelectedConversation)
+                        Button("Repair secure chat") {
+                            repairConfirmationPresented = true
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.canInitializeSelectedConversation)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.canInitializeSelectedConversation)
                     Text(model.connectionStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -448,6 +456,14 @@ private struct LinksConversationDetail: View {
                 MessageList(messages: conversation.messages)
                 Divider()
                 ComposerView(model: model)
+            }
+            .alert("Repair secure chat?", isPresented: $repairConfirmationPresented) {
+                Button("Repair", role: .destructive) {
+                    model.resetSelectedConversation()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This replaces the broken encryption group. Messages already stuck in the old group cannot be recovered and will be discarded from delivery.")
             }
         } else {
             VStack(spacing: 14) {

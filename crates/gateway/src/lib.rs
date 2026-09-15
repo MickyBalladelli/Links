@@ -685,11 +685,14 @@ where
                 if lease.gateway_id != self.config.gateway_id {
                     return Err(GatewayError::Unavailable);
                 }
-                Ok(vec![GatewayAction::LocalMlsBootstrap {
-                    lease,
-                    request_id,
-                    bootstrap,
-                }])
+                Ok(vec![
+                    accepted_request(request_id.clone()),
+                    GatewayAction::LocalMlsBootstrap {
+                        lease,
+                        request_id,
+                        bootstrap,
+                    },
+                ])
             }
         }
     }
@@ -782,10 +785,18 @@ fn validate_request(frame: &v1::ClientFrame) -> Result<(), GatewayError> {
 }
 
 fn accepted(request_id: String, envelope: &v1::Envelope) -> v1::ServerFrame {
+    accepted_request_with_id(request_id, envelope.envelope_id.clone())
+}
+
+fn accepted_request(request_id: String) -> GatewayAction {
+    GatewayAction::Server(accepted_request_with_id(request_id.clone(), request_id))
+}
+
+fn accepted_request_with_id(request_id: String, accepted_id: String) -> v1::ServerFrame {
     v1::ServerFrame {
         request_id,
         body: Some(v1::server_frame::Body::Accepted(v1::Accepted {
-            envelope_id: envelope.envelope_id.clone(),
+            envelope_id: accepted_id,
         })),
     }
 }

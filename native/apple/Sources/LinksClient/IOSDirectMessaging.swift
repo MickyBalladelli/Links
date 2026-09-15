@@ -78,6 +78,7 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
     private let lock = NSLock()
     private var core: (any SharedClientCore)?
     private var connection: IOSConnectionManager?
+    private var retryTimer: DispatchSourceTimer?
     private var currentState = State.stopped
     private var coreFailed = false
 
@@ -141,6 +142,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         let manager = connection
         connection = nil
         core = nil
+        retryTimer?.cancel()
+        retryTimer = nil
         coreFailed = false
         currentState = .stopped
         lock.unlock()
@@ -231,6 +234,55 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                 recipientDevices: claimed,
                 transport: manager)
         }
+        scheduleRetry(for: manager)
+    }
+
+    /// Recreate a direct MLS group when an earlier bootstrap was lost. The
+    /// recipient explicitly discards the stuck mailbox batch after it joins.
+    public func resetFirstDirectConversation(
+        conversationID: String,
+        recipientUserID: String,
+        directory: any IOSDirectChatDirectory,
+        preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID),
+              Self.isValidTextID(recipientUserID) else {
+            throw IOSMessagingError.invalidMessage
+        }
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        let token = try client.accessToken()
+        let descriptors = try await directory.queryRecipientDevices(
+            accessToken: token, recipientUserID: recipientUserID)
+        guard !descriptors.isEmpty, descriptors.count <= 100,
+              descriptors.allSatisfy({ $0.userID == recipientUserID }) else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        var deviceIDs = Set<String>()
+        var claimed = [IOSClaimedRecipientDevice]()
+        claimed.reserveCapacity(descriptors.count)
+        for descriptor in descriptors {
+            guard deviceIDs.insert(descriptor.deviceID).inserted else {
+                throw IOSPreKeyError.invalidRecipient
+            }
+            let bundle = try await preKeyAPI.claim(
+                accessToken: token, deviceID: descriptor.deviceID)
+            claimed.append(try IOSClaimedRecipientDevice(
+                descriptor: descriptor, bundle: bundle))
+        }
+        try coreQueue.sync {
+            try sharedCore.resetDirectConversation(
+                conversationID: conversationID,
+                recipientUserID: recipientUserID,
+                recipientDevices: claimed,
+                transport: manager)
+        }
+        scheduleRetry(for: manager)
     }
 
     public func shutdown() {
@@ -238,6 +290,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         let manager = connection
         connection = nil
         core = nil
+        retryTimer?.cancel()
+        retryTimer = nil
         coreFailed = false
         currentState = .stopped
         lock.unlock()
@@ -266,6 +320,7 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                 recipientUserID: recipientUserID,
                 text: text,
                 transport: manager)
+            scheduleRetry(for: manager)
         } catch {
             let issue = issue(for: sharedCore, error: error, fallback: .sendFailed)
             setState(for: issue)
@@ -436,6 +491,7 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                 if pending > 0 {
                     notifyState(.reconnecting)
                 }
+                scheduleRetry(for: manager)
             } catch {
                 let issue = issue(for: sharedCore, error: error, fallback: .sendFailed)
                 setState(for: issue)
@@ -480,6 +536,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             }
             coreFailed = true
             currentState = state(for: issue)
+            retryTimer?.cancel()
+            retryTimer = nil
             lock.unlock()
             manager.stop()
             notifyState(state(for: issue))
@@ -537,6 +595,54 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         callbackQueue.async { [weak self] in
             guard let self else { return }
             self.delegate?.directMessagingDidFail(self, reason: issue)
+        }
+    }
+
+    private func scheduleRetry(for manager: IOSConnectionManager) {
+        lock.lock()
+        let hasPending = connection === manager
+            && !coreFailed
+            && (core?.pendingRetryCount ?? 0) > 0
+        lock.unlock()
+        guard hasPending else { return }
+        retryTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: coreQueue)
+        timer.schedule(deadline: .now() + 1, repeating: 2)
+        timer.setEventHandler { [weak self, weak manager] in
+            guard let self, let manager else { return }
+            self.retryPendingOutbox(on: manager)
+        }
+        retryTimer = timer
+        timer.resume()
+    }
+
+    private func retryPendingOutbox(on manager: IOSConnectionManager) {
+        lock.lock()
+        guard connection === manager,
+              currentState == .ready,
+              !coreFailed,
+              let sharedCore = core,
+              manager.isConnected else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        do {
+            try sharedCore.retryOutbox(transport: manager)
+            let pending = sharedCore.pendingOutboxCount
+            if pending > 0 {
+                notifyState(.reconnecting)
+            }
+            if sharedCore.pendingRetryCount == 0 {
+                retryTimer?.cancel()
+                retryTimer = nil
+            }
+        } catch {
+            let issue = issue(for: sharedCore, error: error, fallback: .sendFailed)
+            setState(for: issue)
+            retryTimer?.cancel()
+            retryTimer = nil
+            notifyFailure(issue)
         }
     }
 

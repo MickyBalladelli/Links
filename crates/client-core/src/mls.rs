@@ -116,6 +116,25 @@ pub trait MlsEngine {
         Err(CoreError::CryptoUnavailable)
     }
 
+    /// Replace a direct group from a fresh Welcome during explicit recovery.
+    fn reset_direct_group_from_welcome(
+        &mut self,
+        _: &str,
+        _: &[u8],
+    ) -> Result<(), CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
+    /// Create a fresh direct group and return the Welcome that repairs a peer
+    /// which missed the original bootstrap.
+    fn reset_direct_group(
+        &mut self,
+        _: &str,
+        _: &[&[u8]],
+    ) -> Result<PendingCommit, CoreError> {
+        Err(CoreError::CryptoUnavailable)
+    }
+
     /// Ensure a many-to-many group contains the supplied recipient device
     /// leaves. The returned commit must be delivered before it is merged.
     fn ensure_group(&mut self, _: &str, _: &[&[u8]]) -> Result<Option<PendingCommit>, CoreError> {
@@ -854,6 +873,42 @@ where
 
     fn merge_pending_direct_commit(&mut self, conversation_id: &str) -> Result<(), CoreError> {
         self.merge_pending_commit(conversation_id)
+    }
+
+    fn reset_direct_group_from_welcome(
+        &mut self,
+        conversation_id: &str,
+        welcome: &[u8],
+    ) -> Result<(), CoreError> {
+        let group_id = group_id(conversation_id)?;
+        if let Some(mut group) = MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|_| CoreError::Provider)?
+        {
+            group
+                .delete(self.provider.storage())
+                .map_err(|_| CoreError::Provider)?;
+        }
+        self.join_group_with_id(group_id, welcome, DIRECT_MAX_USERS)
+    }
+
+    fn reset_direct_group(
+        &mut self,
+        conversation_id: &str,
+        key_packages: &[&[u8]],
+    ) -> Result<PendingCommit, CoreError> {
+        if key_packages.is_empty() {
+            return Err(CoreError::Authentication);
+        }
+        let group_id = group_id(conversation_id)?;
+        if let Some(mut group) = MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|_| CoreError::Provider)?
+        {
+            group
+                .delete(self.provider.storage())
+                .map_err(|_| CoreError::Provider)?;
+        }
+        self.create_group_with_id(group_id)?;
+        self.add_members(conversation_id, key_packages)
     }
 
     fn merge_pending_group_commit(&mut self, conversation_id: &str) -> Result<(), CoreError> {

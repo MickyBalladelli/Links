@@ -108,6 +108,8 @@ struct PersistedState {
     bindings: Vec<PersistedBinding>,
     #[prost(bytes, repeated, tag = "7")]
     bootstrap_outbox: Vec<Vec<u8>>,
+    #[prost(bool, tag = "8")]
+    discard_next_batch: bool,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -337,6 +339,7 @@ pub struct LinksDesktopCore {
     bootstrap_outbox: Vec<Vec<u8>>,
     recipients: HashMap<String, Vec<RecipientRecord>>,
     pending_batch: Option<v1::SyncBatch>,
+    discard_next_batch: bool,
 }
 
 unsafe fn input<'a>(pointer: *const u8, length: usize, maximum: usize) -> Result<&'a [u8], i32> {
@@ -448,6 +451,7 @@ impl LinksDesktopCore {
             prekey_profile: self.profile.as_ref().map(|profile| profile.profile.encode_to_vec()),
             outbox: self.outbox.clone(),
             bootstrap_outbox: self.bootstrap_outbox.clone(),
+            discard_next_batch: self.discard_next_batch,
             bindings: bindings.values().map(|binding| PersistedBinding {
                 user_id: binding.user_id.as_bytes().to_vec(),
                 device_id: binding.device_id.as_bytes().to_vec(),
@@ -529,6 +533,7 @@ impl LinksDesktopCore {
             self.insert_binding(binding)?;
         }
         self.bootstrap_outbox = state.bootstrap_outbox;
+        self.discard_next_batch = state.discard_next_batch;
         self.recover_group_bindings()?;
         Ok(())
     }
@@ -647,6 +652,7 @@ impl LinksDesktopCore {
         &mut self,
         conversation_id: &str,
         recipient_user_id: &str,
+        reset_group: bool,
     ) -> Result<(), CoreError> {
         protocol::validate_id(conversation_id)?;
         protocol::validate_id(recipient_user_id)?;
@@ -664,9 +670,12 @@ impl LinksDesktopCore {
             .iter()
             .map(|record| record.mls_key_package.as_slice())
             .collect::<Vec<_>>();
-        let Some(pending) = self.client.mls_mut().ensure_direct_group(conversation_id, &packages)? else {
-            return Ok(());
+        let pending = if reset_group {
+            Some(self.client.mls_mut().reset_direct_group(conversation_id, &packages)?)
+        } else {
+            self.client.mls_mut().ensure_direct_group(conversation_id, &packages)?
         };
+        let Some(pending) = pending else { return Ok(()) };
         let welcome = pending.welcome.as_ref().ok_or(CoreError::Provider)?;
         let mut bootstraps = Vec::with_capacity(records.len());
         for record in records {
@@ -678,6 +687,7 @@ impl LinksDesktopCore {
                     welcome: welcome.clone(),
                     sender_mls_credential: self.mls_credential.clone(),
                     sender_identity_public_key: self.callbacks.identity_public_key.to_vec(),
+                    reset_group,
                 },
             ))?;
             bootstraps.push(bootstrap);
@@ -691,13 +701,21 @@ impl LinksDesktopCore {
         self.save()
     }
 
+    fn reset_direct_group(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+    ) -> Result<(), CoreError> {
+        self.initialize_direct_group(conversation_id, recipient_user_id, true)
+    }
+
     fn send_text(&mut self, conversation_id: &str, recipient_user_id: &str, text: &str) -> Result<(), CoreError> {
         protocol::validate_id(conversation_id)?;
         protocol::validate_id(recipient_user_id)?;
         if recipient_user_id == self.client.user_id() || text.is_empty() || text.len() > protocol::MAX_MESSAGE_BYTES {
             return Err(CoreError::Authentication);
         }
-        self.initialize_direct_group(conversation_id, recipient_user_id)?;
+        self.initialize_direct_group(conversation_id, recipient_user_id, false)?;
         let records = self.recipients.get(recipient_user_id).ok_or(CoreError::Authentication)?;
         if records.is_empty() || records.len() > protocol::MAX_FANOUT_DEVICES {
             return Err(CoreError::Authentication);
@@ -755,10 +773,20 @@ impl LinksDesktopCore {
             v1::server_frame::Body::Welcome(_) => Ok(()),
             v1::server_frame::Body::Accepted(accepted) => {
                 self.outbox.retain(|frame| {
-                    v1::ClientFrame::decode(frame.as_slice()).ok().and_then(|frame| match frame.body {
-                        Some(v1::client_frame::Body::Send(envelope)) => Some(envelope.envelope_id != accepted.envelope_id),
-                        _ => Some(true),
-                    }).unwrap_or(true)
+                    match v1::ClientFrame::decode(frame.as_slice()).ok() {
+                        Some(frame) => match frame.body {
+                            Some(v1::client_frame::Body::Send(envelope)) => {
+                                envelope.envelope_id != accepted.envelope_id
+                            }
+                            _ => true,
+                        },
+                        None => true,
+                    }
+                });
+                self.bootstrap_outbox.retain(|frame| {
+                    v1::ClientFrame::decode(frame.as_slice())
+                        .map(|frame| frame.request_id != accepted.envelope_id)
+                        .unwrap_or(true)
                 });
                 self.save()
             }
@@ -790,9 +818,23 @@ impl LinksDesktopCore {
                 if binding.device_id == local_device || binding.public_key != sender_public_key {
                     return Err(CoreError::Authentication);
                 }
-                self.insert_binding(binding)?;
-                self.client.mls_mut().join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
+                self.insert_binding(binding.clone())?;
+                if bootstrap.reset_group {
+                    self.client
+                        .mls_mut()
+                        .reset_direct_group_from_welcome(
+                            &bootstrap.conversation_id,
+                            &bootstrap.welcome,
+                        )?;
+                } else {
+                    self.client
+                        .mls_mut()
+                        .join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
+                }
                 self.save()?;
+                if bootstrap.reset_group {
+                    self.discard_pending_batch()?;
+                }
                 self.retry_pending_batch()
             }.map_err(local_frame_error),
             v1::server_frame::Body::Batch(batch) => self.handle_batch(batch).map_err(local_frame_error),
@@ -829,9 +871,32 @@ impl LinksDesktopCore {
                         }
                     }
                     Err(CoreError::Authentication) => {
-                        let storage = self.client.mls_mut().provider_mut().storage();
-                        let mut values = storage.values.write().map_err(|_| CoreError::Provider)?;
-                        *values = storage_backup;
+                        {
+                            let storage = self.client.mls_mut().provider_mut().storage();
+                            let mut values = storage.values.write().map_err(|_| CoreError::Provider)?;
+                            *values = storage_backup;
+                        }
+                        if self.discard_next_batch {
+                            self.discard_next_batch = batch.next_cursor < batch.high_watermark;
+                            self.cursor = batch.next_cursor;
+                            self.save()?;
+                            let ack = self.encode_client_frame(v1::client_frame::Body::Ack(
+                                v1::QueueAck {
+                                    through_cursor: self.cursor,
+                                },
+                            ))?;
+                            self.send_frame(&ack)?;
+                            if self.cursor < batch.high_watermark {
+                                let replay = self.encode_client_frame(
+                                    v1::client_frame::Body::Replay(v1::Replay {
+                                        after_cursor: self.cursor,
+                                        limit: protocol::MAX_BATCH_ITEMS as u32,
+                                    }),
+                                )?;
+                                self.send_frame(&replay)?;
+                            }
+                            return Ok(());
+                        }
                         self.pending_batch = Some(batch);
                         return Ok(())
                     }
@@ -877,6 +942,36 @@ impl LinksDesktopCore {
                 Err(error)
             }
         }
+    }
+
+    fn discard_pending_batch(&mut self) -> Result<(), CoreError> {
+        let Some(batch) = self.pending_batch.take() else {
+            self.discard_next_batch = true;
+            self.save()?;
+            return Ok(())
+        };
+        if batch.after_cursor != self.cursor || batch.next_cursor < self.cursor {
+            return Err(CoreError::InvalidSync);
+        }
+        self.cursor = batch.next_cursor;
+        self.discard_next_batch = batch.next_cursor < batch.high_watermark;
+        self.save()?;
+        let ack = self.encode_client_frame(v1::client_frame::Body::Ack(
+            v1::QueueAck {
+                through_cursor: self.cursor,
+            },
+        ))?;
+        self.send_frame(&ack)?;
+        if self.cursor < batch.high_watermark {
+            let replay = self.encode_client_frame(v1::client_frame::Body::Replay(
+                v1::Replay {
+                    after_cursor: self.cursor,
+                    limit: protocol::MAX_BATCH_ITEMS as u32,
+                },
+            ))?;
+            self.send_frame(&replay)?;
+        }
+        Ok(())
     }
 }
 
@@ -965,6 +1060,7 @@ pub unsafe extern "C" fn links_desktop_core_create(
                 bootstrap_outbox: Vec::new(),
                 recipients: HashMap::new(),
                 pending_batch: None,
+                discard_next_batch: false,
             };
             if let Some(state) = load_state(callbacks).map_err(status)? {
                 core.restore_state(state).map_err(status)?;
@@ -1003,6 +1099,15 @@ pub unsafe extern "C" fn links_desktop_core_pending_outbox_count(core: *const Li
     boundary(|| {
         if core.is_null() || count.is_null() { return LINKS_DESKTOP_INVALID; }
         unsafe { count.write((*core).outbox.len()) };
+        LINKS_DESKTOP_OK
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_pending_retry_count(core: *const LinksDesktopCore, count: *mut usize) -> i32 {
+    boundary(|| {
+        if core.is_null() || count.is_null() { return LINKS_DESKTOP_INVALID; }
+        unsafe { count.write((*core).outbox.len().saturating_add((*core).bootstrap_outbox.len())) };
         LINKS_DESKTOP_OK
     })
 }
@@ -1167,7 +1272,38 @@ pub unsafe extern "C" fn links_desktop_core_initialize_direct(
                     .to_vec(),
             )
             .map_err(|_| CoreError::Authentication)?;
-            unsafe { (&mut *core).initialize_direct_group(&conversation, &recipient) }
+            unsafe { (&mut *core).initialize_direct_group(&conversation, &recipient, false) }
+        })();
+        result.map_or_else(status, |_| LINKS_DESKTOP_OK)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_reset_direct(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    recipient_user_id: *const u8,
+    recipient_user_id_length: usize,
+) -> i32 {
+    boundary(|| {
+        if core.is_null() {
+            return LINKS_DESKTOP_INVALID;
+        }
+        let result = (|| -> Result<(), CoreError> {
+            let conversation = String::from_utf8(
+                unsafe { input(conversation_id, conversation_id_length, 64) }
+                    .map_err(|_| CoreError::Authentication)?
+                    .to_vec(),
+            )
+            .map_err(|_| CoreError::Authentication)?;
+            let recipient = String::from_utf8(
+                unsafe { input(recipient_user_id, recipient_user_id_length, 64) }
+                    .map_err(|_| CoreError::Authentication)?
+                    .to_vec(),
+            )
+            .map_err(|_| CoreError::Authentication)?;
+            unsafe { (&mut *core).reset_direct_group(&conversation, &recipient) }
         })();
         result.map_or_else(status, |_| LINKS_DESKTOP_OK)
     })

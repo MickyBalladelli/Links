@@ -304,6 +304,14 @@ private final class MacOSRustSharedCore: SharedClientCore {
         return count
     }
 
+    var pendingRetryCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        var count = 0
+        _ = links_desktop_core_pending_retry_count(pointer, &count)
+        return count
+    }
+
     func durableCursor() throws -> UInt64 {
         lock.lock()
         defer { lock.unlock() }
@@ -448,6 +456,54 @@ private final class MacOSRustSharedCore: SharedClientCore {
                     conversationID.utf8.count,
                     UnsafeRawPointer(recipient).assumingMemoryBound(to: UInt8.self),
                     recipientUserID.utf8.count)
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else {
+            currentIssue = .sendFailed
+            throw coreError(for: status)
+        }
+    }
+
+    func resetDirectConversation(
+        conversationID: String,
+        recipientUserID: String,
+        recipientDevices: [IOSClaimedRecipientDevice],
+        transport: any IOSCoreTransport) throws {
+        lock.lock()
+        callbacks.transport = transport
+        defer {
+            callbacks.transport = nil
+            lock.unlock()
+        }
+        for recipient in recipientDevices {
+            let status = recipient.userID.withCString { user in
+                recipient.deviceID.withCString { device in
+                    recipient.identityPublicKey.withUnsafeBytes { identityKey in
+                        recipient.preKeyBundle.withUnsafeBytes { bundle in
+                            recipient.mlsCredential.withUnsafeBytes { credential in
+                                recipient.mlsKeyPackage.withUnsafeBytes { package in
+                                    links_desktop_core_set_recipient(
+                                        pointer,
+                                        UnsafeRawPointer(user).assumingMemoryBound(to: UInt8.self), recipient.userID.utf8.count,
+                                        UnsafeRawPointer(device).assumingMemoryBound(to: UInt8.self), recipient.deviceID.utf8.count,
+                                        identityKey.bindMemory(to: UInt8.self).baseAddress!, recipient.identityPublicKey.count,
+                                        bundle.bindMemory(to: UInt8.self).baseAddress!, recipient.preKeyBundle.count,
+                                        credential.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsCredential.count,
+                                        package.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsKeyPackage.count)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        }
+        let status = conversationID.withCString { conversation in
+            recipientUserID.withCString { recipient in
+                links_desktop_core_reset_direct(
+                    pointer,
+                    UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self), conversationID.utf8.count,
+                    UnsafeRawPointer(recipient).assumingMemoryBound(to: UInt8.self), recipientUserID.utf8.count)
             }
         }
         guard status == Int32(LINKS_DESKTOP_OK) else {

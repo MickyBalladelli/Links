@@ -63,4 +63,5 @@ message MlsBootstrap {
   bytes welcome = 4;
   bytes sender_mls_credential = 5;
   bytes sender_identity_public_key = 6;
+  bool reset_group = 7;
 }

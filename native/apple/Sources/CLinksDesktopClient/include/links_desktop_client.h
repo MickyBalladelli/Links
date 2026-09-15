@@ -59,6 +59,7 @@ int32_t links_desktop_core_create(const uint8_t *user_id, size_t user_id_length,
 void links_desktop_core_destroy(LinksDesktopCore *core);
 int32_t links_desktop_core_durable_cursor(const LinksDesktopCore *core, uint64_t *cursor);
 int32_t links_desktop_core_pending_outbox_count(const LinksDesktopCore *core, size_t *count);
+int32_t links_desktop_core_pending_retry_count(const LinksDesktopCore *core, size_t *count);
 int32_t links_desktop_core_create_hello(const LinksDesktopCore *core, const uint8_t *token,
                                         size_t token_length, uint64_t cursor, uint8_t *output,
                                         size_t capacity, size_t *length);
@@ -82,6 +83,11 @@ int32_t links_desktop_core_initialize_direct(LinksDesktopCore *core,
                                              size_t conversation_id_length,
                                              const uint8_t *recipient_user_id,
                                              size_t recipient_user_id_length);
+int32_t links_desktop_core_reset_direct(LinksDesktopCore *core,
+                                        const uint8_t *conversation_id,
+                                        size_t conversation_id_length,
+                                        const uint8_t *recipient_user_id,
+                                        size_t recipient_user_id_length);
 int32_t links_desktop_core_send_text(LinksDesktopCore *core, const uint8_t *conversation_id,
                                      size_t conversation_id_length, const uint8_t *recipient_user_id,
                                      size_t recipient_user_id_length, const uint8_t *text,

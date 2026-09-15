@@ -855,6 +855,16 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// Claim and verify recipient pre-keys, then stage the first two-user MLS
     /// conversation in the shared client core.
     func initializeSelectedConversation() {
+        initializeSelectedConversation(reset: false)
+    }
+
+    /// Recreate a broken direct MLS group and release the recipient's stuck
+    /// mailbox batch after the fresh bootstrap arrives.
+    func resetSelectedConversation() {
+        initializeSelectedConversation(reset: true)
+    }
+
+    private func initializeSelectedConversation(reset: Bool) {
         guard let selectedConversationID,
               let conversation = conversations.first(where: {
                   $0.id == selectedConversationID
@@ -891,16 +901,26 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         initializedConversationIDs.remove(conversation.id)
-        conversationSetupStatus = "Claiming recipient pre-keys"
+        conversationSetupStatus = reset
+            ? "Repairing secure chat"
+            : "Claiming recipient pre-keys"
         Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.initializingConversationIDs.remove(conversation.id) }
             do {
-                try await messaging.initializeFirstDirectConversation(
-                    conversationID: conversation.id,
-                    recipientUserID: conversation.recipientUserID,
-                    directory: directChatDirectory,
-                    preKeyAPI: preKeyAPI)
+                if reset {
+                    try await messaging.resetFirstDirectConversation(
+                        conversationID: conversation.id,
+                        recipientUserID: conversation.recipientUserID,
+                        directory: directChatDirectory,
+                        preKeyAPI: preKeyAPI)
+                } else {
+                    try await messaging.initializeFirstDirectConversation(
+                        conversationID: conversation.id,
+                        recipientUserID: conversation.recipientUserID,
+                        directory: directChatDirectory,
+                        preKeyAPI: preKeyAPI)
+                }
                 self.conversationSetupStatus = "Secure two-user MLS conversation ready"
                 self.initializedConversationIDs.insert(conversation.id)
                 if self.messaging?.state == .ready {
@@ -915,7 +935,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     self.conversationSetupStatus = "Connect before initializing MLS"
                     self.actionError = "Connection dropped. Click Connect and try again."
                 } else {
-                    self.conversationSetupStatus = "MLS conversation setup failed"
+                    self.conversationSetupStatus = reset
+                        ? "Secure chat repair failed"
+                        : "MLS conversation setup failed"
                     self.actionError = "Recipient pre-key verification or MLS setup failed. "
                         + "Check that the other profile is connected and its pre-keys are ready."
                 }

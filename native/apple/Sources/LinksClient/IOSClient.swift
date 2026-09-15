@@ -45,6 +45,9 @@ public protocol SharedClientCore: AnyObject {
     var messagingIssue: IOSMessagingIssue? { get }
     /// Number of encrypted, durable outbox frames awaiting acceptance.
     var pendingOutboxCount: Int { get }
+    /// Number of durable frames that still need transport retry, including an
+    /// MLS bootstrap that is waiting for the recipient to come online.
+    var pendingRetryCount: Int { get }
     func durableCursor() throws -> UInt64
     func createHello(accessToken: String, lastSeenCursor: UInt64) throws -> Data
     /// Return recoveryComplete only after local inbox/MLS commit and QueueAck.
@@ -62,6 +65,11 @@ public protocol SharedClientCore: AnyObject {
     func maintainPreKeyInventory(accessToken: String, api: any IOSPreKeyAPI)
         async throws -> IOSPreKeyInventory
     func initializeDirectConversation(
+        conversationID: String,
+        recipientUserID: String,
+        recipientDevices: [IOSClaimedRecipientDevice],
+        transport: any IOSCoreTransport) throws
+    func resetDirectConversation(
         conversationID: String,
         recipientUserID: String,
         recipientDevices: [IOSClaimedRecipientDevice],
@@ -109,6 +117,8 @@ public extension SharedClientCore {
     var messagingIssue: IOSMessagingIssue? { nil }
 
     var pendingOutboxCount: Int { 0 }
+
+    var pendingRetryCount: Int { pendingOutboxCount }
 
     func retryOutbox(transport: any IOSCoreTransport) throws {}
 
