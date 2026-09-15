@@ -1,0 +1,20 @@
+[package]
+name = "links-desktop-client-ffi"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+links-client-core.workspace = true
+links-desktop-client = { path = "../desktop-client" }
+links-identity = { path = "../identity" }
+links-protocol.workspace = true
+openmls.workspace = true
+openmls_rust_crypto.workspace = true
+openmls_traits.workspace = true
+prost.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+zeroize.workspace = true
