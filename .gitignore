@@ -6,6 +6,7 @@
 .DS_Store
 /native/apple/.build/
 /native/apple/.swiftpm/
+/native/apple/build/
 /native/android/.gradle/
 /native/android/build/
 /native/android/local.properties
@@ -13,6 +14,8 @@
 /native/macos/.swiftpm/
 /native/macos/DerivedData/
 /native/macos/build/
+/native/ios/DerivedData/
+/native/ios/build/
 /native/macos/Links.xcodeproj/xcuserdata/
 /native/macos/Links.xcodeproj/project.xcworkspace/xcuserdata/
 /.xcode-derived-data/

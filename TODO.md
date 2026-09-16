@@ -913,9 +913,13 @@ Run these checks continuously at the relevant phase boundary, with the full audi
 - [ ] Add a runnable Android application target for end-to-end mobile testing.
   Keep the existing identity/OTP shell, add the shared client-core host, and
   produce an installable Debug APK.
-- [ ] Add a runnable iOS application target for end-to-end mobile testing.
-  Embed `LinksClient` and `LinksKeyStore`, configure signing and entitlements,
-  and produce an installable Debug build for a physical iPhone.
+- [x] Add a runnable iOS application target for end-to-end mobile testing.
+  `native/ios/LinksIOS.xcodeproj` embeds `LinksClient` and `LinksKeyStore`,
+  includes the iOS Keychain entitlement, accepts automatic Apple Development
+  signing, and provides `scripts/build-ios-debug.sh` for an arm64 iPhone build.
+- [ ] Verify the signed iOS Debug build on a physical iPhone.
+  This remains open until Xcode has the iOS platform installed, a registered
+  Apple Development Team, a connected device, and a successful install.
 - [ ] Add QR scanning for signed `links://connect` pairing payloads on Android
   and iOS. Show the account, device, and public-key summary before approval.
 - [ ] Add mobile pairing approval. Validate the signed payload, call
