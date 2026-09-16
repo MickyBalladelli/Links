@@ -5,26 +5,29 @@ struct LinksRootView: View {
     @ObservedObject var model: LinksMacOSAppModel
 
     var body: some View {
-        Group {
-            if model.requiresOnboarding {
-                LinksOnboardingView(model: model)
-            } else if model.requiresAccountAuthentication {
-                LinksAccountOnboardingView(model: model)
-            } else {
-                LinksMessagingView(model: model)
+        VStack(spacing: 0) {
+            Group {
+                if model.requiresOnboarding {
+                    LinksOnboardingView(model: model)
+                } else if model.requiresAccountAuthentication {
+                    LinksAccountOnboardingView(model: model)
+                } else {
+                    LinksMessagingView(model: model)
+                }
             }
-        }
-        .alert("Links", isPresented: actionErrorBinding) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.actionError ?? "")
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             if let error = model.lastError {
                 PersistentErrorBanner(error: error) {
                     model.clearLastError()
                 }
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .alert("Links", isPresented: actionErrorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.actionError ?? "")
         }
     }
 
@@ -47,6 +50,7 @@ private struct PersistentErrorBanner: View {
                 Text("Last error")
                     .font(.headline)
                 Text(error)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
             Spacer(minLength: 12)
@@ -57,6 +61,10 @@ private struct PersistentErrorBanner: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.red.opacity(0.12))
+        .overlay(alignment: .top) {
+            Divider()
+                .overlay(.red.opacity(0.35))
+        }
     }
 }
 
