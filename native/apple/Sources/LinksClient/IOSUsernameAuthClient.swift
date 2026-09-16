@@ -6,6 +6,7 @@ public enum IOSUsernameAuthError: Error {
     case invalidRequest
     case invalidResponse
     case serviceRejected
+    case conflict
     case rateLimited(retryAfterSeconds: Int?)
 }
 
@@ -242,6 +243,9 @@ public final class IOSUsernameAuthClient: Sendable {
                     .flatMap(Int.init)
                 throw IOSUsernameAuthError.rateLimited(retryAfterSeconds: retryAfter)
             }
+            if http.statusCode == 409 {
+                throw IOSUsernameAuthError.conflict
+            }
             throw IOSUsernameAuthError.serviceRejected
         }
         return try decodeObject(data)
@@ -257,6 +261,9 @@ public final class IOSUsernameAuthClient: Sendable {
                 let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
                     .flatMap(Int.init)
                 throw IOSUsernameAuthError.rateLimited(retryAfterSeconds: retryAfter)
+            }
+            if http.statusCode == 409 {
+                throw IOSUsernameAuthError.conflict
             }
             throw IOSUsernameAuthError.serviceRejected
         }

@@ -27,6 +27,15 @@ pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
 pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PRIVACY_PASS_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
+
+fn map_username_registration_write_error(error: sqlx::Error) -> AuthError {
+    match &error {
+        sqlx::Error::Database(database)
+            if database.code().as_deref() == Some("23505") => AuthError::Conflict,
+        _ => AuthError::Unavailable,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountAuthMode {
     Production,
@@ -907,12 +916,14 @@ impl AccountAuth {
             .bind(user_id)
             .bind(Option::<Vec<u8>>::None)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(map_username_registration_write_error)?;
         sqlx::query("INSERT INTO handles (handle,user_id) VALUES ($1,$2)")
             .bind(&request.handle)
             .bind(user_id)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(map_username_registration_write_error)?;
         sqlx::query("INSERT INTO devices (device_id,user_id,mls_node_id,identity_public_key,mls_credential) VALUES ($1,$2,$3,$4,$5)")
             .bind(request.device_id)
             .bind(user_id)
@@ -920,7 +931,8 @@ impl AccountAuth {
             .bind(binding.public_key.as_slice())
             .bind(&credential)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(map_username_registration_write_error)?;
         let session = self
             .issue_session(&mut tx, user_id, request.device_id)
             .await?;

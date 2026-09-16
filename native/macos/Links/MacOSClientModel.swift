@@ -332,6 +332,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     var isConnectionRequested: Bool { connectionRequested }
 
+    var hasBoundAccount: Bool {
+        client?.accountHandle != nil || client?.userID != nil
+    }
+
     var canInitializeSelectedConversation: Bool {
         guard let conversation = selectedConversation, !conversation.isIncoming else {
             return false
@@ -438,6 +442,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         let handle = usernameInput
         let mode = authMode
+        if mode == .register && hasBoundAccount {
+            onboardingError = "This profile is already linked to \(accountStatus). "
+                + "Use Log in, or launch a new profile to register another account."
+            return
+        }
         isAuthenticating = true
         onboardingError = nil
         Task { @MainActor [weak self] in
@@ -473,6 +482,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             switch authError {
             case .invalidHandle:
                 return "Use a valid lowercase username."
+            case .conflict:
+                return "This device or username is already registered. Use Log in or a new profile."
             case .rateLimited(let retryAfterSeconds):
                 if let retryAfterSeconds, retryAfterSeconds >= 60 {
                     let minutes = max(1, (retryAfterSeconds + 59) / 60)

@@ -134,16 +134,38 @@ private struct LinksAccountOnboardingView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 520, alignment: .center)
 
-                Picker("Account action", selection: $model.authMode) {
-                    ForEach(LinksMacOSAuthMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                if model.hasBoundAccount {
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                            .foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Existing profile")
+                                .font(.callout.weight(.semibold))
+                            Text(model.accountStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("Log in")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.secondary)
                     }
+                    .padding(12)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Picker("Account action", selection: $model.authMode) {
+                        ForEach(LinksMacOSAuthMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
                 TextField("Username, for example alice", text: $model.usernameInput)
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.username)
-                Button(model.authMode == .register ? "Register username" : "Log in") {
+                Button(model.authMode == .register && !model.hasBoundAccount
+                       ? "Register username" : "Log in") {
                     model.authenticateUsername()
                 }
                 .buttonStyle(.borderedProminent)
@@ -154,6 +176,12 @@ private struct LinksAccountOnboardingView: View {
                 Text("Auth service: \(model.authEndpointText)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if model.hasBoundAccount {
+                    Text("To create another account, launch Links with a new profile, for example: --profile daryl")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if let error = model.onboardingError {
                     Text(error)
