@@ -3,6 +3,20 @@ import Foundation
 import LinksKeyStore
 import SwiftUI
 
+enum IOSUsernameAction: String, CaseIterable, Identifiable {
+    case register
+    case login
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .register: return "Register"
+        case .login: return "Log in"
+        }
+    }
+}
+
 @MainActor
 final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var status = "Opening secure identity store"
@@ -14,6 +28,8 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var pairingStatus = "No pairing activity"
     @Published var error: String?
+    @Published var username = ""
+    @Published var usernameAction: IOSUsernameAction = .register
     @Published var phone = ""
     @Published var verificationCode = ""
     @Published var channel: IOSOTPChannel = .sms
@@ -78,6 +94,44 @@ final class IOSMobileAppModel: ObservableObject {
                     self.status = "Identity creation failed"
                     self.error = "Secure identity creation failed. Check device security settings."
                 }
+            }
+        }
+    }
+
+    func authenticateUsername() {
+        guard let client, let usernameAuthClient, client.isEnrolled, !isBusy else { return }
+        let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        do {
+            try IOSUsernameAuthClient.validateHandle(cleanUsername)
+        } catch {
+            self.error = "Use a lowercase username with 3–32 letters, numbers, or underscores."
+            return
+        }
+
+        isBusy = true
+        error = nil
+        let action = usernameAction
+        status = action == .register ? "Registering username" : "Logging in"
+        Task { @MainActor [weak self] in
+            do {
+                switch action {
+                case .register:
+                    _ = try await client.registerUsername(using: usernameAuthClient, handle: cleanUsername)
+                case .login:
+                    _ = try await client.loginUsername(using: usernameAuthClient, handle: cleanUsername)
+                }
+                guard let self else { return }
+                self.username = ""
+                self.isBusy = false
+                self.status = action == .register ? "Username registered" : "Account authenticated"
+                self.refreshState()
+            } catch {
+                guard let self else { return }
+                self.isBusy = false
+                self.status = action == .register ? "Username registration failed" : "Username login failed"
+                self.error = action == .register
+                    ? "Could not register this username. It may already be in use."
+                    : "Could not log in. Check the username and local auth service."
             }
         }
     }
@@ -195,9 +249,10 @@ final class IOSMobileAppModel: ObservableObject {
         isAuthenticated = client.isAuthenticated
         identityStatus = client.isEnrolled ? "Hardware identity enrolled" : "No identity enrolled"
         if let userID = client.userID {
+            let handle = client.accountHandle.map { "@\($0) · " } ?? ""
             accountStatus = client.isAuthenticated
-                ? "Authenticated · \(String(userID.prefix(8)))"
-                : "Account saved · sign in again"
+                ? "\(handle)Authenticated · \(String(userID.prefix(8)))"
+                : "\(handle)Account saved · sign in again"
         } else {
             accountStatus = "Signed out"
         }
@@ -235,7 +290,30 @@ struct IOSMobileRootView: View {
                     }
                 }
 
+                Section("Local development account") {
+                    Text("No SMS needed. The local backend creates one account per username.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("Action", selection: $model.usernameAction) {
+                        ForEach(IOSUsernameAction.allCases) { action in
+                            Text(action.title).tag(action)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("Username, for example alice", text: $model.username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.username)
+                    Button(model.usernameAction == .register ? "Register username" : "Log in") {
+                        model.authenticateUsername()
+                    }
+                    .disabled(!model.isEnrolled || model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
+                }
+
                 Section("Phone account") {
+                    Text("Use this only with a real HTTPS account-auth service configured for Twilio Verify. Local development uses username login above.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     LabeledContent("Account", value: model.accountStatus)
                     Text("Auth service: \(model.authEndpointText)")
                         .font(.caption)

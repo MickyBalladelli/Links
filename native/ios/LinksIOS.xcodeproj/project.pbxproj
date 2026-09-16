@@ -11,6 +11,7 @@
 		B10000010000000000000002 /* IOSMobileAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000003 /* IOSMobileAppModel.swift */; };
 		B10000010000000000000003 /* LinksClient in Frameworks */ = {isa = PBXBuildFile; productRef = B10000030000000000000001 /* LinksClient */; };
 		B10000010000000000000004 /* LinksKeyStore in Frameworks */ = {isa = PBXBuildFile; productRef = B10000030000000000000002 /* LinksKeyStore */; };
+		B10000010000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000006 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -19,6 +20,7 @@
 		B10000020000000000000003 /* IOSMobileAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSMobileAppModel.swift; sourceTree = "<group>"; };
 		B10000020000000000000004 /* LinksIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LinksIOS.entitlements; sourceTree = "<group>"; };
 		B10000020000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000020000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +51,7 @@
 				B10000020000000000000003 /* IOSMobileAppModel.swift */,
 				B10000020000000000000004 /* LinksIOS.entitlements */,
 				B10000020000000000000005 /* Info.plist */,
+				B10000020000000000000006 /* Assets.xcassets */,
 			);
 			path = LinksIOS;
 			sourceTree = "<group>";
@@ -121,6 +124,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000010000000000000005 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -143,6 +147,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LinksIOS/LinksIOS.entitlements;
@@ -173,6 +178,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = LinksIOS/LinksIOS.entitlements;

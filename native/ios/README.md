@@ -6,6 +6,7 @@ local Swift package products `LinksClient` and `LinksKeyStore`.
 The current mobile shell supports:
 
 - Secure Enclave-backed identity enrollment;
+- local-development username registration and login;
 - phone OTP enrollment against a real HTTPS account-auth service;
 - signed `links://connect` URL intake; and
 - authenticated device approval through `POST /v1/devices`.
@@ -65,6 +66,12 @@ trusted HTTPS host with `LINKS_AUTH_URL`. The local Rust username mode does
 not implement Twilio OTP; the bridge provides HTTPS reachability but cannot
 send a verification code without a real account-auth service configured for
 Twilio Verify.
+
+For local iPhone testing, create the identity first, then use **Local
+development account** in the app. Choose **Register**, enter a lowercase
+username such as `alice`, and tap **Register username**. On a later install or
+another profile, choose **Log in**. Each username is one account, and the
+hardware identity signs the request; no password or SMS is used.
 
 The script builds both Rust static libraries for `aarch64-apple-ios`, then
 builds and signs `Links.app` with the `Links-iOS-Debug` scheme. Open the
