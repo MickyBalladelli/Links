@@ -220,10 +220,16 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var connectionRequested = false
     private var reconnectAfterBackground = false
     private var isTerminating = false
+    var requestNewProfileRegistration: ((String) -> Void)?
 
-    init() {
+    init(profileOverride: ClientProfile? = nil) {
         do {
-            let profile = try Self.profileFromArguments()
+            let profile: ClientProfile
+            if let profileOverride {
+                profile = profileOverride
+            } else {
+                profile = try Self.profileFromArguments()
+            }
             let (profileRoot, hasExplicitRoot) = try Self.profileRootFromArguments(profile: profile)
             profileRootPath = profileRoot.url.path
             profileLogPath = profileRoot.logsURL
@@ -313,6 +319,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     var packageStatus: String { "LinksClient + LinksKeyStore" }
 
+    static func profileExists(_ profile: ClientProfile) -> Bool {
+        guard let (root, _) = try? Self.profileRootFromArguments(profile: profile) else {
+            return true
+        }
+        return FileManager.default.fileExists(atPath: root.url.path)
+    }
+
     var requiresOnboarding: Bool { client?.isEnrolled != true }
 
     var requiresAccountAuthentication: Bool {
@@ -399,6 +412,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     func enrollIdentity() {
+        enrollIdentity(completion: nil)
+    }
+
+    private func enrollIdentity(completion: (() -> Void)?) {
         guard let client, !client.isEnrolled, !isEnrolling else { return }
         isEnrolling = true
         onboardingError = nil
@@ -410,6 +427,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     guard let self else { return }
                     self.isEnrolling = false
                     self.refreshClientState()
+                    completion?()
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -417,6 +435,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     self.isEnrolling = false
                     self.onboardingError = Self.identityCreationErrorMessage(error)
                 }
+            }
+        }
+    }
+
+    func beginUsernameRegistration(handle: String) {
+        usernameInput = handle
+        authMode = .register
+        if client?.isEnrolled == true {
+            authenticateUsername(inCurrentProfile: true)
+        } else {
+            enrollIdentity { [weak self] in
+                self?.authenticateUsername(inCurrentProfile: true)
             }
         }
     }
@@ -436,15 +466,23 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     func authenticateUsername() {
+        authenticateUsername(inCurrentProfile: false)
+    }
+
+    private func authenticateUsername(inCurrentProfile: Bool) {
         guard let client, let authClient, client.isEnrolled, !isAuthenticating else {
             onboardingError = "Local username auth is unavailable."
             return
         }
         let handle = usernameInput
         let mode = authMode
-        if mode == .register && hasBoundAccount {
-            onboardingError = "This profile is already linked to \(accountStatus). "
-                + "Use Log in, or launch a new profile to register another account."
+        if mode == .register && !inCurrentProfile {
+            guard let requestNewProfileRegistration else {
+                onboardingError = "Create a new profile before registering another account."
+                return
+            }
+            requestNewProfileRegistration(handle.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased())
             return
         }
         isAuthenticating = true
@@ -1450,5 +1488,46 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             throw IOSConnectionError.invalidEndpoint
         }
         return endpoint
+    }
+}
+
+@MainActor
+final class LinksMacOSProfileSession: ObservableObject {
+    @Published private(set) var model: LinksMacOSAppModel
+
+    init() {
+        model = LinksMacOSAppModel()
+        attachProfileRegistrationHandler()
+    }
+
+    private func attachProfileRegistrationHandler() {
+        model.requestNewProfileRegistration = { [weak self] handle in
+            self?.createProfileAndRegister(handle: handle)
+        }
+    }
+
+    private func createProfileAndRegister(handle: String) {
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard (try? IOSUsernameAuthClient.validateHandle(cleanHandle)) != nil,
+              let profile = try? ClientProfile(name: cleanHandle) else {
+            model.actionError = "Use a valid lowercase username."
+            return
+        }
+
+        if profile.name == model.profileName && !model.hasBoundAccount {
+            model.beginUsernameRegistration(handle: cleanHandle)
+            return
+        }
+
+        guard !LinksMacOSAppModel.profileExists(profile) else {
+            model.actionError = "The profile \(profile.name) already exists. Use that profile to log in."
+            return
+        }
+
+        model.logout()
+        let newModel = LinksMacOSAppModel(profileOverride: profile)
+        model = newModel
+        attachProfileRegistrationHandler()
+        newModel.beginUsernameRegistration(handle: cleanHandle)
     }
 }

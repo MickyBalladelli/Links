@@ -126,6 +126,12 @@ to loopback Debug builds. `AUTH_LOOKUP_KEY` is still required.
 `AUTH_DEV_USERNAME_MODE=1` is rejected by `cargo run --release`, and every
 account-auth mode rejects a non-loopback `AUTH_BIND`.
 
+On macOS, registering a username creates a fresh profile named after that
+username. For example, registering `alice` creates profile `alice` with its
+own identity, device/node IDs, Keychain namespace, and Application Support
+state. A username cannot be registered into another profile, and duplicate
+registrations are rejected. To reopen it, launch with `--profile alice`.
+
 ### Build the libraries
 
 ```sh

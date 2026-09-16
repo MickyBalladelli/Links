@@ -415,6 +415,11 @@ exchanging encrypted one-to-one text through the same local development stack.
   `IOSUsernameAuthClient` signs nonce-bound username registration/login requests,
   keeps the bearer in memory, and the macOS shell can create or approve signed
   `links://connect` payloads through the authenticated device endpoint.
+- [x] Create the macOS profile at username registration time and keep the mapping one-to-one.
+  Username registration switches to a fresh profile named after the canonical
+  username, so its Keychain, Application Support state, identity, device ID,
+  and MLS node are isolated. Existing profile names are rejected, while the
+  account service rejects duplicate handles with a clear conflict response.
 - [x] Support OTP enrollment when the macOS host is configured against a real account-auth service and Twilio Verify account.
   The macOS account screen uses `IOSOTPClient` for HTTPS-only `start` and
   `finish` calls, keeps phone/code input memory-only, and stores the returned
