@@ -16,14 +16,15 @@ struct LinksRootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = model.lastError {
                 PersistentErrorBanner(error: error) {
                     model.clearLastError()
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .alert("Links", isPresented: actionErrorBinding) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -43,24 +44,28 @@ private struct PersistentErrorBanner: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.title3)
                 .foregroundStyle(.red)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Last error")
-                    .font(.headline)
+                Text("Needs attention")
+                    .font(.callout.weight(.semibold))
                 Text(error)
+                    .font(.caption)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
             Spacer(minLength: 12)
             Button("Dismiss", action: dismiss)
                 .buttonStyle(.bordered)
+                .controlSize(.small)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.red.opacity(0.12))
+        .background(.regularMaterial)
+        .background(Color.red.opacity(0.08))
         .overlay(alignment: .top) {
             Divider()
                 .overlay(.red.opacity(0.35))
@@ -266,42 +271,65 @@ private struct LinksSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("Links", systemImage: "lock.shield")
-                    .font(.title2.weight(.semibold))
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(Color.accentColor.opacity(0.16))
+                    Image(systemName: "lock.shield.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+                .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Links")
+                        .font(.headline)
+                    Text("Private messaging")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button {
                     showingAddContact = true
                 } label: {
                     Image(systemName: "person.badge.plus")
                 }
+                .buttonStyle(.borderless)
                 .help("Add contact")
                 Button {
                     showingNewConversation = true
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
+                .buttonStyle(.borderless)
                 .help("New conversation")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
 
             List(selection: $model.selectedConversationID) {
-                Section("Conversations") {
+                Section {
                     if model.conversations.isEmpty {
                         Text("No conversations yet")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .padding(.vertical, 5)
                     } else {
                         ForEach(model.conversations) { conversation in
                             ConversationRow(conversation: conversation)
                                 .tag(conversation.id as String?)
                         }
                     }
+                } header: {
+                    SidebarSectionHeader(title: "Conversations") {
+                        showingNewConversation = true
+                    }
                 }
-                Section("Contacts") {
+                Section {
                     if model.contacts.isEmpty {
                         Text("Add someone by username")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .padding(.vertical, 5)
                     } else {
                         ForEach(model.contacts) { contact in
                             Button {
@@ -317,9 +345,14 @@ private struct LinksSidebar: View {
                             }
                         }
                     }
+                } header: {
+                    SidebarSectionHeader(title: "Contacts") {
+                        showingAddContact = true
+                    }
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .alert("Remove contact?", isPresented: Binding(
                 get: { contactToRemove != nil },
                 set: { isPresented in
@@ -341,42 +374,126 @@ private struct LinksSidebar: View {
                 }
 
             Divider()
-            VStack(alignment: .leading, spacing: 10) {
-                StateRow(title: "Profile", value: model.profileName)
-                StateRow(title: "Profile root", value: model.profileRootPath)
-                StateRow(title: "Profile logs", value: model.profileLogPath)
-                StateRow(title: "Profile status", value: model.profileStatusPath)
-                StateRow(title: "Account", value: model.accountStatus)
-                StateRow(title: "Device", value: model.deviceStatus)
-                StateRow(title: "Connection", value: model.connectionStatus)
-                StateRow(title: "Delivery", value: model.deliveryState.title)
-                if model.pendingOutboxCount > 0 {
-                    StateRow(title: "Outbox", value: "\(model.pendingOutboxCount) queued")
-                }
-                StateRow(title: "Pre-keys", value: model.preKeyStatus)
-                StateRow(title: "Lifecycle", value: model.lifecycleStatus)
-                HStack {
-                    Text(model.packageStatus)
-                    Spacer()
-                    Button("Pair device") {
-                        showingPairing = true
-                    }
-                    .buttonStyle(.link)
-                    Button(model.isConnectionRequested ? "Disconnect" : "Connect") {
-                        if model.isConnectionRequested {
-                            model.disconnect()
-                        } else {
-                            model.connect()
-                        }
-                    }
-                    .buttonStyle(.link)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .padding(16)
+            ProfileSummaryCard(model: model, showingPairing: $showingPairing)
         }
-        .frame(minWidth: 270)
+        .frame(minWidth: 300, idealWidth: 320, maxWidth: 360)
+        .background(.regularMaterial)
+    }
+}
+
+private struct SidebarSectionHeader: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .textCase(nil)
+            Spacer()
+            Button(action: action) {
+                Image(systemName: "plus")
+                    .font(.caption.weight(.bold))
+            }
+            .buttonStyle(.borderless)
+            .help("Add to \(title.lowercased())")
+        }
+    }
+}
+
+private struct ProfileSummaryCard: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Binding var showingPairing: Bool
+    @State private var showingDetails = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 10) {
+                ProfileAvatar(title: model.profileName, size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.profileName)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Text(model.accountStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(linksStatusColor(model.connectionStatus))
+                    .frame(width: 8, height: 8)
+                Text(model.connectionStatus)
+                    .font(.caption.weight(.medium))
+                Spacer()
+                if model.pendingOutboxCount > 0 {
+                    Label("\(model.pendingOutboxCount) queued", systemImage: "clock.arrow.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    if model.isConnectionRequested {
+                        model.disconnect()
+                    } else {
+                        model.connect()
+                    }
+                } label: {
+                    Label(model.isConnectionRequested ? "Disconnect" : "Connect",
+                          systemImage: model.isConnectionRequested ? "wifi.slash" : "bolt.horizontal")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button {
+                    showingPairing = true
+                } label: {
+                    Image(systemName: "person.2.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Pair device")
+            }
+
+            DisclosureGroup("Profile details", isExpanded: $showingDetails) {
+                VStack(alignment: .leading, spacing: 7) {
+                    StateRow(title: "Device", value: model.deviceStatus)
+                    StateRow(title: "Delivery", value: model.deliveryState.title)
+                    StateRow(title: "Pre-keys", value: model.preKeyStatus)
+                    StateRow(title: "Lifecycle", value: model.lifecycleStatus)
+                    StateRow(title: "Data", value: model.profileRootPath)
+                    StateRow(title: "Logs", value: model.profileLogPath)
+                    StateRow(title: "Status", value: model.profileStatusPath)
+                    Text(model.packageStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.top, 7)
+            }
+            .font(.caption)
+        }
+        .padding(14)
+    }
+}
+
+private struct ProfileAvatar: View {
+    let title: String
+    let size: CGFloat
+
+    var body: some View {
+        Text(String(title.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).prefix(1)).uppercased())
+            .font(.system(size: size * 0.42, weight: .semibold))
+            .foregroundStyle(.tint)
+            .frame(width: size, height: size)
+            .background(Color.accentColor.opacity(0.14))
+            .clipShape(Circle())
     }
 }
 
@@ -385,11 +502,10 @@ private struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "person.crop.circle")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            ProfileAvatar(title: conversation.title, size: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text(conversation.title)
+                    .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Text(conversation.messages.last?.text ?? "No messages")
                     .font(.caption)
@@ -406,11 +522,10 @@ private struct ContactRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "person.crop.circle")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            ProfileAvatar(title: contact.handle, size: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text("@\(contact.handle)")
+                    .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Text(contact.deviceCount == 1
                      ? "1 active device"
@@ -435,10 +550,25 @@ private struct StateRow: View {
             Spacer(minLength: 8)
             Text(value)
                 .multilineTextAlignment(.trailing)
-                .lineLimit(2)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
         .font(.caption)
     }
+}
+
+private func linksStatusColor(_ value: String) -> Color {
+    let normalized = value.lowercased()
+    if normalized.contains("ready") || normalized.contains("connected") {
+        return .green
+    }
+    if normalized.contains("connect") || normalized.contains("retry") || normalized.contains("pending") {
+        return .orange
+    }
+    if normalized.contains("failed") || normalized.contains("unavailable") || normalized.contains("expired") {
+        return .red
+    }
+    return .secondary
 }
 
 private struct LinksConversationDetail: View {
@@ -449,58 +579,73 @@ private struct LinksConversationDetail: View {
     var body: some View {
         if let conversation = model.selectedConversation {
             VStack(spacing: 0) {
-                HStack {
+                HStack(spacing: 12) {
+                    ProfileAvatar(title: conversation.title, size: 38)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(conversation.title)
-                            .font(.title3.weight(.semibold))
-                        Text("Encrypted one-to-one conversation")
+                            .font(.title2.weight(.semibold))
+                        Text("Private one-to-one conversation")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    HStack(spacing: 8) {
-                        Button("Initialize secure chat") {
-                            model.initializeSelectedConversation()
+                    VStack(alignment: .trailing, spacing: 7) {
+                        HStack(spacing: 7) {
+                            if model.canInitializeSelectedConversation {
+                                Button {
+                                    model.initializeSelectedConversation()
+                                } label: {
+                                    Label("Start secure chat", systemImage: "lock.badge.plus")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            }
+                            Button {
+                                repairConfirmationPresented = true
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(!model.canInitializeSelectedConversation)
+                            .help("Repair secure chat")
+                            Button {
+                                removeConnectionConfirmationPresented = true
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Remove this local connection")
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(!model.canInitializeSelectedConversation)
-                        Button {
-                            repairConfirmationPresented = true
-                        } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!model.canInitializeSelectedConversation)
-                        .help("Repair secure chat")
-                        Button {
-                            removeConnectionConfirmationPresented = true
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.bordered)
-                        .help("Remove this local connection")
+                        StatusPill(title: model.connectionStatus,
+                                   color: linksStatusColor(model.connectionStatus))
                     }
-                    Text(model.connectionStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
 
                 DeliveryStatusBanner(model: model)
 
-                Text(model.conversationSetupStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 8)
+                HStack(spacing: 7) {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(model.conversationSetupStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 8)
 
                 Divider()
                 MessageList(messages: conversation.messages)
                 Divider()
                 ComposerView(model: model)
             }
+            .background(Color.primary.opacity(0.015))
             .alert("Repair secure chat?", isPresented: $repairConfirmationPresented) {
                 Button("Repair", role: .destructive) {
                     model.resetSelectedConversation()
@@ -538,21 +683,46 @@ private struct LinksConversationDetail: View {
     }
 }
 
+private struct StatusPill: View {
+    let title: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(Capsule())
+    }
+}
+
 private struct DeliveryStatusBanner: View {
     @ObservedObject var model: LinksMacOSAppModel
 
     private var state: LinksMacOSDeliveryState { model.deliveryState }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(spacing: 10) {
             Image(systemName: state.systemImage)
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(color)
+                .frame(width: 24, height: 24)
+                .background(color.opacity(0.13))
+                .clipShape(Circle())
             VStack(alignment: .leading, spacing: 2) {
                 Text(state.title)
                     .font(.callout.weight(.semibold))
                 Text(state.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
             Spacer(minLength: 8)
             if case .staleCursor = state {
@@ -560,11 +730,12 @@ private struct DeliveryStatusBanner: View {
                     model.recoverStaleCursor()
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 10)
-        .background(color.opacity(0.08))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 9)
+        .background(color.opacity(0.07))
     }
 
     private var color: Color {
@@ -584,11 +755,20 @@ private struct MessageList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     if messages.isEmpty {
-                        Text("No messages")
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 32)
+                        VStack(spacing: 8) {
+                            Image(systemName: "lock.message")
+                                .font(.system(size: 30))
+                                .foregroundStyle(.tertiary)
+                            Text("No messages yet")
+                                .font(.headline)
+                            Text("Messages in this conversation are end-to-end encrypted.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 76)
                     } else {
                         ForEach(messages) { message in
                             MessageBubble(message: message)
@@ -611,22 +791,27 @@ private struct MessageBubble: View {
     let message: LinksMacOSMessage
 
     var body: some View {
-        HStack {
+        HStack(alignment: .bottom) {
             if message.isOutgoing { Spacer(minLength: 90) }
             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
                 Text(message.text)
+                    .font(.body)
                     .textSelection(.enabled)
                     .padding(.horizontal, 13)
                     .padding(.vertical, 9)
-                    .background(message.isOutgoing ? Color.accentColor : Color.secondary.opacity(0.16))
+                    .background(message.isOutgoing
+                                ? Color.accentColor
+                                : Color.primary.opacity(0.08))
                     .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 13))
                 Text(message.sentAt, style: .time)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: 520, alignment: message.isOutgoing ? .trailing : .leading)
             if !message.isOutgoing { Spacer(minLength: 90) }
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -636,22 +821,29 @@ private struct ComposerView: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
             TextField("Message", text: $model.composerText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .onSubmit { model.sendMessage() }
                 .disabled(!model.canSendSelectedConversation)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             Button {
                 model.sendMessage()
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
+                    .font(.title2.weight(.semibold))
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .keyboardShortcut(.return, modifiers: [.command])
             .help("Send message")
             .disabled(!model.canSendSelectedConversation)
         }
-        .padding(16)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 }
 
