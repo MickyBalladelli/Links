@@ -6,4 +6,6 @@
 ./launch-links.sh
 
 
+./scripts/launch-iphone.sh
+
 ```

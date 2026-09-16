@@ -30,6 +30,42 @@ LINKS_IOS_DESTINATION="id=YOUR_DEVICE_UDID" \
 bash scripts/build-ios-debug.sh
 ```
 
+Build and install in one step:
+
+```sh
+DEVELOPMENT_TEAM=YOUR_TEAM_ID \
+LINKS_AUTH_URL=https://your-phone-reachable-auth-host \
+LINKS_IOS_DEVICE_ID=YOUR_DEVICE_UDID \
+bash scripts/launch-iphone.sh
+```
+
+If `LINKS_AUTH_URL` is omitted, the launcher detects the Mac's default LAN
+IPv4 address, starts the built-in Node HTTPS bridge, and uses
+`https://<mac-ip>:8443`. The bridge forwards account-auth HTTP traffic to
+`127.0.0.1:8080` and WebSocket upgrades at `/v1/connect` to the local gateway
+at `127.0.0.1:8081`. Its generated certificate and log live under
+`native/ios/LocalHTTPS/`.
+
+You can run the bridge by itself with:
+
+```sh
+LINKS_LAN_IP="$(ipconfig getifaddr en0)" node scripts/local-https-proxy.mjs
+```
+
+The iPhone must trust the generated certificate before making requests:
+
+1. Copy `native/ios/LocalHTTPS/root-cert-<mac-ip>.cer` to the iPhone with AirDrop
+   or Files and install the certificate profile. Use the `.pem` file if the
+   device does not offer the `.cer` file to install.
+2. Open Settings > General > About > Certificate Trust Settings.
+3. Enable full trust for the Links local certificate.
+
+The certificate is for local development only. For a real account, use a
+trusted HTTPS host with `LINKS_AUTH_URL`. The local Rust username mode does
+not implement Twilio OTP; the bridge provides HTTPS reachability but cannot
+send a verification code without a real account-auth service configured for
+Twilio Verify.
+
 The script builds both Rust static libraries for `aarch64-apple-ios`, then
 builds and signs `Links.app` with the `Links-iOS-Debug` scheme. Open the
 resulting app in Xcode, select a connected iPhone, and run it. Automatic

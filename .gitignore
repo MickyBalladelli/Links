@@ -16,6 +16,7 @@
 /native/macos/build/
 /native/ios/DerivedData/
 /native/ios/build/
+/native/ios/LocalHTTPS/
 /native/macos/Links.xcodeproj/xcuserdata/
 /native/macos/Links.xcodeproj/project.xcworkspace/xcuserdata/
 /.xcode-derived-data/
