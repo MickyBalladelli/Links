@@ -907,3 +907,32 @@ Run these checks continuously at the relevant phase boundary, with the full audi
   `docs/release-readiness-review.md`. Source contracts are present, but the
   public-release gate stays open until physical-device, failure-injection,
   push/provider, recovery, battery, and MLS-removal evidence is signed.
+
+### Mobile physical-device validation
+
+- [ ] Add a runnable Android application target for end-to-end mobile testing.
+  Keep the existing identity/OTP shell, add the shared client-core host, and
+  produce an installable Debug APK.
+- [ ] Add a runnable iOS application target for end-to-end mobile testing.
+  Embed `LinksClient` and `LinksKeyStore`, configure signing and entitlements,
+  and produce an installable Debug build for a physical iPhone.
+- [ ] Add QR scanning for signed `links://connect` pairing payloads on Android
+  and iOS. Show the account, device, and public-key summary before approval.
+- [ ] Add mobile pairing approval. Validate the signed payload, call
+  `POST /v1/devices`, verify the returned device and MLS credential, and keep
+  the bearer token memory-only.
+- [ ] Add the mobile TLS WebSocket adapter for `wss://<host>/v1/connect`.
+  Use the binary `links.v1` subprotocol, reject text frames, and bind the
+  adapter to the shared Rust core.
+- [ ] Add mobile conversation and message UI. Support contacts, conversation
+  setup, message list, composer, send, receive rendering, reconnect, and
+  offline outbox retry.
+- [ ] Provide a phone-reachable local development endpoint. Document LAN
+  binding, HTTPS certificates, WSS routing, firewall rules, and the required
+  Android/iOS endpoint configuration. Do not use `127.0.0.1` from the phone.
+- [ ] Validate Android identity and OTP onboarding on a physical device, then
+  validate iOS Secure Enclave onboarding on a physical iPhone.
+- [ ] Run a complete phone-to-mac and mac-to-phone smoke flow: pair the
+  devices, connect both `links.v1` sessions, send messages in both directions,
+  restart each client, recover the durable cursor, and confirm encrypted
+  outbox delivery.
