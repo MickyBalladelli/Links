@@ -875,6 +875,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
 
+    func removeContact(_ contact: LinksMacOSContact) {
+        contacts.removeAll { $0.userID == contact.userID }
+        contactStatus = "Removed @\(contact.handle)"
+        persistLocalState()
+    }
+
     func startConversation(with contact: LinksMacOSContact) {
         if let index = conversations.firstIndex(where: {
             $0.peerUserID == contact.userID

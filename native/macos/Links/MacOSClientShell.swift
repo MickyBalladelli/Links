@@ -254,6 +254,7 @@ private struct LinksSidebar: View {
     @Binding var showingNewConversation: Bool
     @Binding var showingAddContact: Bool
     @Binding var showingPairing: Bool
+    @State private var contactToRemove: LinksMacOSContact?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -301,11 +302,35 @@ private struct LinksSidebar: View {
                                 ContactRow(contact: contact)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Remove Contact", role: .destructive) {
+                                    contactToRemove = contact
+                                }
+                            }
                         }
                     }
                 }
             }
             .listStyle(.sidebar)
+            .alert("Remove contact?", isPresented: Binding(
+                get: { contactToRemove != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        contactToRemove = nil
+                    }
+                })) {
+                    Button("Remove", role: .destructive) {
+                        if let contact = contactToRemove {
+                            model.removeContact(contact)
+                        }
+                        contactToRemove = nil
+                    }
+                    Button("Cancel", role: .cancel) {
+                        contactToRemove = nil
+                    }
+                } message: {
+                    Text("This removes the saved contact. Existing conversations and messages stay.")
+                }
 
             Divider()
             VStack(alignment: .leading, spacing: 10) {

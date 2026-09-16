@@ -473,6 +473,7 @@ exchanging encrypted one-to-one text through the same local development stack.
   session discards the old messaging core before the next login rebuilds it.
 - [x] Keep message text, decrypted metadata, seeds, bearer tokens, and sealed payloads out of application and server logs. Secret-bearing desktop/gateway values use redacted `Debug` implementations, native/server paths emit no request or payload bodies, and the desktop logging boundary is documented.
 - [x] Add macOS contact lookup and saved contacts so users can add a known username and start a conversation without entering a raw user UUID. The messaging shell looks up public directory metadata, stores the handle, user ID, and active-device count in the profile's encrypted state, and lists saved contacts per profile.
+- [x] Add local removal of saved contacts without deleting their conversations. The Contacts list offers a confirmation action; removal updates the encrypted profile state and leaves existing conversation history untouched.
 
 ### Local development backend and two-client runner
 
