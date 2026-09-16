@@ -456,11 +456,14 @@ private struct LinksConversationDetail: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(!model.canInitializeSelectedConversation)
-                        Button("Repair secure chat") {
+                        Button {
                             repairConfirmationPresented = true
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
                         }
                         .buttonStyle(.bordered)
                         .disabled(!model.canInitializeSelectedConversation)
+                        .help("Repair secure chat")
                         Button {
                             removeConnectionConfirmationPresented = true
                         } label: {
@@ -499,7 +502,7 @@ private struct LinksConversationDetail: View {
                 Text("This replaces the broken encryption group. Messages already stuck in the old group cannot be recovered and will be discarded from delivery.")
             }
             .confirmationDialog(
-                "Remove connection with (conversation.title)?",
+                "Remove connection with \(conversation.title)?",
                 isPresented: $removeConnectionConfirmationPresented,
                 titleVisibility: .visible) {
                 Button("Remove connection", role: .destructive) {
@@ -508,6 +511,9 @@ private struct LinksConversationDetail: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This removes the local conversation only. Your account, contact, and identity stay safe.")
+            }
+            .task(id: conversation.id) {
+                model.autoInitializeSelectedConversation()
             }
         } else {
             VStack(spacing: 14) {

@@ -347,6 +347,24 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         return initializedConversationIDs.contains(conversation.id)
     }
 
+    /// Start MLS setup after a conversation is selected when all live
+    /// connection and pre-key prerequisites are already ready. The explicit
+    /// action remains available for retry and recovery.
+    func autoInitializeSelectedConversation() {
+        guard let conversation = selectedConversation,
+              !conversation.isIncoming,
+              !initializedConversationIDs.contains(conversation.id),
+              !initializingConversationIDs.contains(conversation.id),
+              messaging?.state == .ready,
+              messaging?.isConnected == true,
+              preKeyStatus.hasPrefix("Ready:"),
+              directChatDirectory != nil,
+              preKeyAPI != nil else {
+            return
+        }
+        initializeSelectedConversation()
+    }
+
     func clearLastError() {
         lastError = nil
     }
@@ -724,6 +742,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                         self.preKeyStatus = "Ready: \(inventory.oneTimeCurvePreKeys) curve, "
                             + "\(inventory.oneTimeKEMPreKeys) KEM keys"
                         self.publishProfileStatus()
+                        self.autoInitializeSelectedConversation()
                     } catch {
                         let message = Self.preKeySetupErrorMessage(error)
                         self.preKeyStatus = message
@@ -1089,6 +1108,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         connectionStatus = deliveryState.title
         publishProfileStatus()
+        if state == .ready {
+            autoInitializeSelectedConversation()
+        }
     }
 
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
