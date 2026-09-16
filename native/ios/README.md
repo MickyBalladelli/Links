@@ -27,6 +27,18 @@ resulting app in Xcode, select a connected iPhone, and run it. Automatic
 signing must have a registered App ID for `ai.links.Links.iOS` and the
 Keychain access capability enabled.
 
+For terminal installation, trust the iPhone and enable Developer Mode first:
+
+```sh
+xcrun devicectl device list
+xcrun devicectl device install app \
+  --device YOUR_DEVICE_UDID \
+  native/ios/DerivedData/Build/Products/Debug-iphoneos/Links.app
+```
+
+If Xcode reports that the iOS platform is missing, install the matching iOS
+platform from Xcode > Settings > Components before running the script.
+
 Set `LINKS_AUTH_URL` in the Xcode scheme or build settings to a reachable
 HTTPS account-auth endpoint. A phone cannot reach the Mac through
 `127.0.0.1`; use a LAN hostname or IP with a trusted development certificate.

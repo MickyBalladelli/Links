@@ -1,5 +1,5 @@
 import Foundation
-import LinksClient
+@preconcurrency import LinksClient
 import LinksKeyStore
 import SwiftUI
 
@@ -30,23 +30,30 @@ final class IOSMobileAppModel: ObservableObject {
             ?? "https://api.links.invalid"
         authEndpointText = endpointText
 
+        var loadedClient: IOSClient?
+        var loadedUsernameAuthClient: IOSUsernameAuthClient?
+        var loadedOTPClient: IOSOTPClient?
+        var initialError: String?
         do {
             guard let endpoint = URL(string: endpointText) else {
                 throw IOSUsernameAuthError.invalidEndpoint
             }
-            let loadedClient = try IOSClient(
+            loadedClient = try IOSClient(
                 identityStore: HardwareIdentityStore(),
                 defaults: .standard)
-            client = loadedClient
-            usernameAuthClient = try IOSUsernameAuthClient(baseURL: endpoint)
-            otpClient = try IOSOTPClient(baseURL: endpoint)
-            refreshState()
+            loadedUsernameAuthClient = try IOSUsernameAuthClient(baseURL: endpoint)
+            loadedOTPClient = try IOSOTPClient(baseURL: endpoint)
         } catch {
-            client = nil
-            usernameAuthClient = nil
-            otpClient = nil
-            self.error = "Mobile client could not open its identity store."
+            initialError = "Mobile client could not open its identity store."
+        }
+        client = loadedClient
+        usernameAuthClient = loadedUsernameAuthClient
+        otpClient = loadedOTPClient
+        error = initialError
+        if initialError != nil {
             status = "Identity store unavailable"
+        } else {
+            refreshState()
         }
     }
 
