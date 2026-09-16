@@ -10,6 +10,12 @@ device_id="${LINKS_IOS_DEVICE_ID:-00008030-001D44593E6B402E}"
 derived_data_path="${LINKS_IOS_DERIVED_DATA_PATH:-$repo_root/native/ios/DerivedData}"
 proxy_started=0
 
+proxy_health() {
+  local health_response
+  health_response="$(curl --silent --show-error --fail --insecure --max-time 1 "$auth_url/healthz" 2>/dev/null || true)"
+  [[ "$health_response" == *'"proxy":"links-https-v2"'* ]] && [[ -f "$root_cert" ]]
+}
+
 if [[ -n "$auth_url" ]]; then
   authority="$(printf '%s' "$auth_url" | sed -E 's#^[^:]+://([^/]+).*$#\1#')"
   case "$authority" in
@@ -52,11 +58,24 @@ if [[ -z "$auth_url" ]]; then
   proxy_dir="${LINKS_HTTPS_PROXY_DIR:-$repo_root/native/ios/LocalHTTPS}"
   proxy_log="$proxy_dir/proxy.log"
   mkdir -p "$proxy_dir"
-  if ! curl --silent --show-error --fail --insecure --max-time 1 "$auth_url/healthz" >/dev/null 2>&1; then
+  root_cert="$proxy_dir/root-cert.cer"
+  if ! proxy_health; then
     if [[ "${LINKS_START_HTTPS_PROXY:-1}" != "1" ]]; then
       echo "No HTTPS proxy is listening at $auth_url." >&2
       echo "Start it with: LINKS_LAN_IP=$lan_ip LINKS_HTTPS_PORT=$auth_port node scripts/local-https-proxy.mjs" >&2
       exit 1
+    fi
+
+    stale_pid="$(lsof -tiTCP:"$auth_port" -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
+    if [[ -n "$stale_pid" ]]; then
+      echo "Stopping stale HTTPS proxy on port $auth_port." >&2
+      kill "$stale_pid" 2>/dev/null || true
+      for _ in {1..20}; do
+        if ! kill -0 "$stale_pid" 2>/dev/null; then
+          break
+        fi
+        sleep 0.25
+      done
     fi
 
     echo "Starting local HTTPS proxy; log: $proxy_log" >&2
@@ -65,7 +84,7 @@ if [[ -z "$auth_url" ]]; then
     node "$repo_root/scripts/local-https-proxy.mjs" >>"$proxy_log" 2>&1 &
     proxy_pid=$!
     for _ in {1..40}; do
-      if curl --silent --show-error --fail --insecure --max-time 1 "$auth_url/healthz" >/dev/null 2>&1; then
+      if proxy_health; then
         proxy_started=1
         break
       fi
@@ -80,7 +99,7 @@ if [[ -z "$auth_url" ]]; then
     fi
     echo "HTTPS proxy ready on $auth_url" >&2
   fi
-  echo "Install and fully trust this iPhone certificate: $proxy_dir/root-cert-$lan_ip.cer" >&2
+  echo "Install and fully trust this iPhone certificate: $root_cert" >&2
 fi
 
 case "$auth_url" in

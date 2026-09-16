@@ -23,11 +23,11 @@ const customKeyPath = process.env.LINKS_TLS_KEY_FILE || ''
 const usingCustomCertificate = Boolean(customCertificatePath || customKeyPath)
 const certificatePath = customCertificatePath || join(tlsDirectory, `server-cert-${fileSafe(lanIp)}.pem`)
 const keyPath = customKeyPath || join(tlsDirectory, `server-key-${fileSafe(lanIp)}.pem`)
-const rootCertificatePath = join(tlsDirectory, `root-cert-${fileSafe(lanIp)}.pem`)
-const rootKeyPath = join(tlsDirectory, `root-key-${fileSafe(lanIp)}.pem`)
+const rootCertificatePath = join(tlsDirectory, 'root-cert.pem')
+const rootKeyPath = join(tlsDirectory, 'root-key.pem')
 const mobileCertificatePath = process.env.LINKS_TLS_CERT_DER_FILE || join(
   tlsDirectory,
-  `${usingCustomCertificate ? 'server-cert' : 'root-cert'}-${fileSafe(lanIp)}.cer`
+  usingCustomCertificate ? 'server-cert.cer' : 'root-cert.cer'
 )
 
 if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
@@ -156,7 +156,7 @@ function checkAuthUpstream(response) {
   })
   socket.once('connect', () => {
     socket.end()
-    finish(200, '{"status":"ok"}\n')
+    finish(200, '{"status":"ok","proxy":"links-https-v2"}\n')
   })
   socket.once('error', () => {
     finish(503, '{"status":"degraded","auth":"unavailable"}\n')
@@ -214,22 +214,27 @@ function proxyWebSocket(request, clientSocket, head) {
 }
 
 function ensureCertificate() {
-  const requiredPaths = usingCustomCertificate
-    ? [certificatePath, keyPath]
-    : [certificatePath, keyPath, rootCertificatePath, rootKeyPath]
-  const existingCount = requiredPaths.filter(existsSync).length
-
-  if (existingCount === requiredPaths.length && process.env.LINKS_TLS_REGENERATE !== '1') {
+  if (usingCustomCertificate) {
+    if (!existsSync(certificatePath) || !existsSync(keyPath)) {
+      fail('LINKS_TLS_CERT_FILE and LINKS_TLS_KEY_FILE must both point to existing files')
+    }
     ensureMobileCertificate()
     return
   }
 
-  if (usingCustomCertificate) {
-    fail('LINKS_TLS_CERT_FILE and LINKS_TLS_KEY_FILE must both point to existing files')
+  const rootExistingCount = [rootCertificatePath, rootKeyPath].filter(existsSync).length
+  const serverExistingCount = [certificatePath, keyPath].filter(existsSync).length
+  const rootComplete = rootExistingCount === 2
+  const serverComplete = serverExistingCount === 2
+  const regenerate = process.env.LINKS_TLS_REGENERATE === '1'
+
+  if (rootExistingCount === 1 || serverExistingCount === 1) {
+    fail('TLS files are incomplete; set LINKS_TLS_REGENERATE=1 to replace them')
   }
 
-  if (existingCount > 0 && process.env.LINKS_TLS_REGENERATE !== '1') {
-    fail('TLS files are incomplete; remove the matching local HTTPS files or set LINKS_TLS_REGENERATE=1')
+  if (rootComplete && serverComplete && !regenerate) {
+    ensureMobileCertificate()
+    return
   }
 
   mkdirSync(dirname(certificatePath), { recursive: true, mode: 0o700 })
@@ -244,27 +249,29 @@ function ensureCertificate() {
   writeFileSync(rootConfigPath, rootConfig, { mode: 0o600 })
   writeFileSync(serverConfigPath, serverConfig, { mode: 0o600 })
   try {
-    execFileSync(
-      process.env.OPENSSL_BIN || 'openssl',
-      [
-        'req',
-        '-x509',
-        '-newkey',
-        'rsa:2048',
-        '-nodes',
-        '-keyout',
-        rootKeyPath,
-        '-out',
-        rootCertificatePath,
-        '-days',
-        '3650',
-        '-config',
-        rootConfigPath,
-        '-extensions',
-        'v3_ca'
-      ],
-      { stdio: 'ignore' }
-    )
+    if (regenerate || !rootComplete) {
+      execFileSync(
+        process.env.OPENSSL_BIN || 'openssl',
+        [
+          'req',
+          '-x509',
+          '-newkey',
+          'rsa:2048',
+          '-nodes',
+          '-keyout',
+          rootKeyPath,
+          '-out',
+          rootCertificatePath,
+          '-days',
+          '3650',
+          '-config',
+          rootConfigPath,
+          '-extensions',
+          'v3_ca'
+        ],
+        { stdio: 'ignore' }
+      )
+    }
     execFileSync(
       process.env.OPENSSL_BIN || 'openssl',
       [
