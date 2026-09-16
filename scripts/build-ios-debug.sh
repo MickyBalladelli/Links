@@ -25,6 +25,7 @@ MACOSX_DEPLOYMENT_TARGET=13.0 cargo build \
 
 derived_data_path="${LINKS_IOS_DERIVED_DATA_PATH:-$repo_root/native/ios/DerivedData}"
 auth_url="${LINKS_AUTH_URL:-https://api.links.invalid}"
+destination="${LINKS_IOS_DESTINATION:-generic/platform=iOS}"
 provisioning_args=()
 if [[ "${LINKS_ALLOW_PROVISIONING_UPDATES:-1}" == "1" ]]; then
   provisioning_args+=(-allowProvisioningUpdates)
@@ -37,7 +38,7 @@ LINKS_IDENTITY_LIB_DIR="$repo_root/target/aarch64-apple-ios/debug" \
     -scheme Links-iOS-Debug \
     -configuration Debug \
     -sdk iphoneos \
-    -destination 'generic/platform=iOS' \
+    -destination "$destination" \
     -derivedDataPath "$derived_data_path" \
     DEVELOPMENT_TEAM="$team" \
     LINKS_AUTH_URL="$auth_url" \

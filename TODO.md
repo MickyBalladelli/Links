@@ -917,9 +917,11 @@ Run these checks continuously at the relevant phase boundary, with the full audi
   `native/ios/LinksIOS.xcodeproj` embeds `LinksClient` and `LinksKeyStore`,
   includes the iOS Keychain entitlement, accepts automatic Apple Development
   signing, and provides `scripts/build-ios-debug.sh` for an arm64 iPhone build.
-- [ ] Verify the signed iOS Debug build on a physical iPhone.
-  This remains open until Xcode has the iOS platform installed, a registered
-  Apple Development Team, a connected device, and a successful install.
+- [x] Verify the signed iOS Debug build on a physical iPhone.
+  Xcode 26.6 built and signed `ai.links.Links.iOS` with the Apple Development
+  profile for team `3SZ568CM7P`, and `devicectl` installed it on the connected
+  iPhone 11 (`00008030-001D44593E6B402E`). First launch still needs the user to
+  trust the development profile on the phone.
 - [ ] Add QR scanning for signed `links://connect` pairing payloads on Android
   and iOS. Show the account, device, and public-key summary before approval.
 - [ ] Add mobile pairing approval. Validate the signed payload, call

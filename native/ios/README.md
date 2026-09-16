@@ -21,6 +21,15 @@ Select a real Apple Development Team in Xcode, or pass it on the command line:
 DEVELOPMENT_TEAM=YOUR_TEAM_ID bash scripts/build-ios-debug.sh
 ```
 
+For a connected phone, target its UDID so Xcode registers that device in the
+development profile:
+
+```sh
+DEVELOPMENT_TEAM=YOUR_TEAM_ID \
+LINKS_IOS_DESTINATION="id=YOUR_DEVICE_UDID" \
+bash scripts/build-ios-debug.sh
+```
+
 The script builds both Rust static libraries for `aarch64-apple-ios`, then
 builds and signs `Links.app` with the `Links-iOS-Debug` scheme. Open the
 resulting app in Xcode, select a connected iPhone, and run it. Automatic
