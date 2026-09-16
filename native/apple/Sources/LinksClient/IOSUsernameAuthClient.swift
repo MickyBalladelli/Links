@@ -6,6 +6,7 @@ public enum IOSUsernameAuthError: Error {
     case invalidRequest
     case invalidResponse
     case serviceRejected
+    case serverRejected(statusCode: Int)
     case conflict
     case rateLimited(retryAfterSeconds: Int?)
 }
@@ -246,7 +247,7 @@ public final class IOSUsernameAuthClient: Sendable {
             if http.statusCode == 409 {
                 throw IOSUsernameAuthError.conflict
             }
-            throw IOSUsernameAuthError.serviceRejected
+            throw IOSUsernameAuthError.serverRejected(statusCode: http.statusCode)
         }
         return try decodeObject(data)
     }
@@ -265,7 +266,7 @@ public final class IOSUsernameAuthClient: Sendable {
             if http.statusCode == 409 {
                 throw IOSUsernameAuthError.conflict
             }
-            throw IOSUsernameAuthError.serviceRejected
+            throw IOSUsernameAuthError.serverRejected(statusCode: http.statusCode)
         }
         return try decodeObject(data)
     }

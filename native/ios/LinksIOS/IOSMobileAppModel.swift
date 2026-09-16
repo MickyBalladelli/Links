@@ -125,14 +125,55 @@ final class IOSMobileAppModel: ObservableObject {
                 self.isBusy = false
                 self.status = action == .register ? "Username registered" : "Account authenticated"
                 self.refreshState()
+            } catch let usernameError as IOSUsernameAuthError {
+                guard let self else { return }
+                self.isBusy = false
+                self.status = action == .register ? "Username registration failed" : "Username login failed"
+                self.error = self.usernameErrorMessage(usernameError, action: action)
             } catch {
                 guard let self else { return }
                 self.isBusy = false
                 self.status = action == .register ? "Username registration failed" : "Username login failed"
-                self.error = action == .register
-                    ? "Could not register this username. It may already be in use."
-                    : "Could not log in. Check the username and local auth service."
+                self.error = "The local identity could not complete the request. Check the profile and auth service."
             }
+        }
+    }
+
+    private func usernameErrorMessage(_ error: IOSUsernameAuthError,
+                                      action: IOSUsernameAction) -> String {
+        switch error {
+        case .invalidEndpoint:
+            return "The auth service URL is invalid. Check LINKS_AUTH_URL."
+        case .invalidHandle:
+            return "Use a lowercase username with 3–32 letters, numbers, or underscores."
+        case .invalidRequest:
+            return "The auth request was invalid. Recreate the local identity and try again."
+        case .invalidResponse:
+            return "The auth service returned an invalid response. Check the local backend."
+        case .serviceRejected:
+            return "Cannot reach the auth service. Check HTTPS trust, the endpoint, and the local backend."
+        case .serverRejected(let statusCode):
+            switch statusCode {
+            case 400:
+                return "The auth service rejected the request (HTTP 400). Check the backend and identity."
+            case 401, 403:
+                return action == .login
+                    ? "The auth service rejected this identity (HTTP \(statusCode)). Use the profile that registered this username."
+                    : "The auth service rejected this identity (HTTP \(statusCode))."
+            case 404:
+                return "The auth endpoint was not found (HTTP 404). Check the auth service URL."
+            case 500...599:
+                return "The auth service is unavailable (HTTP \(statusCode)). Restart the local backend."
+            default:
+                return "The auth service rejected the request (HTTP \(statusCode))."
+            }
+        case .conflict:
+            return "Username already exists. Choose another username."
+        case .rateLimited(let retryAfterSeconds):
+            if let retryAfterSeconds {
+                return "Too many requests. Try again in \(retryAfterSeconds) seconds."
+            }
+            return "Too many requests. Try again later."
         }
     }
 

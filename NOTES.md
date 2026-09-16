@@ -6,6 +6,7 @@
 ./launch-links.sh
 
 
-./scripts/launch-iphone.sh
+unset LINKS_AUTH_URL
+bash scripts/launch-iphone.sh
 
 ```
