@@ -23,7 +23,8 @@ typedef int32_t (*LinksDesktopSaveStateCallback)(void *context, const uint8_t *b
 typedef int32_t (*LinksDesktopSendFrameCallback)(void *context, const uint8_t *bytes,
                                                   size_t length);
 typedef int32_t (*LinksDesktopTextCallback)(void *context, const uint8_t *conversation,
-                                             size_t conversation_length, const uint8_t *sender,
+                                             size_t conversation_length, const uint8_t *sender_user,
+                                             size_t sender_user_length, const uint8_t *sender,
                                              size_t sender_length, const uint8_t *text,
                                              size_t text_length, uint64_t sequence_id,
                                              uint64_t sent_at_ms);

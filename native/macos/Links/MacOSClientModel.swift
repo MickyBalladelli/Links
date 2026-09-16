@@ -17,9 +17,19 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     let id: String
     var title: String
     let recipientUserID: String
+    var peerUserID: String?
     var messages: [LinksMacOSMessage]
 
     var isIncoming: Bool { recipientUserID.isEmpty }
+
+    init(id: String, title: String, recipientUserID: String,
+         peerUserID: String? = nil, messages: [LinksMacOSMessage]) {
+        self.id = id
+        self.title = title
+        self.recipientUserID = recipientUserID
+        self.peerUserID = peerUserID
+        self.messages = messages
+    }
 }
 
 struct LinksMacOSContact: Identifiable, Equatable, Codable {
@@ -816,6 +826,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             id: UUID().uuidString.lowercased(),
             title: cleanTitle,
             recipientUserID: cleanRecipient,
+            peerUserID: cleanRecipient,
             messages: [])
         conversations.append(conversation)
         selectedConversationID = conversation.id
@@ -865,10 +876,19 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     func startConversation(with contact: LinksMacOSContact) {
-        if let existing = conversations.first(where: {
-            $0.recipientUserID == contact.userID
+        if let index = conversations.firstIndex(where: {
+            $0.peerUserID == contact.userID
+                || (!$0.isIncoming && $0.recipientUserID == contact.userID)
         }) {
-            selectedConversationID = existing.id
+            if conversations[index].isIncoming {
+                conversations[index] = LinksMacOSConversation(
+                    id: conversations[index].id,
+                    title: "@\(contact.handle)",
+                    recipientUserID: contact.userID,
+                    peerUserID: contact.userID,
+                    messages: conversations[index].messages)
+            }
+            selectedConversationID = conversations[index].id
             persistLocalState()
             return
         }
@@ -1080,23 +1100,30 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             isOutgoing: false,
             sentAt: Date(timeIntervalSince1970: TimeInterval(message.sentAtMs) / 1000),
             senderDeviceID: message.senderDeviceID)
-        if let index = conversations.firstIndex(where: { $0.id == message.conversationID }) {
+        let index = conversations.firstIndex(where: { $0.id == message.conversationID })
+            ?? conversations.firstIndex(where: {
+                $0.peerUserID == message.senderUserID
+                    || (!$0.isIncoming && $0.recipientUserID == message.senderUserID)
+            })
+        let selectedID: String
+        if let index {
+            conversations[index].peerUserID = message.senderUserID
             conversations[index].messages.append(received)
+            selectedID = conversations[index].id
         } else {
             conversations.append(LinksMacOSConversation(
                 id: message.conversationID,
-                title: "Incoming conversation",
+                title: contacts.first(where: { $0.userID == message.senderUserID })
+                    .map { "@\($0.handle)" } ?? "Incoming conversation",
                 recipientUserID: "",
+                peerUserID: message.senderUserID,
                 messages: [received]))
+            selectedID = message.conversationID
         }
-        selectedConversationID = message.conversationID
-        if conversations.contains(where: {
-            $0.id == message.conversationID && $0.isIncoming
-        }) {
-            conversationSetupStatus = "Secure two-user MLS conversation ready"
-            actionError = nil
-            clearLastError()
-        }
+        selectedConversationID = selectedID
+        conversationSetupStatus = "Secure two-user MLS conversation ready"
+        actionError = nil
+        clearLastError()
         persistLocalState()
     }
 
@@ -1270,6 +1297,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
               conversation.title.utf8.count <= 256,
               conversation.recipientUserID.isEmpty
                   || IOSClient.isCanonicalUUID(conversation.recipientUserID),
+              conversation.peerUserID.map(IOSClient.isCanonicalUUID) ?? true,
               conversation.messages.count <= 10_000 else {
             return false
         }

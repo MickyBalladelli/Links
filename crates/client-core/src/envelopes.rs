@@ -15,6 +15,11 @@ pub struct FanoutRecipient {
     pub envelope_id: String,
 }
 
+pub struct AuthenticatedEnvelope {
+    pub message: v1::Message,
+    pub sender_user_id: String,
+}
+
 impl FanoutRecipient {
     pub fn new(recipient_device_id: String) -> Result<Self, CoreError> {
         protocol::validate_id(&recipient_device_id)?;
@@ -213,11 +218,11 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
         Ok(envelope)
     }
 
-    pub fn open_envelope(
+    pub fn open_envelope_authenticated(
         &mut self,
         envelope: &v1::Envelope,
         now_ms: u64,
-    ) -> Result<v1::Message, CoreError> {
+    ) -> Result<AuthenticatedEnvelope, CoreError> {
         protocol::validate_enqueue(envelope, now_ms)?;
         if envelope.recipient_device_id != self.identity.device_id() {
             return Err(CoreError::Authentication);
@@ -234,7 +239,19 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
         {
             return Err(CoreError::Authentication);
         }
-        Ok(message)
+        protocol::validate_id(&application.sender_user_id)?;
+        Ok(AuthenticatedEnvelope {
+            message,
+            sender_user_id: application.sender_user_id,
+        })
+    }
+
+    pub fn open_envelope(
+        &mut self,
+        envelope: &v1::Envelope,
+        now_ms: u64,
+    ) -> Result<v1::Message, CoreError> {
+        Ok(self.open_envelope_authenticated(envelope, now_ms)?.message)
     }
 }
 
@@ -360,6 +377,7 @@ mod tests {
             assert_eq!(ciphertext, b"opaque-mls");
             Ok(crate::mls::AuthenticatedApplication {
                 conversation_id: self.authenticated_group.clone(),
+                sender_user_id: USER.into(),
                 sender_device_id: self.authenticated_sender.clone(),
                 plaintext: SecretBytes::new(self.message.encode_to_vec()),
             })

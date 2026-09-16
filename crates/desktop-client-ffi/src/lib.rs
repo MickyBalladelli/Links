@@ -72,6 +72,8 @@ pub type TextCallback = unsafe extern "C" fn(
     usize,
     *const u8,
     usize,
+    *const u8,
+    usize,
     u64,
     u64,
 ) -> i32;
@@ -864,10 +866,19 @@ impl LinksDesktopCore {
         for item in &batch.items {
             let Some(entry) = item.entry.as_ref() else { return Err(CoreError::InvalidSync) };
             if let v1::queue_item::Entry::Envelope(envelope) = entry {
-                match self.client.open_envelope(envelope, now_ms()) {
+                match self.client.open_envelope_authenticated(envelope, now_ms()) {
                     Ok(message) => {
+                        let sender_user_id = message.sender_user_id;
+                        let message = message.message;
                         if let Some(v1::message::Content::Text(text)) = message.content {
-                            rendered.push((message.conversation_id, message.sender_device_id, text, message.sequence_id, message.sent_at_ms));
+                            rendered.push((
+                                message.conversation_id,
+                                sender_user_id,
+                                message.sender_device_id,
+                                text,
+                                message.sequence_id,
+                                message.sent_at_ms,
+                            ));
                         }
                     }
                     Err(CoreError::Authentication) => {
@@ -916,14 +927,16 @@ impl LinksDesktopCore {
             self.send_frame(&replay)?;
         }
         if let Some(callback) = self.callbacks.on_text {
-            for (conversation, sender, text, sequence, sent_at) in rendered {
+            for (conversation, sender_user, sender, text, sequence, sent_at) in rendered {
                 let conversation_bytes = conversation.as_bytes();
+                let sender_user_bytes = sender_user.as_bytes();
                 let sender_bytes = sender.as_bytes();
                 let text_bytes = text.as_bytes();
                 callback_status(unsafe {
                     callback(
                         self.callbacks.context,
                         conversation_bytes.as_ptr(), conversation_bytes.len(),
+                        sender_user_bytes.as_ptr(), sender_user_bytes.len(),
                         sender_bytes.as_ptr(), sender_bytes.len(),
                         text_bytes.as_ptr(), text_bytes.len(), sequence, sent_at,
                     )

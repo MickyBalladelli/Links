@@ -179,6 +179,8 @@ private func macOSRustText(
     _ context: UnsafeMutableRawPointer?,
     _ conversation: UnsafePointer<UInt8>?,
     _ conversationLength: Int,
+    _ senderUser: UnsafePointer<UInt8>?,
+    _ senderUserLength: Int,
     _ sender: UnsafePointer<UInt8>?,
     _ senderLength: Int,
     _ text: UnsafePointer<UInt8>?,
@@ -187,9 +189,11 @@ private func macOSRustText(
     _ sentAtMs: UInt64) -> Int32 {
     guard let box = callbackBox(context),
           let conversation = callbackData(conversation, conversationLength),
+          let senderUser = callbackData(senderUser, senderUserLength),
           let sender = callbackData(sender, senderLength),
           let text = callbackData(text, textLength),
           let conversationID = String(data: conversation, encoding: .utf8),
+          let senderUserID = String(data: senderUser, encoding: .utf8),
           let senderDeviceID = String(data: sender, encoding: .utf8),
           let text = String(data: text, encoding: .utf8) else {
         return Int32(LINKS_DESKTOP_INVALID)
@@ -197,6 +201,7 @@ private func macOSRustText(
     do {
         let message = try IOSReceivedTextMessage(
             conversationID: conversationID,
+            senderUserID: senderUserID,
             senderDeviceID: senderDeviceID,
             text: text,
             sequenceID: sequenceID,

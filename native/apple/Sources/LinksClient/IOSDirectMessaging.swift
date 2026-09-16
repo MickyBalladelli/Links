@@ -12,14 +12,16 @@ public enum IOSCoreFrameResult: Equatable, Sendable {
 
 public struct IOSReceivedTextMessage: Sendable {
     public let conversationID: String
+    public let senderUserID: String
     public let senderDeviceID: String
     public let text: String
     public let sequenceID: UInt64
     public let sentAtMs: UInt64
 
-    public init(conversationID: String, senderDeviceID: String, text: String,
+    public init(conversationID: String, senderUserID: String, senderDeviceID: String, text: String,
                 sequenceID: UInt64, sentAtMs: UInt64) throws {
         guard IOSClient.isCanonicalUUID(conversationID),
+              IOSClient.isCanonicalUUID(senderUserID),
               IOSClient.isCanonicalUUID(senderDeviceID),
               !text.isEmpty,
               text.utf8.count <= IOSInternalTextMilestone.maximumTextBytes,
@@ -27,6 +29,7 @@ public struct IOSReceivedTextMessage: Sendable {
             throw IOSMessagingError.invalidMessage
         }
         self.conversationID = conversationID
+        self.senderUserID = senderUserID
         self.senderDeviceID = senderDeviceID
         self.text = text
         self.sequenceID = sequenceID

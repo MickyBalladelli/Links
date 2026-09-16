@@ -381,6 +381,11 @@ exchanging encrypted one-to-one text through the same local development stack.
   onboarding screen, conversation list, message list, composer, send action,
   and receive rendering. The UI stays fail-closed until a concrete shared-core
   and durable host is installed.
+- [x] Combine outgoing conversations and received messages into one conversation per peer.
+  Received MLS metadata now carries the verified sender user ID through the
+  Rust/Swift boundary, allowing the macOS model to merge received messages
+  into the matching contact conversation instead of creating a separate
+  incoming row.
 - [x] Add macOS signing, Keychain entitlements, hardened runtime settings, and a documented local unsigned-debug path.
   The macOS target uses Automatic signing with Apple Development for Debug and
   Developer ID Application for Release, enables the hardened runtime, and

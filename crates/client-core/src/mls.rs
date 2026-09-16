@@ -25,6 +25,7 @@ pub const MLS_CIPHERSUITE: Ciphersuite =
 /// Metadata must come from verified MLS authentication, never plaintext claims.
 pub struct AuthenticatedApplication {
     pub conversation_id: String,
+    pub sender_user_id: String,
     pub sender_device_id: String,
     pub plaintext: SecretBytes,
 }
@@ -728,6 +729,7 @@ where
         };
         Ok(AuthenticatedApplication {
             conversation_id: conversation_id(&group_id)?,
+            sender_user_id: binding.user_id.to_string(),
             sender_device_id: binding.device_id.to_string(),
             plaintext: SecretBytes::new(plaintext),
         })
