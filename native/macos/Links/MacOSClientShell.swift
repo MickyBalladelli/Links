@@ -411,6 +411,7 @@ private struct StateRow: View {
 private struct LinksConversationDetail: View {
     @ObservedObject var model: LinksMacOSAppModel
     @State private var repairConfirmationPresented = false
+    @State private var removeConnectionConfirmationPresented = false
 
     var body: some View {
         if let conversation = model.selectedConversation {
@@ -435,6 +436,13 @@ private struct LinksConversationDetail: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(!model.canInitializeSelectedConversation)
+                        Button {
+                            removeConnectionConfirmationPresented = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Remove this local connection")
                     }
                     Text(model.connectionStatus)
                         .font(.caption)
@@ -464,6 +472,17 @@ private struct LinksConversationDetail: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This replaces the broken encryption group. Messages already stuck in the old group cannot be recovered and will be discarded from delivery.")
+            }
+            .confirmationDialog(
+                "Remove connection with (conversation.title)?",
+                isPresented: $removeConnectionConfirmationPresented,
+                titleVisibility: .visible) {
+                Button("Remove connection", role: .destructive) {
+                    model.removeSelectedConnection()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the local conversation only. Your account, contact, and identity stay safe.")
             }
         } else {
             VStack(spacing: 14) {

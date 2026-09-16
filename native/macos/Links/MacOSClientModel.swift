@@ -742,6 +742,29 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         publishProfileStatus()
     }
 
+    /// Remove only the selected local chat connection. The saved contact,
+    /// account identity, Keychain seed, and other conversations stay intact.
+    /// A later click on the contact creates a fresh conversation ID.
+    func removeSelectedConnection() {
+        guard let conversationID = selectedConversationID,
+              let conversation = conversations.first(where: {
+                  $0.id == conversationID
+              }) else {
+            actionError = "Select a conversation to remove."
+            return
+        }
+        guard !initializingConversationIDs.contains(conversation.id) else {
+            actionError = "Secure chat setup is still running. Try again when it finishes."
+            return
+        }
+        conversations.removeAll { $0.id == conversation.id }
+        initializedConversationIDs.remove(conversation.id)
+        selectedConversationID = conversations.first?.id
+        conversationSetupStatus = "MLS conversation not initialized"
+        actionError = nil
+        persistLocalState()
+    }
+
     func recoverStaleCursor() {
         guard let messaging else {
             deliveryState = .notConfigured
