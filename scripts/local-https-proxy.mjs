@@ -29,6 +29,7 @@ const mobileCertificatePath = process.env.LINKS_TLS_CERT_DER_FILE || join(
   tlsDirectory,
   usingCustomCertificate ? 'server-cert.cer' : 'root-cert.cer'
 )
+const mobileProfilePath = join(tlsDirectory, 'root-cert.mobileconfig')
 
 if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
   fail('LINKS_HTTPS_PORT must be a valid TCP port')
@@ -156,7 +157,7 @@ function checkAuthUpstream(response) {
   })
   socket.once('connect', () => {
     socket.end()
-    finish(200, '{"status":"ok","proxy":"links-https-v2"}\n')
+    finish(200, '{"status":"ok","proxy":"links-https-v3"}\n')
   })
   socket.once('error', () => {
     finish(503, '{"status":"degraded","auth":"unavailable"}\n')
@@ -234,6 +235,7 @@ function ensureCertificate() {
 
   if (rootComplete && serverComplete && !regenerate) {
     ensureMobileCertificate()
+    ensureMobileProfile()
     return
   }
 
@@ -330,6 +332,7 @@ function ensureCertificate() {
   chmodSync(rootCertificatePath, 0o644)
   chmodSync(certificatePath, 0o644)
   ensureMobileCertificate()
+  ensureMobileProfile()
 }
 
 function ensureMobileCertificate() {
@@ -354,6 +357,41 @@ function ensureMobileCertificate() {
     chmodSync(mobileCertificatePath, 0o644)
   } catch (_error) {
     fail('Could not create the iPhone certificate file. The HTTPS server certificate was created, but iPhone installation needs openssl.')
+  }
+}
+
+function ensureMobileProfile() {
+  if (usingCustomCertificate || existsSync(mobileProfilePath)) {
+    return
+  }
+
+  try {
+    const certificateBase64 = readFileSync(mobileCertificatePath).toString('base64')
+    const profile = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+      '<plist version="1.0"><dict>',
+      '<key>PayloadContent</key><array><dict>',
+      '<key>PayloadCertificateFileName</key><string>root-cert.cer</string>',
+      '<key>PayloadContent</key><data>' + certificateBase64 + '</data>',
+      '<key>PayloadDisplayName</key><string>Links Local Development CA</string>',
+      '<key>PayloadIdentifier</key><string>ai.links.local-development-ca</string>',
+      '<key>PayloadType</key><string>com.apple.security.root</string>',
+      '<key>PayloadUUID</key><string>1C0C0E86-2C56-4DAB-8D63-45A3D3F1E6A4</string>',
+      '<key>PayloadVersion</key><integer>1</integer>',
+      '</dict></array>',
+      '<key>PayloadDisplayName</key><string>Links Local HTTPS Trust</string>',
+      '<key>PayloadIdentifier</key><string>ai.links.local-development</string>',
+      '<key>PayloadOrganization</key><string>Links</string>',
+      '<key>PayloadRemovalDisallowed</key><false/>',
+      '<key>PayloadType</key><string>Configuration</string>',
+      '<key>PayloadUUID</key><string>8B46879E-7A75-4A57-8AA1-7D52C6E4D5C2</string>',
+      '<key>PayloadVersion</key><integer>1</integer>',
+      '</dict></plist>\n'
+    ].join('\n')
+    writeFileSync(mobileProfilePath, profile, { mode: 0o644 })
+  } catch (_error) {
+    fail('Could not create the iPhone trust profile.')
   }
 }
 

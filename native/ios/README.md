@@ -61,10 +61,10 @@ LINKS_LAN_IP="$(ipconfig getifaddr en0)" node scripts/local-https-proxy.mjs
 
 The iPhone must trust the generated certificate before making requests:
 
-1. Use the exact `root-cert.cer` path printed by
-   `scripts/launch-iphone.sh`. Copy that file to the iPhone with AirDrop or
-   Files and install the certificate profile. Do not install an old
-   `cert-<mac-ip>.cer` server certificate.
+1. Use the exact `root-cert.mobileconfig` path printed by
+   `scripts/launch-iphone.sh`. Copy that profile to the iPhone with AirDrop,
+   Mail, or Safari. Do not install an old `cert-<mac-ip>.cer` server
+   certificate. The raw `root-cert.cer` file is only a fallback.
 2. Open Settings > General > About > Certificate Trust Settings.
 3. Enable full trust for the Links local certificate.
 

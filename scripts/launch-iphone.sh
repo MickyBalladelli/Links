@@ -13,7 +13,7 @@ proxy_started=0
 proxy_health() {
   local health_response
   health_response="$(curl --silent --show-error --fail --insecure --max-time 1 "$auth_url/healthz" 2>/dev/null || true)"
-  [[ "$health_response" == *'"proxy":"links-https-v2"'* ]] && [[ -f "$root_cert" ]]
+  [[ "$health_response" == *'"proxy":"links-https-v3"'* ]] && [[ -f "$root_cert" ]]
 }
 
 if [[ -n "$auth_url" ]]; then
@@ -99,7 +99,8 @@ if [[ -z "$auth_url" ]]; then
     fi
     echo "HTTPS proxy ready on $auth_url" >&2
   fi
-  echo "Install and fully trust this iPhone certificate: $root_cert" >&2
+  echo "Install this iPhone trust profile: $proxy_dir/root-cert.mobileconfig" >&2
+  echo "Certificate fallback: $root_cert" >&2
 fi
 
 case "$auth_url" in
