@@ -80,6 +80,7 @@ if [[ -z "$auth_url" ]]; then
     fi
     echo "HTTPS proxy ready on $auth_url" >&2
   fi
+  echo "Install and fully trust this iPhone certificate: $proxy_dir/root-cert-$lan_ip.cer" >&2
 fi
 
 case "$auth_url" in
