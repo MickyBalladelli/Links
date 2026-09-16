@@ -10,6 +10,17 @@ device_id="${LINKS_IOS_DEVICE_ID:-00008030-001D44593E6B402E}"
 derived_data_path="${LINKS_IOS_DERIVED_DATA_PATH:-$repo_root/native/ios/DerivedData}"
 proxy_started=0
 
+if [[ -n "$auth_url" ]]; then
+  authority="$(printf '%s' "$auth_url" | sed -E 's#^[^:]+://([^/]+).*$#\1#')"
+  case "$authority" in
+    127.0.0.1|127.0.0.1:*|localhost|localhost:*|::1|::1:*)
+      echo "Loopback auth URL cannot work on a physical iPhone: $auth_url" >&2
+      echo "Using the Mac LAN endpoint instead." >&2
+      auth_url=""
+      ;;
+  esac
+fi
+
 if [[ -z "$team" ]]; then
   echo "Set DEVELOPMENT_TEAM to your Apple Development Team ID." >&2
   echo "Example: LINKS_AUTH_URL=https://auth.example bash scripts/launch-iphone.sh" >&2

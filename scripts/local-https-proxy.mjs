@@ -88,8 +88,7 @@ function proxyHttpRequest(request, response) {
   const requestPath = pathname(request.url)
 
   if (requestPath === '/healthz') {
-    response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-    response.end('{"status":"ok"}\n')
+    checkAuthUpstream(response)
     return
   }
 
@@ -138,6 +137,30 @@ function proxyHttpRequest(request, response) {
     logRequest(request.method, requestPath, 502)
   })
   request.pipe(upstream)
+}
+
+function checkAuthUpstream(response) {
+  let completed = false
+  const finish = (status, body) => {
+    if (completed || response.writableEnded) {
+      return
+    }
+    completed = true
+    response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    response.end(body)
+  }
+  const socket = tcpConnect(authPort, authHost)
+  socket.setTimeout(1000, () => {
+    socket.destroy()
+    finish(503, '{"status":"degraded","auth":"unavailable"}\n')
+  })
+  socket.once('connect', () => {
+    socket.end()
+    finish(200, '{"status":"ok"}\n')
+  })
+  socket.once('error', () => {
+    finish(503, '{"status":"degraded","auth":"unavailable"}\n')
+  })
 }
 
 function proxyWebSocket(request, clientSocket, head) {

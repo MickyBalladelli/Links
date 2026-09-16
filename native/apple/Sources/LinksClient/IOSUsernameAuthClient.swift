@@ -7,6 +7,10 @@ public enum IOSUsernameAuthError: Error {
     case invalidResponse
     case serviceRejected
     case serverRejected(statusCode: Int)
+    case networkUnavailable
+    case cannotConnect
+    case timedOut
+    case tlsRejected
     case conflict
     case rateLimited(retryAfterSeconds: Int?)
 }
@@ -274,6 +278,20 @@ public final class IOSUsernameAuthClient: Sendable {
     private func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await urlSession.data(for: request)
+        } catch let error as URLError {
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                throw IOSUsernameAuthError.networkUnavailable
+            case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                throw IOSUsernameAuthError.cannotConnect
+            case .timedOut:
+                throw IOSUsernameAuthError.timedOut
+            case .serverCertificateUntrusted, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .secureConnectionFailed:
+                throw IOSUsernameAuthError.tlsRejected
+            default:
+                throw IOSUsernameAuthError.serviceRejected
+            }
         } catch {
             throw IOSUsernameAuthError.serviceRejected
         }

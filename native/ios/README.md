@@ -47,6 +47,12 @@ IPv4 address, starts the built-in Node HTTPS bridge, and uses
 at `127.0.0.1:8081`. Its generated certificate and log live under
 `native/ios/LocalHTTPS/`.
 
+Start the local Rust services before launching the iPhone build. The launcher
+checks that account-auth is reachable on port 8080 and stops with a clear
+error if it is not. Do not use `https://127.0.0.1:8443` for a physical
+iPhone: that points to the iPhone itself. If a stale loopback URL is exported,
+the launcher replaces it with the Mac LAN endpoint automatically.
+
 You can run the bridge by itself with:
 
 ```sh

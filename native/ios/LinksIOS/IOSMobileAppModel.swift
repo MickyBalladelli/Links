@@ -151,7 +151,15 @@ final class IOSMobileAppModel: ObservableObject {
         case .invalidResponse:
             return "The auth service returned an invalid response. Check the local backend."
         case .serviceRejected:
-            return "Cannot reach the auth service. Check HTTPS trust, the endpoint, and the local backend."
+            return "Cannot reach the auth service at \(authEndpointText). Check the endpoint and local backend."
+        case .networkUnavailable:
+            return "This iPhone has no usable network connection."
+        case .cannotConnect:
+            return "Cannot connect to \(authEndpointText). Check the Mac IP, same Wi-Fi, and HTTPS proxy."
+        case .timedOut:
+            return "The auth service at \(authEndpointText) timed out. Check the Mac and local backend."
+        case .tlsRejected:
+            return "The iPhone rejected the HTTPS certificate. Install and fully trust the Links local root certificate."
         case .serverRejected(let statusCode):
             switch statusCode {
             case 400:
