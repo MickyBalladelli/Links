@@ -771,6 +771,21 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         publishProfileStatus()
     }
 
+    /// Sign out of the account while preserving this profile's identity and
+    /// encrypted local state. The bearer session is memory-only, so clearing
+    /// it returns the app to account authentication without deleting data.
+    func logout() {
+        disconnect()
+        discardMessaging()
+        client?.clearAuthenticatedSession()
+        initializedConversationIDs.removeAll()
+        initializingConversationIDs.removeAll()
+        conversationSetupStatus = "Sign in to reconnect"
+        actionError = nil
+        clearLastError()
+        refreshClientState()
+    }
+
     /// Remove only the selected local chat connection. The saved contact,
     /// account identity, Keychain seed, and other conversations stay intact.
     /// A later click on the contact creates a fresh conversation ID.

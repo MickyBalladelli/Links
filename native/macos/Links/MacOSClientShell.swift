@@ -405,6 +405,7 @@ private struct ProfileSummaryCard: View {
     @ObservedObject var model: LinksMacOSAppModel
     @Binding var showingPairing: Bool
     @State private var showingDetails = false
+    @State private var logoutConfirmationPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -458,6 +459,14 @@ private struct ProfileSummaryCard: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .help("Pair device")
+
+                Spacer()
+                Button("Log out") {
+                    logoutConfirmationPresented = true
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .foregroundStyle(.secondary)
             }
 
             DisclosureGroup("Profile details", isExpanded: $showingDetails) {
@@ -480,6 +489,17 @@ private struct ProfileSummaryCard: View {
             .font(.caption)
         }
         .padding(14)
+        .confirmationDialog(
+            "Log out of this profile?",
+            isPresented: $logoutConfirmationPresented,
+            titleVisibility: .visible) {
+            Button("Log out", role: .destructive) {
+                model.logout()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your identity, contacts, conversations, and encrypted local state stay on this Mac. You will need to sign in again to reconnect.")
+        }
     }
 }
 
