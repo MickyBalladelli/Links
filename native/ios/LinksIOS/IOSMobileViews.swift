@@ -435,6 +435,7 @@ private struct IOSConversationRow: View {
 
 private struct IOSNewConversationSheet: View {
     @ObservedObject var model: IOSMobileAppModel
+    let onCreated: (IOSMobileConversation) -> Void
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
     @State private var handle = ""
@@ -529,7 +530,8 @@ private struct IOSNewConversationSheet: View {
 
     private func createConversation() {
         Task {
-            if await model.createConversation(handle: handle) != nil {
+            if let conversation = await model.createConversation(handle: handle) {
+                onCreated(conversation)
                 dismiss()
             }
         }
@@ -539,9 +541,10 @@ private struct IOSNewConversationSheet: View {
 private struct IOSPeopleView: View {
     @ObservedObject var model: IOSMobileAppModel
     @State private var showingNewConversation = false
+    @State private var path = [String]()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if model.contacts.isEmpty {
                     VStack(spacing: 15) {
@@ -565,7 +568,11 @@ private struct IOSPeopleView: View {
                     List {
                         ForEach(model.contacts) { contact in
                             Button {
-                                Task { _ = await model.createConversation(handle: contact.handle) }
+                                Task {
+                                    if let conversation = await model.createConversation(handle: contact.handle) {
+                                        path.append(conversation.id)
+                                    }
+                                }
                             } label: {
                                 HStack(spacing: 13) {
                                     IOSAvatar(name: contact.handle, size: 46)
@@ -607,8 +614,18 @@ private struct IOSPeopleView: View {
                     .accessibilityLabel("Add someone")
                 }
             }
+            .navigationDestination(for: String.self) { conversationID in
+                if let conversation = model.conversations.first(where: { $0.id == conversationID }) {
+                    IOSConversationView(conversation: conversation)
+                } else {
+                    Text("Conversation unavailable")
+                        .foregroundStyle(.secondary)
+                }
+            }
             .sheet(isPresented: $showingNewConversation) {
-                IOSNewConversationSheet(model: model)
+                IOSNewConversationSheet(model: model) { conversation in
+                    path.append(conversation.id)
+                }
             }
         }
     }
