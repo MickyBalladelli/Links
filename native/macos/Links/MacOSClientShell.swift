@@ -317,18 +317,11 @@ private struct AccountOnboardingBackground: View {
 private struct AccountOnboardingHero: View {
     var body: some View {
         HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 17)
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing))
-                Image("LinksLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .padding(9)
-            }
+            Image("LinksLogo")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .clipShape(RoundedRectangle(cornerRadius: 17))
             .frame(width: 76, height: 76)
             .shadow(color: .blue.opacity(0.24), radius: 16, y: 7)
 
