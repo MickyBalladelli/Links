@@ -2,7 +2,6 @@ import Foundation
 @preconcurrency import LinksClient
 import LinksKeyStore
 import SwiftUI
-import UIKit
 
 enum IOSUsernameAction: String, CaseIterable, Identifiable {
     case register
@@ -448,10 +447,7 @@ struct IOSMobileRootView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    dismissKeyboard()
-                })
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Links")
             .overlay(alignment: .bottom) {
                 if let error = model.error {
@@ -473,11 +469,4 @@ struct IOSMobileRootView: View {
         }
     }
 
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil)
-    }
 }
