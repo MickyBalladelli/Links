@@ -353,6 +353,13 @@ final class IOSMobileAppModel: ObservableObject {
         pairingStatus = "Pairing link received. Review before approval."
     }
 
+    func signOut() {
+        client?.clearAuthenticatedSession()
+        status = "Signed out"
+        error = nil
+        refreshState()
+    }
+
     func clearError() {
         error = nil
     }
@@ -391,7 +398,48 @@ struct IOSMobileRootView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
+                if model.isAuthenticated {
+                    Section {
+                        Label("You're in", systemImage: "checkmark.shield.fill")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.green)
+                        Text("Your Links account is authenticated on this iPhone.")
+                            .foregroundStyle(.secondary)
+                        LabeledContent("Account", value: model.accountStatus)
+                        LabeledContent("Device", value: model.deviceStatus)
+                    }
+
+                    Section("Messages") {
+                        Label("No conversations yet", systemImage: "bubble.left.and.bubble.right")
+                        Text("Your secure account is ready. Conversations will appear here when messaging is connected.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("Approve another device") {
+                        Text("Paste a signed links://connect link. Review it before approval.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $model.pairingInput)
+                            .font(.system(.footnote, design: .monospaced))
+                            .frame(minHeight: 120)
+                        Button("Approve device") {
+                            model.approvePairing()
+                        }
+                        .disabled(model.isBusy)
+                        Text(model.pairingStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section {
+                        Button("Sign out", role: .destructive) {
+                            model.signOut()
+                        }
+                        .disabled(model.isBusy)
+                    }
+                } else {
+                    Section {
                     Label("Links mobile", systemImage: "lock.shield")
                         .font(.title2.weight(.semibold))
                     Text("Internal physical-device build")
@@ -430,7 +478,7 @@ struct IOSMobileRootView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textContentType(.username)
-                    Button(model.usernameAction == .register ? "Register username" : "Log in") {
+                    Button(model.usernameAction == .register ? "Register and continue" : "Log in and continue") {
                         model.authenticateUsername()
                     }
                     .disabled(model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
@@ -479,6 +527,7 @@ struct IOSMobileRootView: View {
                     Text(model.pairingStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
