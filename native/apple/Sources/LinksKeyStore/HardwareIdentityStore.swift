@@ -41,6 +41,15 @@ public final class HardwareIdentityStore {
         keychainNamespace = nil
 #endif
     }
+#if !os(macOS)
+    /// Use a separate iOS Keychain namespace for an additional local account.
+    public init(profile: ClientProfile) {
+        let provider = HardwareSeedVault(profile: profile)
+        vault = provider
+        self.profile = provider.profile
+        keychainNamespace = provider.keychainNamespace
+    }
+#endif
 #if os(macOS)
     /// Use the explicit macOS Keychain provider at the host boundary.
     public init(seedProvider: MacOSKeychainSeedProvider) {

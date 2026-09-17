@@ -141,7 +141,7 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var preparingConversationIDs = Set<String>()
 
     let authEndpointText: String
-    private let client: IOSClient?
+    private var client: IOSClient?
     private let usernameAuthClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
     private var preKeyAPI: IOSPreKeyHTTPClient?
@@ -270,6 +270,48 @@ final class IOSMobileAppModel: ObservableObject {
             api: usernameAuthClient,
             handle: cleanUsername,
             action: action)
+    }
+
+    /// Move to a new local profile without deleting the current account.
+    /// Each profile gets its own hardware-backed identity and metadata namespace.
+    func enrollNewUsername() {
+        guard !isBusy else { return }
+        let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        do {
+            try IOSUsernameAuthClient.validateHandle(cleanUsername)
+            let defaultClient = try IOSClient(
+                identityStore: HardwareIdentityStore(),
+                defaults: .standard,
+                profile: .default)
+            let profile = defaultClient.accountHandle == cleanUsername
+                ? ClientProfile.default
+                : try ClientProfile(name: cleanUsername)
+            persistLocalState()
+            stopActiveSession()
+
+            let newClient = try IOSClient(
+                identityStore: HardwareIdentityStore(profile: profile),
+                defaults: .standard,
+                profile: profile)
+            client = newClient
+            contacts.removeAll()
+            conversations.removeAll()
+            restoreLocalState()
+            usernameAction = newClient.accountHandle == nil ? .register : .login
+            username = cleanUsername
+            error = nil
+            status = "Preparing @\(cleanUsername)"
+            refreshState()
+
+            if !newClient.isEnrolled {
+                createIdentity { [weak self] in
+                    self?.authenticateUsername()
+                }
+            }
+        } catch {
+            status = "New username setup failed"
+            self.error = "Could not create a secure profile for this username."
+        }
     }
 
     private func startUsernameAuthentication(
@@ -749,6 +791,15 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     func signOut() {
+        stopActiveSession()
+        client?.clearAuthenticatedSession()
+        status = "Signed out"
+        error = nil
+        conversationCreationStatus = nil
+        refreshState()
+    }
+
+    private func stopActiveSession() {
         messaging?.shutdown()
         messaging = nil
         directChatDirectory = nil
@@ -759,11 +810,7 @@ final class IOSMobileAppModel: ObservableObject {
         messagingStatus = "Offline"
         preKeyStatus = "Waiting for sign in"
         preparingConversationIDs.removeAll()
-        client?.clearAuthenticatedSession()
-        status = "Signed out"
-        error = nil
-        conversationCreationStatus = nil
-        refreshState()
+        otpChallenge = nil
     }
 
     func clearError() {
@@ -902,4 +949,3 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
         }
     }
 }
-

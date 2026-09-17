@@ -47,6 +47,7 @@ private struct IOSOnboardingView: View {
     @ObservedObject var model: IOSMobileAppModel
     @FocusState private var usernameFocused: Bool
     @State private var showingPhoneLogin = false
+    @State private var showingNewUsernameConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -164,6 +165,22 @@ private struct IOSOnboardingView: View {
                             .opacity(model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                      ? 0.55 : 1)
 
+                            if model.isEnrolled {
+                                Button {
+                                    usernameFocused = false
+                                    showingNewUsernameConfirmation = true
+                                } label: {
+                                    Label("Enroll a new username", systemImage: "person.badge.plus")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 46)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(IOSLinksPalette.violet)
+                                .disabled(model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                          || model.isBusy)
+                            }
+
                             HStack(spacing: 7) {
                                 Image(systemName: "lock.fill")
                                     .foregroundStyle(IOSLinksPalette.mint)
@@ -203,6 +220,13 @@ private struct IOSOnboardingView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear { usernameFocused = true }
+            .confirmationDialog("Enroll a new username?", isPresented: $showingNewUsernameConfirmation,
+                                titleVisibility: .visible) {
+                Button("Create new identity") { model.enrollNewUsername() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your existing account stays on this iPhone. A separate secure profile will be created for this username.")
+            }
         }
     }
 }
@@ -643,6 +667,7 @@ private struct IOSProfileView: View {
     @ObservedObject var model: IOSMobileAppModel
     @State private var showingPairDevice = false
     @State private var showingSignOut = false
+    @State private var showingNewUsername = false
 
     var body: some View {
         NavigationStack {
@@ -686,6 +711,17 @@ private struct IOSProfileView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(IOSLinksPalette.coral)
+
+                    Button {
+                        showingNewUsername = true
+                    } label: {
+                        Label("Enroll another username", systemImage: "person.badge.plus")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(IOSLinksPalette.violet)
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
@@ -701,6 +737,13 @@ private struct IOSProfileView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Your hardware identity and saved conversations stay on this iPhone.")
+            }
+            .confirmationDialog("Enroll another username?", isPresented: $showingNewUsername,
+                                titleVisibility: .visible) {
+                Button("Continue") { model.signOut() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Links will keep this account saved, then let you create a separate username.")
             }
         }
     }
