@@ -613,6 +613,13 @@ impl AccountAuth {
         peer_ip: IpAddr,
         now: i64,
     ) -> Result<(), AuthError> {
+        // Username accounts are the explicit loopback development flow. Repeated
+        // installs and UI testing should not leave a developer locked out for an
+        // hour; production authentication modes retain the limits below.
+        if self.is_loopback_username_dev() {
+            return Ok(());
+        }
+
         let handle_minute_key =
             self.digest(b"links/username-handle-minute/v1\0", handle.as_bytes());
         let handle_hour_key = self.digest(b"links/username-handle-hour/v1\0", handle.as_bytes());

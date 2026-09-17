@@ -316,10 +316,20 @@ final class IOSMobileAppModel: ObservableObject {
         case .deviceAlreadyRegistered:
             return "This iPhone already has a registered username. Switch to Log in and use the first username."
         case .rateLimited(let retryAfterSeconds):
-            if let retryAfterSeconds {
-                return "Too many requests. Try again in \(retryAfterSeconds) seconds."
+            guard let retryAfterSeconds else {
+                return "Too many requests. Try again later."
             }
-            return "Too many requests. Try again later."
+            if retryAfterSeconds >= 3_600 {
+                let hours = Int(ceil(Double(retryAfterSeconds) / 3_600))
+                return hours == 1
+                    ? "Too many requests. Try again in about an hour."
+                    : "Too many requests. Try again in about \(hours) hours."
+            }
+            if retryAfterSeconds >= 60 {
+                let minutes = Int(ceil(Double(retryAfterSeconds) / 60))
+                return "Too many requests. Try again in about \(minutes) minute\(minutes == 1 ? "" : "s")."
+            }
+            return "Too many requests. Try again in \(retryAfterSeconds) second\(retryAfterSeconds == 1 ? "" : "s")."
         }
     }
 
