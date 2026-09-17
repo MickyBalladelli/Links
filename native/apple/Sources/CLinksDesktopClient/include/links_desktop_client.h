@@ -73,6 +73,9 @@ int32_t links_desktop_core_generate_mls_key_package(LinksDesktopCore *core, uint
 int32_t links_desktop_core_generate_prekey_upload(LinksDesktopCore *core, uint32_t curve_count,
                                                    uint32_t kem_count, uint8_t *output,
                                                    size_t capacity, size_t *length);
+int32_t links_desktop_core_has_recipient(const LinksDesktopCore *core,
+                                         const uint8_t *user_id, size_t user_id_length,
+                                         uint8_t *output);
 int32_t links_desktop_core_set_recipient(
     LinksDesktopCore *core, const uint8_t *user_id, size_t user_id_length,
     const uint8_t *device_id, size_t device_id_length, const uint8_t *identity_public_key,

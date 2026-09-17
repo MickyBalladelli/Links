@@ -167,18 +167,22 @@ private struct IOSOnboardingView: View {
 
                             if model.isEnrolled {
                                 Button {
-                                    usernameFocused = false
-                                    showingNewUsernameConfirmation = true
+                                    if model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        usernameFocused = true
+                                        model.error = "Enter a username first."
+                                    } else {
+                                        usernameFocused = false
+                                        showingNewUsernameConfirmation = true
+                                    }
                                 } label: {
                                     Label("Enroll a new username", systemImage: "person.badge.plus")
                                         .font(.subheadline.weight(.semibold))
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 46)
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.borderedProminent)
                                 .tint(IOSLinksPalette.violet)
-                                .disabled(model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                          || model.isBusy)
+                                .disabled(model.isBusy)
                             }
 
                             HStack(spacing: 7) {

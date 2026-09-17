@@ -69,6 +69,7 @@ public protocol SharedClientCore: AnyObject {
         recipientUserID: String,
         recipientDevices: [IOSClaimedRecipientDevice],
         transport: any IOSCoreTransport) throws
+    func hasRecipientDevices(for userID: String) -> Bool
     func resetDirectConversation(
         conversationID: String,
         recipientUserID: String,
@@ -121,6 +122,8 @@ public extension SharedClientCore {
     var pendingRetryCount: Int { pendingOutboxCount }
 
     func retryOutbox(transport: any IOSCoreTransport) throws {}
+
+    func hasRecipientDevices(for userID: String) -> Bool { false }
 
     func resetReplayCursorForRecovery() throws {
         throw IOSMessagingError.staleCursorRecoveryUnavailable

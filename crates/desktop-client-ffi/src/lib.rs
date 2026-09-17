@@ -112,6 +112,8 @@ struct PersistedState {
     bootstrap_outbox: Vec<Vec<u8>>,
     #[prost(bool, tag = "8")]
     discard_next_batch: bool,
+    #[prost(message, repeated, tag = "9")]
+    recipients: Vec<PersistedRecipient>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -124,6 +126,22 @@ struct PersistedBinding {
     mls_node_id: Vec<u8>,
     #[prost(bytes, tag = "4")]
     public_key: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct PersistedRecipient {
+    #[prost(string, tag = "1")]
+    user_id: String,
+    #[prost(string, tag = "2")]
+    device_id: String,
+    #[prost(bytes, tag = "3")]
+    identity_public_key: Vec<u8>,
+    #[prost(bytes, tag = "4")]
+    prekey_bundle: Vec<u8>,
+    #[prost(bytes, tag = "5")]
+    mls_credential: Vec<u8>,
+    #[prost(bytes, tag = "6")]
+    mls_key_package: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -460,6 +478,16 @@ impl LinksDesktopCore {
                 mls_node_id: binding.mls_node_id.as_bytes().to_vec(),
                 public_key: binding.public_key.to_vec(),
             }).collect(),
+            recipients: self.recipients.values().flat_map(|records| records.iter().map(|record| {
+                PersistedRecipient {
+                    user_id: record.user_id.clone(),
+                    device_id: record.device_id.clone(),
+                    identity_public_key: record.identity_public_key.to_vec(),
+                    prekey_bundle: record.prekey_bundle.encode_to_vec(),
+                    mls_credential: record.mls_credential.clone(),
+                    mls_key_package: record.mls_key_package.clone(),
+                }
+            })).collect(),
         };
         Ok(state.encode_to_vec())
     }
@@ -475,6 +503,7 @@ impl LinksDesktopCore {
             || state.storage.len() > 100_000
             || state.outbox.len() > 100
             || state.bootstrap_outbox.len() > 100
+            || state.recipients.len() > 10_000
             || state.outbox.iter().chain(state.bootstrap_outbox.iter()).any(|frame| {
                 frame.is_empty() || frame.len() > MAX_OUTPUT_BYTES
             })
@@ -534,6 +563,32 @@ impl LinksDesktopCore {
                 .map_err(|_| CoreError::Authentication)?;
             self.insert_binding(binding)?;
         }
+        self.recipients.clear();
+        for persisted in state.recipients {
+            if protocol::validate_id(&persisted.user_id).is_err()
+                || protocol::validate_id(&persisted.device_id).is_err()
+                || persisted.identity_public_key.len() != 32
+                || persisted.prekey_bundle.len() > protocol::MAX_PREKEY_UPLOAD_BYTES
+                || persisted.mls_credential.len() > 1024
+                || persisted.mls_key_package.len() > protocol::MAX_FRAME_BYTES
+            {
+                return Err(CoreError::Authentication);
+            }
+            let identity_public_key: [u8; 32] = persisted.identity_public_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| CoreError::Authentication)?;
+            let prekey_bundle = v1::PreKeyBundle::decode(persisted.prekey_bundle.as_slice())
+                .map_err(|_| CoreError::Authentication)?;
+            self.set_recipient(RecipientRecord {
+                user_id: persisted.user_id,
+                device_id: persisted.device_id,
+                identity_public_key,
+                prekey_bundle,
+                mls_credential: persisted.mls_credential,
+                mls_key_package: persisted.mls_key_package,
+            })?;
+        }
         self.bootstrap_outbox = state.bootstrap_outbox;
         self.discard_next_batch = state.discard_next_batch;
         self.recover_group_bindings()?;
@@ -580,7 +635,7 @@ impl LinksDesktopCore {
         Ok(())
     }
 
-    fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
+fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         let callback = self.callbacks.send_frame.ok_or(CoreError::Provider)?;
         callback_status(unsafe { callback(self.callbacks.context, frame.as_ptr(), frame.len()) })
     }
@@ -1225,6 +1280,40 @@ pub unsafe extern "C" fn links_desktop_core_generate_prekey_upload(
         if core.is_null() { return LINKS_DESKTOP_INVALID; }
         let result = unsafe { (&mut *core).generate_prekey_upload(curve_count, kem_count) };
         match result { Ok(bytes) => unsafe { write_output(&bytes, output, capacity, length) }, Err(error) => status(error) }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_has_recipient(
+    core: *const LinksDesktopCore,
+    user_id: *const u8,
+    user_id_length: usize,
+    output: *mut u8,
+) -> i32 {
+    boundary(|| {
+        if core.is_null() || output.is_null() {
+            return LINKS_DESKTOP_INVALID;
+        }
+        let user_bytes = match unsafe { input(user_id, user_id_length, 64) } {
+            Ok(bytes) => bytes,
+            Err(_) => return LINKS_DESKTOP_INVALID,
+        };
+        let user = match String::from_utf8(user_bytes.to_vec()) {
+            Ok(user) => user,
+            Err(_) => return LINKS_DESKTOP_INVALID,
+        };
+        if protocol::validate_id(&user).is_err() {
+            return LINKS_DESKTOP_INVALID;
+        }
+        let has_recipient = unsafe {
+            (&*core)
+                .recipients
+                .get(&user)
+                .map(|records| !records.is_empty())
+                .unwrap_or(false)
+        };
+        unsafe { output.write(u8::from(has_recipient)) };
+        LINKS_DESKTOP_OK
     })
 }
 

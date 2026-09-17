@@ -116,6 +116,12 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         return core?.pendingOutboxCount ?? 0
     }
 
+    public func hasRecipientDevices(for userID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return core?.hasRecipientDevices(for: userID) ?? false
+    }
+
     public func start() throws {
         lock.lock()
         let alreadyStarted = currentState == .connecting || currentState == .ready

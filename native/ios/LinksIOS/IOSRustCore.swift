@@ -469,6 +469,20 @@ private final class IOSRustSharedCore: SharedClientCore {
         }
     }
 
+    func hasRecipientDevices(for userID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        var present: UInt8 = 0
+        let status = userID.withCString { user in
+            links_desktop_core_has_recipient(
+                pointer,
+                UnsafeRawPointer(user).assumingMemoryBound(to: UInt8.self),
+                userID.utf8.count,
+                &present)
+        }
+        return status == Int32(LINKS_DESKTOP_OK) && present != 0
+    }
+
     func resetDirectConversation(
         conversationID: String,
         recipientUserID: String,

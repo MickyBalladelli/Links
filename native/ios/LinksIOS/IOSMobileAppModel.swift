@@ -621,7 +621,11 @@ final class IOSMobileAppModel: ObservableObject {
 
     func prepareConversation(_ conversationID: String) async {
         guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
-        if conversations[index].isSecureReady { return }
+        if conversations[index].isSecureReady,
+           let messaging,
+           messaging.hasRecipientDevices(for: conversations[index].recipientUserID) {
+            return
+        }
         guard preparingConversationIDs.insert(conversationID).inserted else { return }
         defer { preparingConversationIDs.remove(conversationID) }
 
