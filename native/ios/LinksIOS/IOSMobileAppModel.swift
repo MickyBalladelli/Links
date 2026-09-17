@@ -75,6 +75,10 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     func createIdentity() {
+        createIdentity(completion: nil)
+    }
+
+    private func createIdentity(completion: (() -> Void)?) {
         guard let client, !client.isEnrolled, !isBusy else { return }
         isBusy = true
         error = nil
@@ -87,6 +91,7 @@ final class IOSMobileAppModel: ObservableObject {
                     self.isBusy = false
                     self.status = "Identity ready"
                     self.refreshState()
+                    completion?()
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -100,7 +105,12 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     func authenticateUsername() {
-        guard let client, let usernameAuthClient, client.isEnrolled, !isBusy else { return }
+        guard !isBusy else { return }
+        guard let client, let usernameAuthClient else {
+            status = "Identity store unavailable"
+            error = "Mobile client could not open its identity store."
+            return
+        }
         let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         do {
             try IOSUsernameAuthClient.validateHandle(cleanUsername)
@@ -109,17 +119,45 @@ final class IOSMobileAppModel: ObservableObject {
             return
         }
 
+        let action = usernameAction
+        if !client.isEnrolled {
+            guard action == .register else {
+                status = "Identity required"
+                error = "Create or restore your hardware identity before logging in."
+                return
+            }
+            createIdentity { [weak self, client, usernameAuthClient] in
+                self?.startUsernameAuthentication(
+                    using: client,
+                    api: usernameAuthClient,
+                    handle: cleanUsername,
+                    action: action)
+            }
+            return
+        }
+
+        startUsernameAuthentication(
+            using: client,
+            api: usernameAuthClient,
+            handle: cleanUsername,
+            action: action)
+    }
+
+    private func startUsernameAuthentication(
+        using client: IOSClient,
+        api: IOSUsernameAuthClient,
+        handle: String,
+        action: IOSUsernameAction) {
         isBusy = true
         error = nil
-        let action = usernameAction
         status = action == .register ? "Registering username" : "Logging in"
         Task { @MainActor [weak self] in
             do {
                 switch action {
                 case .register:
-                    _ = try await client.registerUsername(using: usernameAuthClient, handle: cleanUsername)
+                    _ = try await client.registerUsername(using: api, handle: handle)
                 case .login:
-                    _ = try await client.loginUsername(using: usernameAuthClient, handle: cleanUsername)
+                    _ = try await client.loginUsername(using: api, handle: handle)
                 }
                 guard let self else { return }
                 self.username = ""
@@ -344,6 +382,11 @@ struct IOSMobileRootView: View {
                     Text("No SMS needed. The local backend creates one account per username.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text(model.isEnrolled
+                         ? "Your hardware identity signs this request."
+                         : "First registration creates your secure hardware identity automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Picker("Action", selection: $model.usernameAction) {
                         ForEach(IOSUsernameAction.allCases) { action in
                             Text(action.title).tag(action)
@@ -357,7 +400,7 @@ struct IOSMobileRootView: View {
                     Button(model.usernameAction == .register ? "Register username" : "Log in") {
                         model.authenticateUsername()
                     }
-                    .disabled(!model.isEnrolled || model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
+                    .disabled(model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
                 }
 
                 Section("Phone account") {
