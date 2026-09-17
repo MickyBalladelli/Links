@@ -1,4 +1,5 @@
 import Foundation
+import Security
 @preconcurrency import LinksClient
 import LinksKeyStore
 import SwiftUI
@@ -38,6 +39,45 @@ private struct IOSMobilePersistedState: Codable {
     let conversations: [IOSMobileConversation]
 }
 
+private enum IOSMobileLocalStateStore {
+    private static let service = "ai.links.ios.conversations.v1"
+
+    static func load(accountID: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountID,
+            kSecAttrSynchronizable as String: false,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
+            return nil
+        }
+        return result as? Data
+    }
+
+    static func save(_ data: Data, accountID: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountID,
+            kSecAttrSynchronizable as String: false
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var insert = query
+            attributes.forEach { insert[$0.key] = $0.value }
+            _ = SecItemAdd(insert as CFDictionary, nil)
+        }
+    }
+}
+
 @MainActor
 final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var status = "Opening secure identity store"
@@ -65,8 +105,6 @@ final class IOSMobileAppModel: ObservableObject {
     private let usernameAuthClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
     private var otpChallenge: IOSOTPChallenge?
-    private let defaults = UserDefaults.standard
-    private static let localStateKey = "links.ios.mobile-state.v1"
 
     init() {
         let endpointText = Bundle.main.object(forInfoDictionaryKey: "LINKS_AUTH_URL") as? String
@@ -498,7 +536,8 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     private func restoreLocalState() {
-        guard let data = defaults.data(forKey: Self.localStateKey),
+        guard let accountID = client?.userID,
+              let data = IOSMobileLocalStateStore.load(accountID: accountID),
               let state = try? PropertyListDecoder().decode(
                 IOSMobilePersistedState.self, from: data) else {
             return
@@ -508,11 +547,12 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     private func persistLocalState() {
+        guard let accountID = client?.userID else { return }
         let state = IOSMobilePersistedState(
             contacts: contacts,
             conversations: conversations)
         guard let data = try? PropertyListEncoder().encode(state) else { return }
-        defaults.set(data, forKey: Self.localStateKey)
+        IOSMobileLocalStateStore.save(data, accountID: accountID)
     }
 
     private func refreshState() {
@@ -543,164 +583,3 @@ final class IOSMobileAppModel: ObservableObject {
     }
 }
 
-struct IOSMobileRootView: View {
-    @ObservedObject var model: IOSMobileAppModel
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if model.isAuthenticated {
-                    Section {
-                        Label("You're in", systemImage: "checkmark.shield.fill")
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(.green)
-                        Text("Your Links account is authenticated on this iPhone.")
-                            .foregroundStyle(.secondary)
-                        LabeledContent("Account", value: model.accountStatus)
-                        LabeledContent("Device", value: model.deviceStatus)
-                    }
-
-                    Section("Messages") {
-                        Label("No conversations yet", systemImage: "bubble.left.and.bubble.right")
-                        Text("Your secure account is ready. Conversations will appear here when messaging is connected.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Section("Approve another device") {
-                        Text("Paste a signed links://connect link. Review it before approval.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextEditor(text: $model.pairingInput)
-                            .font(.system(.footnote, design: .monospaced))
-                            .frame(minHeight: 120)
-                        Button("Approve device") {
-                            model.approvePairing()
-                        }
-                        .disabled(model.isBusy)
-                        Text(model.pairingStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Section {
-                        Button("Sign out", role: .destructive) {
-                            model.signOut()
-                        }
-                        .disabled(model.isBusy)
-                    }
-                } else {
-                    Section {
-                    Label("Links mobile", systemImage: "lock.shield")
-                        .font(.title2.weight(.semibold))
-                    Text("Internal physical-device build")
-                        .foregroundStyle(.secondary)
-                    Text(model.status)
-                        .foregroundStyle(model.error == nil ? Color.secondary : Color.red)
-                }
-
-                Section("Identity") {
-                    LabeledContent("State", value: model.identityStatus)
-                    LabeledContent("Device", value: model.deviceStatus)
-                    if !model.isEnrolled {
-                        Button("Create hardware identity") {
-                            model.createIdentity()
-                        }
-                        .disabled(model.isBusy)
-                    }
-                }
-
-                Section("Local development account") {
-                    Text("No SMS needed. The local backend creates one account per username.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(model.isEnrolled
-                         ? "Your hardware identity signs this request."
-                         : "First registration creates your secure hardware identity automatically.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("Action", selection: $model.usernameAction) {
-                        ForEach(IOSUsernameAction.allCases) { action in
-                            Text(action.title).tag(action)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    TextField("Username, for example alice", text: $model.username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textContentType(.username)
-                    Button(model.usernameAction == .register ? "Register and continue" : "Log in and continue") {
-                        model.authenticateUsername()
-                    }
-                    .disabled(model.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
-                }
-
-                Section("Phone account") {
-                    Text("Use this only with a real HTTPS account-auth service configured for Twilio Verify. Local development uses username login above.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    LabeledContent("Account", value: model.accountStatus)
-                    Text("Auth service: \(model.authEndpointText)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("Phone, for example +33123456789", text: $model.phone)
-                        .keyboardType(.phonePad)
-                        .textContentType(.telephoneNumber)
-                    Picker("Channel", selection: $model.channel) {
-                        Text("SMS").tag(IOSOTPChannel.sms)
-                        Text("WhatsApp").tag(IOSOTPChannel.whatsapp)
-                    }
-                    .pickerStyle(.segmented)
-                    Button("Send verification code") {
-                        model.sendVerificationCode()
-                    }
-                    .disabled(!model.isEnrolled || model.isBusy)
-                    SecureField("Verification code", text: $model.verificationCode)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                    Button("Verify phone") {
-                        model.verifyCode()
-                    }
-                    .disabled(model.verificationCode.isEmpty || model.isBusy)
-                }
-
-                Section("Approve another device") {
-                    Text("Paste a signed links://connect link. Review it before approval.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextEditor(text: $model.pairingInput)
-                        .font(.system(.footnote, design: .monospaced))
-                        .frame(minHeight: 120)
-                    Button("Approve device") {
-                        model.approvePairing()
-                    }
-                    .disabled(!model.isAuthenticated || model.isBusy)
-                    Text(model.pairingStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                }
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Links")
-            .overlay(alignment: .bottom) {
-                if let error = model.error {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(.red)
-                        Text(error)
-                            .font(.footnote)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Dismiss") {
-                            model.clearError()
-                        }
-                        .font(.footnote.weight(.semibold))
-                    }
-                    .padding()
-                    .background(.thinMaterial)
-                }
-            }
-        }
-    }
-
-}
