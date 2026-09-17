@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import LinksClient
 
 struct LinksRootView: View {
@@ -113,130 +114,450 @@ private struct LinksOnboardingView: View {
 
 private struct LinksAccountOnboardingView: View {
     @ObservedObject var model: LinksMacOSAppModel
+    @FocusState private var usernameFieldFocused: Bool
+    @State private var showingPhoneAccount = false
+    @State private var showingPairing = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Image(systemName: "person.badge.key")
-                    .font(.system(size: 50))
-                    .foregroundStyle(.tint)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Connect your account")
-                    .font(.largeTitle.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Register a local username or log in with the identity already enrolled on this Mac.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520, alignment: .center)
-                Text("Loopback development uses lowercase handles, such as alice or karine.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520, alignment: .center)
+        ZStack {
+            AccountOnboardingBackground()
 
-                Picker("Account action", selection: $model.authMode) {
-                    ForEach(LinksMacOSAuthMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+            ScrollView {
+                VStack(spacing: 24) {
+                    AccountOnboardingHero()
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .leading, spacing: 18) {
+                            HStack(spacing: 10) {
+                                IconBadge(systemImage: "person.crop.circle.badge.checkmark",
+                                          tint: .blue)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Choose how to continue")
+                                        .font(.title3.weight(.semibold))
+                                    Text("A username is the fastest way to get started.")
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                ForEach(LinksMacOSAuthMode.allCases) { mode in
+                                    AccountModeButton(
+                                        mode: mode,
+                                        isSelected: model.authMode == mode) {
+                                            model.authMode = mode
+                                        }
+                                }
+                            }
+                            .padding(5)
+                            .background(Color.primary.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Username")
+                                    .font(.callout.weight(.semibold))
+                                HStack(spacing: 10) {
+                                    Image(systemName: "at")
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundStyle(.tint)
+                                        .frame(width: 20)
+                                    TextField("Choose a username", text: $model.usernameInput)
+                                        .textFieldStyle(.plain)
+                                        .textContentType(.username)
+                                        .focused($usernameFieldFocused)
+                                        .onSubmit { model.authenticateUsername() }
+                                }
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 11)
+                                .background(Color.primary.opacity(0.055))
+                                .clipShape(RoundedRectangle(cornerRadius: 11))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 11)
+                                        .stroke(usernameFieldFocused
+                                                ? Color.accentColor
+                                                : Color.primary.opacity(0.12),
+                                                lineWidth: usernameFieldFocused ? 2 : 1)
+                                }
+                                Text("3–32 lowercase letters, numbers, or underscores")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Button {
+                                model.authenticateUsername()
+                            } label: {
+                                HStack(spacing: 9) {
+                                    Image(systemName: model.authMode == .register
+                                          ? "person.badge.plus"
+                                          : "arrow.right.circle.fill")
+                                    Text(model.authMode == .register
+                                         ? "Create secure account"
+                                         : "Continue to Links")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(model.isAuthenticating
+                                      || model.usernameInput.trimmingCharacters(
+                                        in: .whitespacesAndNewlines).isEmpty)
+
+                            if model.isAuthenticating {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Securing your account…")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+
+                            if let error = model.onboardingError {
+                                InlineAccountMessage(
+                                    systemImage: "exclamationmark.triangle.fill",
+                                    text: error,
+                                    tint: .red)
+                            }
+
+                            if model.hasBoundAccount {
+                                InlineAccountMessage(
+                                    systemImage: "checkmark.shield.fill",
+                                    text: "This profile is linked to \(model.accountStatus). You can sign in again or register a separate profile.",
+                                    tint: .green)
+                            }
+
+                            HStack(spacing: 8) {
+                                Image(systemName: "server.rack")
+                                    .foregroundStyle(.secondary)
+                                Text("Local account service")
+                                    .font(.caption.weight(.medium))
+                                Spacer()
+                                Text(model.authEndpointText)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                        .padding(24)
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("More ways to connect")
+                                .font(.callout.weight(.semibold))
+                            Text("Use these only if your account needs phone verification or device pairing.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            AccountDisclosureRow(
+                                title: "Use a phone number",
+                                detail: "Verify with SMS or WhatsApp",
+                                systemImage: "iphone",
+                                tint: .orange,
+                                isExpanded: $showingPhoneAccount) {
+                                    PhoneAccountPanel(model: model)
+                                }
+
+                            AccountDisclosureRow(
+                                title: "Join an existing account",
+                                detail: "Create a secure pairing link",
+                                systemImage: "person.2.fill",
+                                tint: .purple,
+                                isExpanded: $showingPairing) {
+                                    ExistingAccountPanel(model: model)
+                                }
+                        }
+                        .padding(20)
                     }
-                }
-                .pickerStyle(.segmented)
-                TextField("Username, for example alice", text: $model.usernameInput)
-                    .textFieldStyle(.roundedBorder)
-                    .textContentType(.username)
-                Button(model.authMode == .register ? "Register username" : "Log in") {
-                    model.authenticateUsername()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isAuthenticating)
-                if model.isAuthenticating {
-                    ProgressView("Contacting local account service")
-                }
-                Text("Auth service: \(model.authEndpointText)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 640)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.primary.opacity(0.11), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.14), radius: 28, y: 12)
 
-                if model.hasBoundAccount {
-                    Text("This profile is linked to \(model.accountStatus). Registering another username creates a separate profile automatically.")
+                    HStack(spacing: 7) {
+                        Image(systemName: "lock.fill")
+                        Text("End-to-end encrypted by design")
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 36)
+            }
+        }
+        .onAppear { usernameFieldFocused = true }
+    }
+}
+
+private struct AccountOnboardingBackground: View {
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+            Circle()
+                .fill(Color.blue.opacity(0.13))
+                .frame(width: 520, height: 520)
+                .blur(radius: 70)
+                .offset(x: 300, y: -260)
+            Circle()
+                .fill(Color.purple.opacity(0.10))
+                .frame(width: 440, height: 440)
+                .blur(radius: 80)
+                .offset(x: -360, y: 300)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct AccountOnboardingHero: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 17)
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(9)
+            }
+            .frame(width: 76, height: 76)
+            .shadow(color: .blue.opacity(0.24), radius: 16, y: 7)
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Welcome to Links")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                Text("Connect your account")
+                    .font(.title3.weight(.semibold))
+                Text("Private conversations. Simple setup.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: 640, alignment: .leading)
+    }
+}
+
+private struct IconBadge: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 38, height: 38)
+            .background(tint.opacity(0.13))
+            .clipShape(RoundedRectangle(cornerRadius: 11))
+    }
+}
+
+private struct AccountModeButton: View {
+    let mode: LinksMacOSAuthMode
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: mode == .register ? "person.badge.plus" : "arrow.right.circle")
+                Text(mode == .register ? "Create account" : "Log in")
+            }
+            .font(.callout.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? Color.white : Color.primary)
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.accentColor : Color.clear)
+        }
+    }
+}
+
+private struct InlineAccountMessage: View {
+    let systemImage: String
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(11)
+        .background(tint.opacity(0.09))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct AccountDisclosureRow<Content: View>: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
+    @Binding var isExpanded: Bool
+    let content: () -> Content
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            content()
+                .padding(.top, 10)
+        } label: {
+            HStack(spacing: 11) {
+                IconBadge(systemImage: systemImage, tint: tint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.callout.weight(.semibold))
+                    Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 8)
+            }
+        }
+        .padding(13)
+        .background(Color.primary.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 13))
+    }
+}
 
-                if let error = model.onboardingError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+private struct PhoneAccountPanel: View {
+    @ObservedObject var model: LinksMacOSAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Phone verification is optional and needs a real HTTPS service with Twilio Verify.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 9) {
+                HStack(spacing: 9) {
+                    Image(systemName: "phone.fill")
+                        .foregroundStyle(.orange)
+                    TextField("Phone number", text: $model.phoneInput)
+                        .textFieldStyle(.plain)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.primary.opacity(0.055))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                Divider()
-                Text("Phone account (OTP)")
-                    .font(.headline)
-                Text("Use this only with a real HTTPS account-auth service configured for Twilio Verify.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    TextField("Phone, for example +33123456789", text: $model.phoneInput)
-                        .textFieldStyle(.roundedBorder)
-                    Picker("Channel", selection: $model.otpChannel) {
-                        ForEach(IOSOTPChannel.allCases, id: \.self) { channel in
-                            Text(channel.rawValue.capitalized).tag(channel)
-                        }
+                Picker("Channel", selection: $model.otpChannel) {
+                    ForEach(IOSOTPChannel.allCases, id: \.self) { channel in
+                        Text(channel.rawValue.capitalized).tag(channel)
                     }
-                    .labelsHidden()
-                    .frame(width: 120)
                 }
-                Button("Send verification code") {
-                    model.startOTPEnrollment()
-                }
-                .buttonStyle(.bordered)
-                .disabled(!model.otpAvailable || model.isOTPWorking)
-                if model.hasOTPChallenge {
-                    HStack {
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 112)
+            }
+
+            Button {
+                model.startOTPEnrollment()
+            } label: {
+                Label("Send verification code", systemImage: "paperplane.fill")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!model.otpAvailable || model.isOTPWorking)
+
+            if model.hasOTPChallenge {
+                HStack(spacing: 9) {
+                    HStack(spacing: 9) {
+                        Image(systemName: "number")
+                            .foregroundStyle(.orange)
                         TextField("Verification code", text: $model.otpCodeInput)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
                             .textContentType(.oneTimeCode)
-                        Button("Verify") {
-                            model.finishOTPEnrollment()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isOTPWorking)
                     }
-                }
-                Text(model.otpAvailable
-                     ? model.otpStatus
-                     : "Phone OTP disabled until the endpoint uses HTTPS.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.primary.opacity(0.055))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                Divider()
-                Text("Join an existing account")
-                    .font(.headline)
-                Text("Enter the account username or user ID. Scan the generated link on an authenticated device, then log in here with that username.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("Account username or user ID", text: $model.pairingTarget)
-                    .textFieldStyle(.roundedBorder)
-                Button("Create pairing link") {
-                    model.createPairingLink()
-                }
-                .buttonStyle(.bordered)
-                .disabled(model.isPairing)
-                Text(model.pairingStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let pairingURI = model.pairingURI {
-                    Text(pairingURI)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .lineLimit(4)
-                    Button("Copy pairing link") {
-                        model.copyPairingLink()
+                    Button {
+                        model.finishOTPEnrollment()
+                    } label: {
+                        Label("Verify", systemImage: "checkmark.circle.fill")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isOTPWorking)
                 }
             }
-            .frame(maxWidth: 520)
-            .padding(48)
-            .frame(maxWidth: .infinity)
+
+            Text(model.otpAvailable
+                 ? model.otpStatus
+                 : "Phone verification is disabled for this local endpoint.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ExistingAccountPanel: View {
+    @ObservedObject var model: LinksMacOSAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Create a pairing link for an authenticated device, then use that link to join this account.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 9) {
+                Image(systemName: "at")
+                    .foregroundStyle(.purple)
+                TextField("Account username or user ID", text: $model.pairingTarget)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.primary.opacity(0.055))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            Button {
+                model.createPairingLink()
+            } label: {
+                Label("Create pairing link", systemImage: "link.badge.plus")
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.isPairing)
+
+            Text(model.pairingStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let pairingURI = model.pairingURI {
+                Text(pairingURI)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(4)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.055))
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                Button {
+                    model.copyPairingLink()
+                } label: {
+                    Label("Copy pairing link", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+            }
         }
     }
 }
