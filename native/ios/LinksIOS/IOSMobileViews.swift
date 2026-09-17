@@ -5,13 +5,18 @@ struct IOSMobileRootView: View {
     @ObservedObject var model: IOSMobileAppModel
 
     var body: some View {
-        Group {
-            if model.isAuthenticated {
-                IOSAuthenticatedShell(model: model)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            } else {
-                IOSOnboardingView(model: model)
-                    .transition(.opacity)
+        ZStack {
+            Color(uiColor: .systemGroupedBackground)
+                .ignoresSafeArea()
+
+            Group {
+                if model.isAuthenticated {
+                    IOSAuthenticatedShell(model: model)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else {
+                    IOSOnboardingView(model: model)
+                        .transition(.opacity)
+                }
             }
         }
         .animation(.easeOut(duration: 0.25), value: model.isAuthenticated)
@@ -256,6 +261,9 @@ private struct IOSAuthenticatedShell: View {
                 .tabItem { Label("You", systemImage: "person.crop.circle.fill") }
         }
         .tint(IOSLinksPalette.cobalt)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+        .toolbarBackground(Color(uiColor: .secondarySystemGroupedBackground), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
     }
 }
 

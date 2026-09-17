@@ -43,9 +43,7 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Links uses your local network to reach a development account service.</string>
-	<key>UIDeviceFamily</key>
-	<array>
-		<integer>1</integer>
-	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
 </dict>
 </plist>
