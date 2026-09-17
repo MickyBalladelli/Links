@@ -81,7 +81,7 @@ if [[ -z "$auth_url" ]]; then
     echo "Starting local HTTPS proxy; log: $proxy_log" >&2
     LINKS_LAN_IP="$lan_ip" \
     LINKS_HTTPS_PORT="$auth_port" \
-    node "$repo_root/scripts/local-https-proxy.mjs" >>"$proxy_log" 2>&1 &
+    nohup node "$repo_root/scripts/local-https-proxy.mjs" >>"$proxy_log" 2>&1 </dev/null &
     proxy_pid=$!
     for _ in {1..40}; do
       if proxy_health; then
@@ -120,6 +120,7 @@ fi
 
 DEVELOPMENT_TEAM="$team" \
 LINKS_AUTH_URL="$auth_url" \
+LINKS_LOCAL_CA_CERT_FILE="${root_cert:-}" \
 LINKS_IOS_DESTINATION="id=$device_id" \
 bash "$repo_root/scripts/build-ios-debug.sh"
 

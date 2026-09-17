@@ -280,8 +280,10 @@ public final class IOSUsernameAuthClient: Sendable {
             return try await urlSession.data(for: request)
         } catch let error as URLError {
             switch error.code {
-            case .notConnectedToInternet, .networkConnectionLost:
+            case .notConnectedToInternet:
                 throw IOSUsernameAuthError.networkUnavailable
+            case .networkConnectionLost:
+                throw IOSUsernameAuthError.cannotConnect
             case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
                 throw IOSUsernameAuthError.cannotConnect
             case .timedOut:

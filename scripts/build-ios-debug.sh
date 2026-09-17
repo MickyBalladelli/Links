@@ -26,6 +26,15 @@ MACOSX_DEPLOYMENT_TARGET=13.0 cargo build \
 derived_data_path="${LINKS_IOS_DERIVED_DATA_PATH:-$repo_root/native/ios/DerivedData}"
 auth_url="${LINKS_AUTH_URL:-https://api.links.invalid}"
 destination="${LINKS_IOS_DESTINATION:-generic/platform=iOS}"
+local_ca_cert_file="${LINKS_LOCAL_CA_CERT_FILE:-}"
+local_ca_cert_base64="${LINKS_LOCAL_CA_CERT_BASE64:-}"
+if [[ -n "$local_ca_cert_file" ]]; then
+  if [[ ! -f "$local_ca_cert_file" ]]; then
+    echo "Local CA certificate does not exist: $local_ca_cert_file" >&2
+    exit 1
+  fi
+  local_ca_cert_base64="$(base64 < "$local_ca_cert_file" | tr -d '\n')"
+fi
 provisioning_args=()
 if [[ "${LINKS_ALLOW_PROVISIONING_UPDATES:-1}" == "1" ]]; then
   provisioning_args+=(-allowProvisioningUpdates)
@@ -42,6 +51,7 @@ LINKS_IDENTITY_LIB_DIR="$repo_root/target/aarch64-apple-ios/debug" \
     -derivedDataPath "$derived_data_path" \
     DEVELOPMENT_TEAM="$team" \
     LINKS_AUTH_URL="$auth_url" \
+    LINKS_LOCAL_CA_CERT_BASE64="$local_ca_cert_base64" \
     CODE_SIGN_STYLE=Automatic \
     "${provisioning_args[@]}" \
     build

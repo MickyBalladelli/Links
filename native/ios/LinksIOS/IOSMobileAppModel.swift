@@ -57,7 +57,15 @@ final class IOSMobileAppModel: ObservableObject {
             loadedClient = try IOSClient(
                 identityStore: HardwareIdentityStore(),
                 defaults: .standard)
-            loadedUsernameAuthClient = try IOSUsernameAuthClient(baseURL: endpoint)
+            let localRootCertificate = (Bundle.main.object(
+                forInfoDictionaryKey: "LINKS_LOCAL_CA_CERT_BASE64") as? String)
+                .flatMap { Data(base64Encoded: $0) }
+            let urlSession = IOSLocalDevelopmentURLSessionDelegate.makeURLSession(
+                baseURL: endpoint,
+                rootCertificateData: localRootCertificate)
+            loadedUsernameAuthClient = try IOSUsernameAuthClient(
+                baseURL: endpoint,
+                urlSession: urlSession)
             loadedOTPClient = try IOSOTPClient(baseURL: endpoint)
         } catch {
             initialError = "Mobile client could not open its identity store."

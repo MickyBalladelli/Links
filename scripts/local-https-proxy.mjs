@@ -119,7 +119,7 @@ function proxyHttpRequest(request, response) {
       delete responseHeaders['proxy-authorization']
       delete responseHeaders.te
       delete responseHeaders.trailer
-      delete responseHeaders.transfer-encoding
+      delete responseHeaders['transfer-encoding']
       delete responseHeaders.upgrade
       response.writeHead(upstreamResponse.statusCode || 502, responseHeaders)
       upstreamResponse.pipe(response)
@@ -336,10 +336,6 @@ function ensureCertificate() {
 }
 
 function ensureMobileCertificate() {
-  if (existsSync(mobileCertificatePath)) {
-    return
-  }
-
   try {
     execFileSync(
       process.env.OPENSSL_BIN || 'openssl',
@@ -361,7 +357,7 @@ function ensureMobileCertificate() {
 }
 
 function ensureMobileProfile() {
-  if (usingCustomCertificate || existsSync(mobileProfilePath)) {
+  if (usingCustomCertificate) {
     return
   }
 

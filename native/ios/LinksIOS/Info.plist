@@ -37,6 +37,8 @@
 	</array>
 	<key>LINKS_AUTH_URL</key>
 	<string>$(LINKS_AUTH_URL)</string>
+	<key>LINKS_LOCAL_CA_CERT_BASE64</key>
+	<string>$(LINKS_LOCAL_CA_CERT_BASE64)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>

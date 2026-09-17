@@ -75,6 +75,11 @@ Mac IP. The proxy creates a new server certificate with the current IP when
 needed, so changing IP does not require reinstalling the root certificate.
 Rebuild with `scripts/launch-iphone.sh` if the Mac IP changed.
 
+The debug app also receives the exact generic root CA during
+`scripts/launch-iphone.sh`. Its local HTTPS session validates that pinned CA
+and the `links-mac.local` server identity, so the trusted root does not need to
+contain the Mac IP address.
+
 The certificate is for local development only. For a real account, use a
 trusted HTTPS host with `LINKS_AUTH_URL`. The local Rust username mode does
 not implement Twilio OTP; the bridge provides HTTPS reachability but cannot
