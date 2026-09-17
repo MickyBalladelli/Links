@@ -448,9 +448,10 @@ struct IOSMobileRootView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .onTapGesture {
-                dismissKeyboard()
-            }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissKeyboard()
+                })
             .navigationTitle("Links")
             .overlay(alignment: .bottom) {
                 if let error = model.error {
