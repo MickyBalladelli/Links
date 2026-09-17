@@ -193,10 +193,10 @@ private struct LinksAccountOnboardingView: View {
                                          ? "Create secure account"
                                          : "Continue to Links")
                                 }
-                                .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
+                            .controlSize(.regular)
+                            .fixedSize(horizontal: true, vertical: false)
                             .disabled(model.isAuthenticating
                                       || model.usernameInput.trimmingCharacters(
                                         in: .whitespacesAndNewlines).isEmpty)
