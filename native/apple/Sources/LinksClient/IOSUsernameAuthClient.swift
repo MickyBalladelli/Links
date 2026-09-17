@@ -12,6 +12,7 @@ public enum IOSUsernameAuthError: Error {
     case timedOut
     case tlsRejected
     case conflict
+    case deviceAlreadyRegistered
     case rateLimited(retryAfterSeconds: Int?)
 }
 
@@ -249,6 +250,9 @@ public final class IOSUsernameAuthClient: Sendable {
                 throw IOSUsernameAuthError.rateLimited(retryAfterSeconds: retryAfter)
             }
             if http.statusCode == 409 {
+                if Self.errorCode(from: data) == "device_already_registered" {
+                    throw IOSUsernameAuthError.deviceAlreadyRegistered
+                }
                 throw IOSUsernameAuthError.conflict
             }
             throw IOSUsernameAuthError.serverRejected(statusCode: http.statusCode)
@@ -305,6 +309,13 @@ public final class IOSUsernameAuthClient: Sendable {
             throw IOSUsernameAuthError.invalidResponse
         }
         return object
+    }
+
+    private static func errorCode(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object["error"] as? String
     }
 
     private static func isLoopback(_ host: String) -> Bool {

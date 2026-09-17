@@ -31,7 +31,11 @@ pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
 fn map_username_registration_write_error(error: sqlx::Error) -> AuthError {
     match &error {
         sqlx::Error::Database(database)
-            if database.code().as_deref() == Some("23505") => AuthError::Conflict,
+            if database.code().as_deref() == Some("23505") => match database.constraint() {
+                Some("handles_pkey") => AuthError::UsernameConflict,
+                Some("devices_pkey") | Some("devices_mls_node_id_key") => AuthError::DeviceConflict,
+                _ => AuthError::Conflict,
+            },
         _ => AuthError::Unavailable,
     }
 }

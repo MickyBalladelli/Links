@@ -16,6 +16,10 @@ pub enum AuthError {
     RateLimited,
     #[error("conflicting authentication write")]
     Conflict,
+    #[error("username already exists")]
+    UsernameConflict,
+    #[error("device already has a username")]
+    DeviceConflict,
     #[error("authentication temporarily unavailable")]
     Unavailable,
 }

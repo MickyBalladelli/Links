@@ -172,6 +172,19 @@ final class IOSMobileAppModel: ObservableObject {
                 self.status = action == .register ? "Username registered" : "Account authenticated"
                 self.refreshState()
             } catch let usernameError as IOSUsernameAuthError {
+                if action == .register && Self.isRegistrationConflict(usernameError) {
+                    do {
+                        _ = try await client.loginUsername(using: api, handle: handle)
+                        guard let self else { return }
+                        self.username = ""
+                        self.isBusy = false
+                        self.status = "Account authenticated"
+                        self.refreshState()
+                        return
+                    } catch {
+                        // Keep the original registration error when recovery cannot log in.
+                    }
+                }
                 guard let self else { return }
                 self.isBusy = false
                 self.status = action == .register ? "Username registration failed" : "Username login failed"
@@ -182,6 +195,15 @@ final class IOSMobileAppModel: ObservableObject {
                 self.status = action == .register ? "Username registration failed" : "Username login failed"
                 self.error = "The local identity could not complete the request. Check the profile and auth service."
             }
+        }
+    }
+
+    private static func isRegistrationConflict(_ error: IOSUsernameAuthError) -> Bool {
+        switch error {
+        case .conflict, .deviceAlreadyRegistered:
+            return true
+        default:
+            return false
         }
     }
 
@@ -222,7 +244,11 @@ final class IOSMobileAppModel: ObservableObject {
                 return "The auth service rejected the request (HTTP \(statusCode))."
             }
         case .conflict:
-            return "Username already exists. Choose another username."
+            return action == .register
+                ? "This username or iPhone is already registered. Switch to Log in with the first username."
+                : "Username already exists."
+        case .deviceAlreadyRegistered:
+            return "This iPhone already has a registered username. Switch to Log in and use the first username."
         case .rateLimited(let retryAfterSeconds):
             if let retryAfterSeconds {
                 return "Too many requests. Try again in \(retryAfterSeconds) seconds."

@@ -506,6 +506,8 @@ impl IntoResponse for AuthError {
             Self::Denied => (StatusCode::UNAUTHORIZED, "authentication_failed"),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
             Self::Conflict => (StatusCode::CONFLICT, "conflicting_write"),
+            Self::UsernameConflict => (StatusCode::CONFLICT, "username_exists"),
+            Self::DeviceConflict => (StatusCode::CONFLICT, "device_already_registered"),
             Self::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable"),
         };
         let mut response = (status, Json(serde_json::json!({"error":code}))).into_response();

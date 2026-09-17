@@ -126,7 +126,9 @@ impl DeviceAuthenticator for AccountAuthDeviceAuthenticator {
 fn auth_error(error: AuthError) -> GatewayError {
     match error {
         AuthError::Invalid | AuthError::Denied => GatewayError::Authentication,
-        AuthError::Conflict => GatewayError::Conflict,
+        AuthError::Conflict | AuthError::UsernameConflict | AuthError::DeviceConflict => {
+            GatewayError::Conflict
+        }
         AuthError::RateLimited | AuthError::Unavailable => GatewayError::Unavailable,
     }
 }
