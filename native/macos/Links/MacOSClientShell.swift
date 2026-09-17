@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import LinksClient
 
 struct LinksRootView: View {
@@ -325,7 +324,7 @@ private struct AccountOnboardingHero: View {
                             colors: [.blue, .purple],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing))
-                Image(nsImage: NSApplication.shared.applicationIconImage)
+                Image("LinksLogo")
                     .resizable()
                     .scaledToFit()
                     .padding(9)
