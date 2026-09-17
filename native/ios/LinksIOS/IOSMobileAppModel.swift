@@ -17,6 +17,27 @@ enum IOSUsernameAction: String, CaseIterable, Identifiable {
     }
 }
 
+struct IOSMobileContact: Identifiable, Equatable, Codable {
+    let handle: String
+    let userID: String
+    let deviceCount: Int
+
+    var id: String { userID }
+}
+
+struct IOSMobileConversation: Identifiable, Equatable, Codable {
+    let id: String
+    let handle: String
+    let recipientUserID: String
+    let deviceCount: Int
+    let createdAt: Date
+}
+
+private struct IOSMobilePersistedState: Codable {
+    let contacts: [IOSMobileContact]
+    let conversations: [IOSMobileConversation]
+}
+
 @MainActor
 final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var status = "Opening secure identity store"
@@ -34,12 +55,18 @@ final class IOSMobileAppModel: ObservableObject {
     @Published var verificationCode = ""
     @Published var channel: IOSOTPChannel = .sms
     @Published var pairingInput = ""
+    @Published private(set) var contacts: [IOSMobileContact] = []
+    @Published private(set) var conversations: [IOSMobileConversation] = []
+    @Published private(set) var isCreatingConversation = false
+    @Published private(set) var conversationCreationStatus: String?
 
     let authEndpointText: String
     private let client: IOSClient?
     private let usernameAuthClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
     private var otpChallenge: IOSOTPChallenge?
+    private let defaults = UserDefaults.standard
+    private static let localStateKey = "links.ios.mobile-state.v1"
 
     init() {
         let endpointText = Bundle.main.object(forInfoDictionaryKey: "LINKS_AUTH_URL") as? String
@@ -74,6 +101,7 @@ final class IOSMobileAppModel: ObservableObject {
         usernameAuthClient = loadedUsernameAuthClient
         otpClient = loadedOTPClient
         error = initialError
+        restoreLocalState()
         if initialError != nil {
             status = "Identity store unavailable"
         } else {
@@ -353,15 +381,138 @@ final class IOSMobileAppModel: ObservableObject {
         pairingStatus = "Pairing link received. Review before approval."
     }
 
+    var profileName: String {
+        client?.accountHandle.map { "@\($0)" } ?? "Links user"
+    }
+
+    func createConversation(handle: String) async -> IOSMobileConversation? {
+        guard let client, let usernameAuthClient, client.isAuthenticated,
+              !isCreatingConversation else {
+            conversationCreationStatus = "Sign in before starting a conversation."
+            return nil
+        }
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().replacingOccurrences(of: "^@", with: "", options: .regularExpression)
+        do {
+            try IOSUsernameAuthClient.validateHandle(cleanHandle)
+        } catch {
+            conversationCreationStatus = "Use 3–32 lowercase letters, numbers, or underscores."
+            return nil
+        }
+
+        isCreatingConversation = true
+        conversationCreationStatus = "Finding @\(cleanHandle)…"
+        defer { isCreatingConversation = false }
+        do {
+            let directory = try await usernameAuthClient.lookup(handle: cleanHandle)
+            guard directory.userID != client.userID else {
+                conversationCreationStatus = "Choose someone other than your own account."
+                return nil
+            }
+            guard !directory.devices.isEmpty else {
+                conversationCreationStatus = "@\(directory.handle) has no active devices."
+                return nil
+            }
+
+            let contact = IOSMobileContact(
+                handle: directory.handle,
+                userID: directory.userID,
+                deviceCount: directory.devices.count)
+            if let contactIndex = contacts.firstIndex(where: { $0.userID == contact.userID }) {
+                contacts[contactIndex] = contact
+            } else {
+                contacts.append(contact)
+                contacts.sort { $0.handle < $1.handle }
+            }
+
+            if let existingIndex = conversations.firstIndex(where: {
+                $0.recipientUserID == directory.userID
+            }) {
+                let existing = conversations.remove(at: existingIndex)
+                let updated = IOSMobileConversation(
+                    id: existing.id,
+                    handle: directory.handle,
+                    recipientUserID: directory.userID,
+                    deviceCount: directory.devices.count,
+                    createdAt: existing.createdAt)
+                conversations.insert(updated, at: 0)
+                conversationCreationStatus = "Opened @\(directory.handle)."
+                persistLocalState()
+                return updated
+            }
+
+            let conversation = IOSMobileConversation(
+                id: UUID().uuidString.lowercased(),
+                handle: directory.handle,
+                recipientUserID: directory.userID,
+                deviceCount: directory.devices.count,
+                createdAt: Date())
+            conversations.insert(conversation, at: 0)
+            conversationCreationStatus = "Conversation with @\(directory.handle) is ready."
+            persistLocalState()
+            return conversation
+        } catch let authError as IOSUsernameAuthError {
+            switch authError {
+            case .serverRejected(let statusCode) where statusCode == 404:
+                conversationCreationStatus = "No Links account uses @\(cleanHandle)."
+            case .rateLimited:
+                conversationCreationStatus = "Too many searches. Wait a moment and try again."
+            case .networkUnavailable, .cannotConnect, .timedOut:
+                conversationCreationStatus = "The directory is unavailable. Check your connection."
+            case .tlsRejected:
+                conversationCreationStatus = "The secure connection to the directory was rejected."
+            default:
+                conversationCreationStatus = "Could not add @\(cleanHandle)."
+            }
+            return nil
+        } catch {
+            conversationCreationStatus = "Could not add @\(cleanHandle)."
+            return nil
+        }
+    }
+
+    func removeContact(_ contact: IOSMobileContact) {
+        contacts.removeAll { $0.userID == contact.userID }
+        persistLocalState()
+    }
+
+    func deleteConversation(_ conversation: IOSMobileConversation) {
+        conversations.removeAll { $0.id == conversation.id }
+        persistLocalState()
+    }
+
+    func clearConversationCreationStatus() {
+        conversationCreationStatus = nil
+    }
+
     func signOut() {
         client?.clearAuthenticatedSession()
         status = "Signed out"
         error = nil
+        conversationCreationStatus = nil
         refreshState()
     }
 
     func clearError() {
         error = nil
+    }
+
+    private func restoreLocalState() {
+        guard let data = defaults.data(forKey: Self.localStateKey),
+              let state = try? PropertyListDecoder().decode(
+                IOSMobilePersistedState.self, from: data) else {
+            return
+        }
+        contacts = state.contacts
+        conversations = state.conversations.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private func persistLocalState() {
+        let state = IOSMobilePersistedState(
+            contacts: contacts,
+            conversations: conversations)
+        guard let data = try? PropertyListEncoder().encode(state) else { return }
+        defaults.set(data, forKey: Self.localStateKey)
     }
 
     private func refreshState() {
