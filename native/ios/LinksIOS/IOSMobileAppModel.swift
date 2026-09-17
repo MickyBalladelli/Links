@@ -26,12 +26,48 @@ struct IOSMobileContact: Identifiable, Equatable, Codable {
     var id: String { userID }
 }
 
+struct IOSMobileMessage: Identifiable, Equatable, Codable {
+    let id: String
+    let text: String
+    let isOutgoing: Bool
+    let sentAt: Date
+    let senderDeviceID: String?
+}
+
 struct IOSMobileConversation: Identifiable, Equatable, Codable {
     let id: String
     let handle: String
     let recipientUserID: String
     let deviceCount: Int
     let createdAt: Date
+    var messages: [IOSMobileMessage]
+    var isSecureReady: Bool
+
+    init(id: String, handle: String, recipientUserID: String, deviceCount: Int,
+         createdAt: Date, messages: [IOSMobileMessage] = [], isSecureReady: Bool = false) {
+        self.id = id
+        self.handle = handle
+        self.recipientUserID = recipientUserID
+        self.deviceCount = deviceCount
+        self.createdAt = createdAt
+        self.messages = messages
+        self.isSecureReady = isSecureReady
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, handle, recipientUserID, deviceCount, createdAt, messages, isSecureReady
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        handle = try values.decode(String.self, forKey: .handle)
+        recipientUserID = try values.decode(String.self, forKey: .recipientUserID)
+        deviceCount = try values.decode(Int.self, forKey: .deviceCount)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        messages = try values.decodeIfPresent([IOSMobileMessage].self, forKey: .messages) ?? []
+        isSecureReady = try values.decodeIfPresent(Bool.self, forKey: .isSecureReady) ?? false
+    }
 }
 
 private struct IOSMobilePersistedState: Codable {
@@ -99,11 +135,22 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var conversations: [IOSMobileConversation] = []
     @Published private(set) var isCreatingConversation = false
     @Published private(set) var conversationCreationStatus: String?
+    @Published private(set) var messagingState: IOSDirectMessaging.State = .stopped
+    @Published private(set) var messagingStatus = "Offline"
+    @Published private(set) var preKeyStatus = "Waiting for sign in"
+    @Published private(set) var preparingConversationIDs = Set<String>()
 
     let authEndpointText: String
     private let client: IOSClient?
     private let usernameAuthClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
+    private var preKeyAPI: IOSPreKeyHTTPClient?
+    private var messaging: IOSDirectMessaging?
+    private var directChatDirectory: (any IOSDirectChatDirectory)?
+    private var coreFactory: IOSRustCoreFactory?
+    private var coreStateStore: IOSEncryptedStateStore?
+    private var keychainSecretProvider: IOSKeychainSecretProvider?
+    private var localRootCertificateData: Data?
     private var otpChallenge: IOSOTPChallenge?
 
     init() {
@@ -114,6 +161,7 @@ final class IOSMobileAppModel: ObservableObject {
         var loadedClient: IOSClient?
         var loadedUsernameAuthClient: IOSUsernameAuthClient?
         var loadedOTPClient: IOSOTPClient?
+        var loadedLocalRootCertificateData: Data?
         var initialError: String?
         do {
             guard let endpoint = URL(string: endpointText) else {
@@ -125,25 +173,33 @@ final class IOSMobileAppModel: ObservableObject {
             let localRootCertificate = (Bundle.main.object(
                 forInfoDictionaryKey: "LINKS_LOCAL_CA_CERT_BASE64") as? String)
                 .flatMap { Data(base64Encoded: $0) }
+            loadedLocalRootCertificateData = localRootCertificate
             let urlSession = IOSLocalDevelopmentURLSessionDelegate.makeURLSession(
                 baseURL: endpoint,
                 rootCertificateData: localRootCertificate)
             loadedUsernameAuthClient = try IOSUsernameAuthClient(
                 baseURL: endpoint,
                 urlSession: urlSession)
-            loadedOTPClient = try IOSOTPClient(baseURL: endpoint)
+            loadedOTPClient = try IOSOTPClient(baseURL: endpoint, urlSession: urlSession)
+            preKeyAPI = try IOSPreKeyHTTPClient(baseURL: endpoint, urlSession: urlSession)
         } catch {
             initialError = "Mobile client could not open its identity store."
         }
         client = loadedClient
         usernameAuthClient = loadedUsernameAuthClient
         otpClient = loadedOTPClient
+        localRootCertificateData = loadedLocalRootCertificateData
         error = initialError
         restoreLocalState()
         if initialError != nil {
             status = "Identity store unavailable"
         } else {
             refreshState()
+        }
+        if isAuthenticated {
+            Task { [weak self] in
+                self?.configureMessagingIfPossible()
+            }
         }
     }
 
@@ -482,7 +538,9 @@ final class IOSMobileAppModel: ObservableObject {
                     handle: directory.handle,
                     recipientUserID: directory.userID,
                     deviceCount: directory.devices.count,
-                    createdAt: existing.createdAt)
+                    createdAt: existing.createdAt,
+                    messages: existing.messages,
+                    isSecureReady: existing.isSecureReady)
                 conversations.insert(updated, at: 0)
                 conversationCreationStatus = "Opened @\(directory.handle)."
                 persistLocalState()
@@ -519,6 +577,163 @@ final class IOSMobileAppModel: ObservableObject {
         }
     }
 
+    func prepareConversation(_ conversationID: String) async {
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        if conversations[index].isSecureReady { return }
+        guard preparingConversationIDs.insert(conversationID).inserted else { return }
+        defer { preparingConversationIDs.remove(conversationID) }
+
+        configureMessagingIfPossible()
+        for _ in 0..<75 where messagingState != .ready || !preKeyStatus.hasPrefix("Ready") {
+            if messagingState == .authenticationRequired || messagingState == .failed { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+
+        guard let messaging, let directChatDirectory, let preKeyAPI,
+              messagingState == .ready, preKeyStatus.hasPrefix("Ready") else {
+            error = messagingSetupError
+            return
+        }
+        let conversation = conversations[index]
+        do {
+            try await messaging.initializeFirstDirectConversation(
+                conversationID: conversation.id,
+                recipientUserID: conversation.recipientUserID,
+                directory: directChatDirectory,
+                preKeyAPI: preKeyAPI)
+            guard let currentIndex = conversations.firstIndex(where: { $0.id == conversationID }) else {
+                return
+            }
+            conversations[currentIndex].isSecureReady = true
+            messagingStatus = "End-to-end encrypted"
+            error = nil
+            persistLocalState()
+        } catch {
+            self.error = "Secure chat setup failed. The contact must be online with pre-keys available."
+        }
+    }
+
+    func sendMessage(conversationID: String, text: String) -> Bool {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty,
+              cleanText.utf8.count <= IOSDirectMessaging.maximumTextBytes,
+              let index = conversations.firstIndex(where: { $0.id == conversationID }) else {
+            return false
+        }
+        guard conversations[index].isSecureReady else {
+            error = "Wait for secure chat setup to finish before sending."
+            return false
+        }
+        guard let messaging, messagingState == .ready else {
+            error = "Messaging is reconnecting. Your text remains in the composer."
+            return false
+        }
+        do {
+            try messaging.sendText(
+                conversationID: conversationID,
+                recipientUserID: conversations[index].recipientUserID,
+                text: cleanText)
+            conversations[index].messages.append(IOSMobileMessage(
+                id: UUID().uuidString.lowercased(),
+                text: cleanText,
+                isOutgoing: true,
+                sentAt: Date(),
+                senderDeviceID: nil))
+            error = nil
+            persistLocalState()
+            return true
+        } catch {
+            self.error = messaging.pendingOutboxCount > 0
+                ? "Message is encrypted and queued for delivery."
+                : "Message could not be sent. Check the connection and try again."
+            return false
+        }
+    }
+
+    func conversation(withID conversationID: String) -> IOSMobileConversation? {
+        conversations.first { $0.id == conversationID }
+    }
+
+    private var messagingSetupError: String {
+        switch messagingState {
+        case .connecting, .reconnecting:
+            return "Connecting to secure messaging. Try again in a moment."
+        case .authenticationRequired:
+            return "Your session expired. Log in again to continue messaging."
+        case .staleCursor:
+            return "Message history needs secure recovery before continuing."
+        case .dependencyOutage, .failed, .sendFailed:
+            return "The messaging service is unavailable. Check the local gateway."
+        case .stopped:
+            return "Secure messaging has not started."
+        case .ready:
+            return preKeyStatus
+        }
+    }
+
+    private func configureMessagingIfPossible() {
+        guard messaging == nil,
+              let client, client.isAuthenticated,
+              let accountID = client.userID,
+              let usernameAuthClient,
+              let preKeyAPI,
+              let authURL = URL(string: authEndpointText),
+              var components = URLComponents(url: authURL, resolvingAgainstBaseURL: false) else {
+            return
+        }
+        components.scheme = components.scheme?.lowercased() == "https" ? "wss" : "ws"
+        components.path = "/v1/connect"
+        components.query = nil
+        components.fragment = nil
+        guard let gatewayURL = components.url else { return }
+
+        do {
+            let stateStore = try IOSEncryptedStateStore(accountID: accountID)
+            let secrets = IOSKeychainSecretProvider(accountID: accountID)
+            let factory = IOSRustCoreFactory(stateStore: stateStore, secrets: secrets)
+            let keyPackageProvider = IOSHTTPMLSKeyPackageProvider(api: preKeyAPI)
+            let directory = IOSDirectoryChatAdapter(
+                directoryClient: usernameAuthClient,
+                keyPackageProvider: keyPackageProvider) { [weak self] in
+                    guard let self else { return [:] }
+                    return Dictionary(uniqueKeysWithValues: self.contacts.map {
+                        ($0.userID, $0.handle)
+                    })
+                }
+            let directMessaging = IOSDirectMessaging(
+                client: client,
+                factory: factory,
+                endpoint: gatewayURL,
+                delegate: self,
+                localDevelopmentRootCertificateData: localRootCertificateData)
+            coreStateStore = stateStore
+            keychainSecretProvider = secrets
+            coreFactory = factory
+            directChatDirectory = directory
+            messaging = directMessaging
+            messagingState = .connecting
+            messagingStatus = "Connecting securely"
+            preKeyStatus = "Preparing encryption keys"
+            try directMessaging.start()
+            Task { @MainActor [weak self, weak directMessaging] in
+                guard let self, let directMessaging else { return }
+                do {
+                    let inventory = try await directMessaging.maintainPreKeyInventory(using: preKeyAPI)
+                    guard self.messaging === directMessaging else { return }
+                    self.preKeyStatus = "Ready · \(inventory.oneTimeCurvePreKeys) curve · \(inventory.oneTimeKEMPreKeys) KEM"
+                } catch {
+                    guard self.messaging === directMessaging else { return }
+                    self.preKeyStatus = "Encryption key setup failed"
+                    self.error = "Could not publish this device’s encryption keys."
+                }
+            }
+        } catch {
+            messagingState = .failed
+            messagingStatus = "Secure messaging unavailable"
+            self.error = "The encrypted messaging core could not start on this iPhone."
+        }
+    }
+
     func removeContact(_ contact: IOSMobileContact) {
         contacts.removeAll { $0.userID == contact.userID }
         persistLocalState()
@@ -534,6 +749,16 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     func signOut() {
+        messaging?.shutdown()
+        messaging = nil
+        directChatDirectory = nil
+        coreFactory = nil
+        coreStateStore = nil
+        keychainSecretProvider = nil
+        messagingState = .stopped
+        messagingStatus = "Offline"
+        preKeyStatus = "Waiting for sign in"
+        preparingConversationIDs.removeAll()
         client?.clearAuthenticatedSession()
         status = "Signed out"
         error = nil
@@ -589,6 +814,91 @@ final class IOSMobileAppModel: ObservableObject {
             deviceStatus = "Device \(String(deviceID.prefix(8)))"
         } else {
             deviceStatus = "No device"
+        }
+        if client.isAuthenticated {
+            configureMessagingIfPossible()
+        }
+    }
+}
+
+extension IOSMobileAppModel: IOSDirectMessagingDelegate {
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                     didChange state: IOSDirectMessaging.State) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            self.messagingState = state
+            switch state {
+            case .stopped:
+                self.messagingStatus = "Offline"
+            case .connecting:
+                self.messagingStatus = "Connecting securely"
+            case .ready:
+                self.messagingStatus = messaging.pendingOutboxCount > 0
+                    ? "Delivering queued messages" : "End-to-end encrypted"
+            case .reconnecting:
+                self.messagingStatus = "Reconnecting"
+            case .staleCursor:
+                self.messagingStatus = "Secure recovery required"
+            case .authenticationRequired:
+                self.messagingStatus = "Sign in again"
+            case .dependencyOutage, .failed:
+                self.messagingStatus = "Messaging service unavailable"
+            case .sendFailed:
+                self.messagingStatus = "Delivery interrupted"
+            }
+        }
+    }
+
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                     didReceive message: IOSReceivedTextMessage) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            let received = IOSMobileMessage(
+                id: UUID().uuidString.lowercased(),
+                text: message.text,
+                isOutgoing: false,
+                sentAt: Date(timeIntervalSince1970: TimeInterval(message.sentAtMs) / 1_000),
+                senderDeviceID: message.senderDeviceID)
+            if let index = self.conversations.firstIndex(where: {
+                $0.id == message.conversationID || $0.recipientUserID == message.senderUserID
+            }) {
+                self.conversations[index].messages.append(received)
+                self.conversations[index].isSecureReady = true
+            } else {
+                let handle = self.contacts.first(where: { $0.userID == message.senderUserID })?.handle
+                    ?? "contact-\(String(message.senderUserID.prefix(8)))"
+                self.conversations.insert(IOSMobileConversation(
+                    id: message.conversationID,
+                    handle: handle,
+                    recipientUserID: message.senderUserID,
+                    deviceCount: 1,
+                    createdAt: received.sentAt,
+                    messages: [received],
+                    isSecureReady: true), at: 0)
+            }
+            self.persistLocalState()
+        }
+    }
+
+    nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging) {
+        directMessagingDidFail(messaging, reason: .dependencyOutage)
+    }
+
+    nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging,
+                                             reason: IOSMessagingIssue) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            switch reason {
+            case .staleCursor:
+                self.messagingStatus = "Secure recovery required"
+            case .authenticationExpired:
+                self.messagingStatus = "Sign in again"
+            case .dependencyOutage:
+                self.messagingStatus = "Messaging service unavailable"
+            case .sendFailed:
+                self.messagingStatus = messaging.pendingOutboxCount > 0
+                    ? "Encrypted message queued" : "Delivery interrupted"
+            }
         }
     }
 }

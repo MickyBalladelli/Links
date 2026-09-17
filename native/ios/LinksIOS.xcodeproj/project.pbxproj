@@ -13,7 +13,9 @@
 		B10000010000000000000004 /* LinksKeyStore in Frameworks */ = {isa = PBXBuildFile; productRef = B10000030000000000000002 /* LinksKeyStore */; };
 		B10000010000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000006 /* Assets.xcassets */; };
 		B10000010000000000000006 /* IOSLocalDevelopmentURLSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000007 /* IOSLocalDevelopmentURLSession.swift */; };
-			B10000010000000000000007 /* IOSMobileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000008 /* IOSMobileViews.swift */; };
+		B10000010000000000000007 /* IOSMobileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000008 /* IOSMobileViews.swift */; };
+			B10000010000000000000008 /* IOSRustCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000009 /* IOSRustCore.swift */; };
+			B10000010000000000000009 /* IOSMessagingStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000002000000000000000A /* IOSMessagingStores.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,7 +26,9 @@
 		B10000020000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000020000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10000020000000000000007 /* IOSLocalDevelopmentURLSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSLocalDevelopmentURLSession.swift; sourceTree = "<group>"; };
-			B10000020000000000000008 /* IOSMobileViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSMobileViews.swift; sourceTree = "<group>"; };
+		B10000020000000000000008 /* IOSMobileViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSMobileViews.swift; sourceTree = "<group>"; };
+			B10000020000000000000009 /* IOSRustCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSRustCore.swift; sourceTree = "<group>"; };
+			B1000002000000000000000A /* IOSMessagingStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSMessagingStores.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,7 +61,9 @@
 				B10000020000000000000005 /* Info.plist */,
 				B10000020000000000000006 /* Assets.xcassets */,
 				B10000020000000000000007 /* IOSLocalDevelopmentURLSession.swift */,
-					B10000020000000000000008 /* IOSMobileViews.swift */,
+				B10000020000000000000008 /* IOSMobileViews.swift */,
+					B10000020000000000000009 /* IOSRustCore.swift */,
+					B1000002000000000000000A /* IOSMessagingStores.swift */,
 			);
 			path = LinksIOS;
 			sourceTree = "<group>";
@@ -144,7 +150,9 @@
 				B10000010000000000000001 /* LinksIOSApp.swift in Sources */,
 				B10000010000000000000002 /* IOSMobileAppModel.swift in Sources */,
 				B10000010000000000000006 /* IOSLocalDevelopmentURLSession.swift in Sources */,
-					B10000010000000000000007 /* IOSMobileViews.swift in Sources */,
+				B10000010000000000000007 /* IOSMobileViews.swift in Sources */,
+					B10000010000000000000008 /* IOSRustCore.swift in Sources */,
+					B10000010000000000000009 /* IOSMessagingStores.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

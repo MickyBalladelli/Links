@@ -9,7 +9,10 @@ The current mobile shell supports:
 - local-development username registration and login;
 - phone OTP enrollment against a real HTTPS account-auth service;
 - signed `links://connect` URL intake; and
-- authenticated device approval through `POST /v1/devices`.
+- authenticated device approval through `POST /v1/devices`;
+- encrypted WebSocket messaging through the shared Rust client core;
+- account-scoped Keychain secrets and encrypted durable MLS/outbox state; and
+- username-directory contact discovery with one-to-one MLS conversation setup.
 
 The bearer token stays in memory. The app does not log phone numbers, OTP
 codes, pairing payloads, seeds, or message text.
@@ -115,6 +118,6 @@ HTTPS account-auth endpoint. A phone cannot reach the Mac through
 `127.0.0.1`; use a LAN hostname or IP with a trusted development certificate.
 The local HTTP Debug endpoint is intentionally not accepted by the iOS host.
 
-The iOS target is an internal onboarding and pairing build. Full mobile
-WebSocket messaging, QR scanning, and conversation UI remain separate mobile
-validation tasks in `TODO.md`.
+The iOS target is an internal onboarding, pairing, and text-messaging build.
+Signed physical-device validation of two-device message delivery and QR scanning
+remain mobile acceptance tasks in `TODO.md`.

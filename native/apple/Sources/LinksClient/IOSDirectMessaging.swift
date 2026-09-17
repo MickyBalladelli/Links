@@ -74,6 +74,7 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
     private let client: IOSClient
     private let factory: any SharedClientCoreFactory
     private let endpoint: URL
+    private let localDevelopmentRootCertificateData: Data?
     private weak var delegate: IOSDirectMessagingDelegate?
     private let callbackQueue: DispatchQueue
     private let coreQueue = DispatchQueue(
@@ -87,10 +88,12 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
 
     public init(client: IOSClient, factory: any SharedClientCoreFactory, endpoint: URL,
                 delegate: IOSDirectMessagingDelegate,
-                callbackQueue: DispatchQueue = .main) {
+                callbackQueue: DispatchQueue = .main,
+                localDevelopmentRootCertificateData: Data? = nil) {
         self.client = client
         self.factory = factory
         self.endpoint = endpoint
+        self.localDevelopmentRootCertificateData = localDevelopmentRootCertificateData
         self.delegate = delegate
         self.callbackQueue = callbackQueue
     }
@@ -128,7 +131,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                 return try sharedCore.createHello(accessToken: token, lastSeenCursor: cursor)
             },
             delegate: self,
-            callbackQueue: coreQueue)
+            callbackQueue: coreQueue,
+            localDevelopmentRootCertificateData: localDevelopmentRootCertificateData)
         lock.lock()
         core = sharedCore
         connection = manager

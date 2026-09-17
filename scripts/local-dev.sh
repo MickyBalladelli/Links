@@ -20,6 +20,12 @@ export GATEWAY_BIND="${GATEWAY_BIND:-127.0.0.1:8081}"
 export LINKS_AUTH_URL="${LINKS_AUTH_URL:-http://127.0.0.1:8080}"
 export LINKS_GATEWAY_ENDPOINT="${LINKS_GATEWAY_ENDPOINT:-ws://127.0.0.1:8081/v1/connect}"
 
+local_auth_probe="http://${AUTH_BIND}/v1/auth/me"
+if curl -sS --max-time 1 -o /dev/null "$local_auth_probe"; then
+  echo "Local backend already running at $local_auth_probe"
+  exit 0
+fi
+
 postgres_mode="${LINKS_USE_DOCKER:-auto}"
 if [[ "$postgres_mode" != "auto" && "$postgres_mode" != "0" && "$postgres_mode" != "1" ]]; then
   echo "LINKS_USE_DOCKER must be auto, 0, or 1." >&2

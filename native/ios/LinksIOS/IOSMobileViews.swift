@@ -317,7 +317,7 @@ private struct IOSChatsView: View {
             }
             .navigationDestination(for: String.self) { conversationID in
                 if let conversation = model.conversations.first(where: { $0.id == conversationID }) {
-                    IOSConversationView(conversation: conversation)
+                    IOSConversationView(model: model, conversationID: conversation.id)
                 } else {
                     Text("Conversation unavailable")
                         .foregroundStyle(.secondary)
@@ -624,7 +624,7 @@ private struct IOSPeopleView: View {
             }
             .navigationDestination(for: String.self) { conversationID in
                 if let conversation = model.conversations.first(where: { $0.id == conversationID }) {
-                    IOSConversationView(conversation: conversation)
+                    IOSConversationView(model: model, conversationID: conversation.id)
                 } else {
                     Text("Conversation unavailable")
                         .foregroundStyle(.secondary)
@@ -795,50 +795,143 @@ private struct IOSPairDeviceSheet: View {
 }
 
 private struct IOSConversationView: View {
-    let conversation: IOSMobileConversation
+    @ObservedObject var model: IOSMobileAppModel
+    let conversationID: String
+    @State private var composerText = ""
+    @FocusState private var composerFocused: Bool
+
+    private var conversation: IOSMobileConversation? {
+        model.conversation(withID: conversationID)
+    }
+
+    private var setupStatusText: String {
+        if conversation?.isSecureReady == true { return model.messagingStatus }
+        if model.messagingState != .ready { return model.messagingStatus }
+        if !model.preKeyStatus.hasPrefix("Ready") { return model.preKeyStatus }
+        return model.preparingConversationIDs.contains(conversationID)
+            ? "Establishing a secure conversation" : "Secure setup needs attention"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
-                Image(systemName: "lock.fill")
-                Text("End-to-end encryption setup pending")
+                if model.preparingConversationIDs.contains(conversationID) {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: conversation?.isSecureReady == true
+                          && model.messagingState == .ready
+                          ? "lock.fill" : "arrow.triangle.2.circlepath")
+                }
+                Text(setupStatusText)
             }
             .font(.caption.weight(.medium))
-            .foregroundStyle(IOSLinksPalette.violet)
+            .foregroundStyle(conversation?.isSecureReady == true
+                             ? IOSLinksPalette.mint : IOSLinksPalette.violet)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
-            .background(IOSLinksPalette.violet.opacity(0.09))
+            .background((conversation?.isSecureReady == true
+                         ? IOSLinksPalette.mint : IOSLinksPalette.violet).opacity(0.09))
 
-            Spacer()
-            VStack(spacing: 14) {
-                IOSAvatar(name: conversation.handle, size: 72)
-                Text("@\(conversation.handle)")
-                    .font(.title2.weight(.bold))
-                Text("This conversation is saved. Message delivery becomes available when the shared encrypted messaging core is connected to the iOS app.")
-                    .font(.subheadline)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 310)
+            if let conversation, conversation.messages.isEmpty {
+                Spacer()
+                VStack(spacing: 14) {
+                    IOSAvatar(name: conversation.handle, size: 72)
+                    Text("@\(conversation.handle)")
+                        .font(.title2.weight(.bold))
+                    Text(conversation.isSecureReady
+                         ? "Messages are protected with end-to-end encryption."
+                         : setupStatusText + "…")
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 310)
+                }
+                Spacer()
+            } else if let conversation {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(conversation.messages) { message in
+                                IOSMessageBubble(message: message)
+                                    .id(message.id)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
+                    }
+                    .onChange(of: conversation.messages.count) { _ in
+                        guard let lastID = conversation.messages.last?.id else { return }
+                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+                    }
+                }
             }
-            Spacer()
 
-            HStack(spacing: 10) {
-                Text("Messaging is not connected")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "lock.fill")
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Message", text: $composerText, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($composerFocused)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                Button {
+                    if model.sendMessage(conversationID: conversationID, text: composerText) {
+                        composerText = ""
+                    }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(IOSLinksPalette.identityGradient)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || conversation?.isSecureReady != true)
+                .opacity(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                         || conversation?.isSecureReady != true ? 0.45 : 1)
+                .accessibilityLabel("Send message")
             }
-            .padding(.horizontal, 16)
-            .frame(height: 50)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.regularMaterial)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle("@\(conversation.handle)")
+        .navigationTitle(conversation.map { "@\($0.handle)" } ?? "Conversation")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: conversationID) {
+            await model.prepareConversation(conversationID)
+        }
+    }
+}
+
+private struct IOSMessageBubble: View {
+    let message: IOSMobileMessage
+
+    var body: some View {
+        HStack {
+            if message.isOutgoing { Spacer(minLength: 52) }
+            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
+                Text(message.text)
+                    .font(.body)
+                    .foregroundStyle(message.isOutgoing ? .white : .primary)
+                    .textSelection(.enabled)
+                Text(message.sentAt, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(message.isOutgoing ? .white.opacity(0.72) : .secondary)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(message.isOutgoing
+                        ? AnyShapeStyle(IOSLinksPalette.identityGradient)
+                        : AnyShapeStyle(Color(uiColor: .secondarySystemGroupedBackground)))
+            .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+            if !message.isOutgoing { Spacer(minLength: 52) }
+        }
     }
 }
 

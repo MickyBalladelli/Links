@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 public protocol IOSConnectionManagerDelegate: AnyObject {
     func connectionManager(_ manager: IOSConnectionManager, didChange state: IOSConnectionManager.State)
@@ -24,6 +25,47 @@ public final class IOSConnectionManager {
 
     private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate {
         weak var owner: IOSConnectionManager?
+        private var endpointHost: String?
+        private var trustedRootCertificate: SecCertificate?
+
+        func configureTrust(endpoint: URL, rootCertificateData: Data?) throws {
+            guard let rootCertificateData else { return }
+            guard endpoint.scheme?.lowercased() == "wss",
+                  let host = endpoint.host?.lowercased(),
+                  IOSConnectionManager.isLocalDevelopmentHost(host),
+                  let certificate = SecCertificateCreateWithData(
+                    nil, rootCertificateData as CFData) else {
+                throw IOSConnectionError.invalidEndpoint
+            }
+            endpointHost = host
+            trustedRootCertificate = certificate
+        }
+
+        func urlSession(_ session: URLSession,
+                        didReceive challenge: URLAuthenticationChallenge,
+                        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+            guard let endpointHost, let trustedRootCertificate,
+                  challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  challenge.protectionSpace.host.lowercased() == endpointHost,
+                  let serverTrust = challenge.protectionSpace.serverTrust else {
+                completionHandler(.performDefaultHandling, nil)
+                return
+            }
+            let policy = SecPolicyCreateSSL(true, "links-mac.local" as CFString)
+            guard SecTrustSetPolicies(serverTrust, policy) == errSecSuccess,
+                  SecTrustSetAnchorCertificates(serverTrust, [trustedRootCertificate] as CFArray)
+                    == errSecSuccess,
+                  SecTrustSetAnchorCertificatesOnly(serverTrust, true) == errSecSuccess else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+            var trustError: CFError?
+            guard SecTrustEvaluateWithError(serverTrust, &trustError) else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+        }
 
         func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                         didOpenWithProtocol protocol: String?) {
@@ -70,7 +112,8 @@ public final class IOSConnectionManager {
 
     public init(endpoint: URL, helloProvider: @escaping () throws -> Data,
                 delegate: IOSConnectionManagerDelegate,
-                callbackQueue: DispatchQueue = .main) throws {
+                callbackQueue: DispatchQueue = .main,
+                localDevelopmentRootCertificateData: Data? = nil) throws {
         let scheme = endpoint.scheme?.lowercased()
         #if DEBUG
         let localDevelopmentSocket = scheme == "ws"
@@ -91,6 +134,9 @@ public final class IOSConnectionManager {
         self.helloProvider = helloProvider
         self.delegate = delegate
         self.callbackQueue = callbackQueue
+        try socketDelegate.configureTrust(
+            endpoint: endpoint,
+            rootCertificateData: localDevelopmentRootCertificateData)
         socketDelegate.owner = self
     }
 
@@ -362,6 +408,21 @@ public final class IOSConnectionManager {
             guard let self else { return }
             self.delegate?.connectionManagerDidDisconnect(self)
         }
+    }
+
+    fileprivate static func isLocalDevelopmentHost(_ host: String) -> Bool {
+        guard host != "localhost", host != "127.0.0.1", host != "::1" else {
+            return false
+        }
+        if host == "links-mac.local" { return true }
+        let octets = host.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
+            return false
+        }
+        return octets[0] == 10
+            || (octets[0] == 172 && (16...31).contains(octets[1]))
+            || (octets[0] == 192 && octets[1] == 168)
+            || (octets[0] == 169 && octets[1] == 254)
     }
 
     private static func makeURLSessionConfiguration() -> URLSessionConfiguration {
