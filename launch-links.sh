@@ -57,6 +57,11 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 
+lsregister_path="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -x "$lsregister_path" ]]; then
+  "$lsregister_path" -f "$app_path" >/dev/null 2>&1 || true
+fi
+
 if [[ "${LINKS_BUILD_APP:-1}" != "1" ]] && ! codesign --verify --deep --strict "$app_path" >/dev/null 2>&1; then
   echo "Links.app is not validly signed." >&2
   echo "The two-client launcher needs Keychain entitlements for pre-key storage." >&2
