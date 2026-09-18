@@ -925,6 +925,14 @@ private struct IOSConversationView: View {
                             }
                         }
                     }
+                    .onReceive(NotificationCenter.default.publisher(
+                        for: UIResponder.keyboardDidShowNotification)) { _ in
+                        DispatchQueue.main.async {
+                            withAnimation {
+                                proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                            }
+                        }
+                    }
                 }
             }
 
