@@ -104,15 +104,15 @@ else
   fi
 fi
 
+bob_profile="${LINKS_BOB_PROFILE:-bob}"
+bob_args=(--profile "$bob_profile" --auth-url "$auth_url")
 if [[ -n "$profile_root" ]]; then
-  LINKS_AUTH_URL="$auth_url" \
-    bash "$repo_root/scripts/launch-macos-two-client.sh" \
-    "$app_path" "$profile_root" "${LINKS_ALICE_PROFILE:-alice}" "${LINKS_BOB_PROFILE:-bob}"
-else
-  LINKS_AUTH_URL="$auth_url" \
-    bash "$repo_root/scripts/launch-macos-two-client.sh" \
-    "$app_path" "" "${LINKS_ALICE_PROFILE:-alice}" "${LINKS_BOB_PROFILE:-bob}"
+  mkdir -p "$profile_root"
+  bob_args+=(--profile-root "$profile_root")
 fi
+
+open -n "$app_path" --args "${bob_args[@]}"
+echo "Started $bob_profile"
 
 if [[ -n "$backend_pid" ]]; then
   wait "$backend_pid"
