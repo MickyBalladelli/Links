@@ -7,7 +7,13 @@ use links_account_auth::{
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    error::Error,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 use zeroize::Zeroizing;
 
 const DEV_USERNAME_MODE_ENV: &str = "AUTH_DEV_USERNAME_MODE";
@@ -20,6 +26,23 @@ fn flag(name: &str) -> Result<bool, Box<dyn Error>> {
         Err(std::env::VarError::NotPresent) => Ok(false),
         Err(std::env::VarError::NotUnicode(_)) => Err(format!("{name} is not valid UTF-8").into()),
     }
+}
+
+fn trusted_proxy_ips() -> Result<HashSet<IpAddr>, Box<dyn Error>> {
+    let value = match std::env::var("AUTH_TRUSTED_PROXY_IPS") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => return Ok(HashSet::new()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("AUTH_TRUSTED_PROXY_IPS is not valid UTF-8".into())
+        }
+    };
+    let mut proxies = HashSet::new();
+    for entry in value.split(',').map(str::trim).filter(|entry| !entry.is_empty()) {
+        proxies.insert(entry.parse::<IpAddr>().map_err(|_| {
+            format!("AUTH_TRUSTED_PROXY_IPS contains an invalid IP address: {entry}")
+        })?);
+    }
+    Ok(proxies)
 }
 
 fn build_production_auth(
@@ -83,8 +106,15 @@ fn build_auth(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dev_mode = flag(DEV_USERNAME_MODE_ENV)?;
+    let trusted_proxies = Arc::new(trusted_proxy_ips()?);
+    if dev_mode && !trusted_proxies.is_empty() {
+        return Err("AUTH_TRUSTED_PROXY_IPS is unavailable in username development mode".into());
+    }
     if dev_mode && !cfg!(debug_assertions) {
         return Err("AUTH_DEV_USERNAME_MODE is unavailable in Release builds".into());
+    }
+    if !cfg!(debug_assertions) && trusted_proxies.is_empty() {
+        return Err("AUTH_TRUSTED_PROXY_IPS is required in Release builds".into());
     }
     let key_text =
         Zeroizing::new(std::env::var("AUTH_LOOKUP_KEY").map_err(|_| {
@@ -143,7 +173,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let result = axum::serve(
         listener,
-        web::router(auth).into_make_service_with_connect_info::<SocketAddr>(),
+        web::router_with_trusted_proxies(auth, trusted_proxies)
+            .into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async {
         let _ = tokio::signal::ctrl_c().await;

@@ -16,6 +16,46 @@ public enum IOSUsernameAuthError: Error {
     case rateLimited(retryAfterSeconds: Int?)
 }
 
+public struct IOSUsernameAuthChallenge: Sendable {
+    public let challengeID: String
+    public let handle: String
+    public let purpose: String
+    public let deviceID: String
+    public let mlsNodeID: String
+    public let publicKey: Data
+    public let challenge: Data
+    public let expiresAtMs: UInt64
+
+    fileprivate init(object: [String: Any]) throws {
+        guard let challengeID = object["challenge_id"] as? String,
+              IOSClient.isCanonicalUUID(challengeID),
+              let handle = object["handle"] as? String,
+              IOSUsernameAuthSession.isCanonicalHandle(handle),
+              let purpose = object["purpose"] as? String,
+              purpose == "registration" || purpose == "login",
+              let deviceID = object["device_id"] as? String,
+              IOSClient.isCanonicalUUID(deviceID),
+              let mlsNodeID = object["mls_node_id"] as? String,
+              IOSClient.isCanonicalUUID(mlsNodeID),
+              let publicKeyString = object["public_key"] as? String,
+              let publicKey = IOSUsernameAuthSession.decode(publicKeyString, count: 32),
+              let challengeString = object["challenge"] as? String,
+              let challenge = IOSUsernameAuthSession.decode(challengeString, count: 32),
+              let expiresAt = object["expires_at_ms"] as? NSNumber,
+              expiresAt.int64Value > 0 else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        self.challengeID = challengeID
+        self.handle = handle
+        self.purpose = purpose
+        self.deviceID = deviceID
+        self.mlsNodeID = mlsNodeID
+        self.publicKey = publicKey
+        self.challenge = challenge
+        self.expiresAtMs = UInt64(expiresAt.int64Value)
+    }
+}
+
 public struct IOSUsernameAuthSession: Sendable {
     public let accessToken: String
     public let expiresAtMs: UInt64
@@ -156,20 +196,52 @@ public final class IOSUsernameAuthClient: Sendable {
         }
     }
 
-    public func register(handle: String, deviceID: String, mlsNodeID: String,
-                         publicKey: Data, nonce: Data, signature: Data)
-        async throws -> IOSUsernameAuthSession {
-        try await authenticate(path: "v1/auth/username/register", handle: handle,
-                               deviceID: deviceID, mlsNodeID: mlsNodeID,
-                               publicKey: publicKey, nonce: nonce, signature: signature)
+    public func startAuthentication(handle: String, purpose: String, deviceID: String,
+                                    mlsNodeID: String, publicKey: Data)
+        async throws -> IOSUsernameAuthChallenge {
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        try Self.validateHandle(cleanHandle)
+        guard purpose == "registration" || purpose == "login",
+              IOSClient.isCanonicalUUID(deviceID), IOSClient.isCanonicalUUID(mlsNodeID),
+              publicKey.count == 32 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        let body: [String: Any] = [
+            "handle": cleanHandle,
+            "purpose": purpose,
+            "device_id": deviceID,
+            "mls_node_id": mlsNodeID,
+            "public_key": IOSUsernameAuthSession.encode(publicKey)
+        ]
+        let request = try makeRequest(path: "v1/auth/username/challenge", body: body)
+        return try IOSUsernameAuthChallenge(object: try await post(request))
     }
 
-    public func login(handle: String, deviceID: String, mlsNodeID: String,
-                      publicKey: Data, nonce: Data, signature: Data)
+    public func register(challengeID: String, signature: Data)
         async throws -> IOSUsernameAuthSession {
-        try await authenticate(path: "v1/auth/username/login", handle: handle,
-                               deviceID: deviceID, mlsNodeID: mlsNodeID,
-                               publicKey: publicKey, nonce: nonce, signature: signature)
+        try await finishAuthentication(path: "v1/auth/username/register",
+                                       challengeID: challengeID, signature: signature)
+    }
+
+    public func login(challengeID: String, signature: Data)
+        async throws -> IOSUsernameAuthSession {
+        try await finishAuthentication(path: "v1/auth/username/login",
+                                       challengeID: challengeID, signature: signature)
+    }
+
+    public func logout(accessToken: String) async throws {
+        guard !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/auth/logout"))
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
     }
 
     public func lookup(handle: String) async throws -> IOSUsernameDirectory {
@@ -202,21 +274,13 @@ public final class IOSUsernameAuthClient: Sendable {
         return try IOSPairingRegistrationResponse(object: try await post(request))
     }
 
-    private func authenticate(path: String, handle: String, deviceID: String,
-                              mlsNodeID: String, publicKey: Data, nonce: Data,
-                              signature: Data) async throws -> IOSUsernameAuthSession {
-        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        try Self.validateHandle(cleanHandle)
-        guard IOSClient.isCanonicalUUID(deviceID), IOSClient.isCanonicalUUID(mlsNodeID),
-              publicKey.count == 32, nonce.count == 32, signature.count == 64 else {
+    private func finishAuthentication(path: String, challengeID: String,
+                                      signature: Data) async throws -> IOSUsernameAuthSession {
+        guard IOSClient.isCanonicalUUID(challengeID), signature.count == 64 else {
             throw IOSUsernameAuthError.invalidRequest
         }
         let body: [String: Any] = [
-            "handle": cleanHandle,
-            "device_id": deviceID,
-            "mls_node_id": mlsNodeID,
-            "public_key": IOSUsernameAuthSession.encode(publicKey),
-            "nonce": IOSUsernameAuthSession.encode(nonce),
+            "challenge_id": challengeID,
             "signature": IOSUsernameAuthSession.encode(signature)
         ]
         let request = try makeRequest(path: path, body: body)

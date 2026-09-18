@@ -19,9 +19,11 @@ performed during implementation.
 Username-only accounts use the same Ed25519 device identity but do not require a
 phone or store a phone-derived subject. The canonical handle is lowercase ASCII
 `[a-z][a-z0-9_]{2,31}`; the `@` is display-only. Registration and returning login
-both sign a domain-separated transcript with a fresh 32-byte client nonce. The
-server creates the account, unique handle, device, MLS credential, and first
-session in one transaction. Handle and IP rate limits run before that write.
+start with a durable, short-lived, one-time server challenge. The versioned
+transcript binds the operation, challenge ID and value, expiry, handle, device,
+MLS node, and public key. Challenge consumption commits atomically with account or
+session creation. Unauthenticated traffic is limited by source and global buckets;
+account/device limits apply only after a valid returning-device proof.
 
 For local two-client work, the Debug-only `AUTH_DEV_USERNAME_MODE=1` service
 accepts signed canonical lowercase handles (for example `alice`) and uses no
@@ -85,8 +87,11 @@ application, proxy, provider SDK, or analytics layer.
 | --- | --- | --- |
 | `POST /start` | `phone`, `channel`, `device_id`, `mls_node_id`, `public_key`, `signature` | Provisional account/device binding, `challenge_id`, nonce, expiry and MLS credential. |
 | `POST /finish` | `challenge_id`, `code`, `signature` | A device-scoped bearer access token, expiry, user ID and device ID. |
-| `POST /v1/auth/username/register` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Creates a pseudonymous account and returns its session, handle, and MLS credential. |
-| `POST /v1/auth/username/login` | `handle`, `device_id`, `mls_node_id`, `public_key`, `nonce`, `signature` | Returns a session after the registered device key proves possession. |
+| `POST /v1/auth/username/challenge` | `purpose` (`registration` or `login`), `handle`, `device_id`, `mls_node_id`, `public_key` | Returns the server challenge ID/value, exact bound identity fields, and expiry. |
+| `POST /v1/auth/username/register` | `challenge_id`, `signature` | Atomically consumes a registration challenge, creates a pseudonymous account, and returns its session, handle, and MLS credential. |
+| `POST /v1/auth/username/login` | `challenge_id`, `signature` | Atomically consumes a login challenge and returns one session after the registered device key proves possession. |
+| `POST /v1/auth/logout` | Current bearer | Deletes only the current session and returns no body. Repetition is safe. |
+| `DELETE /v1/auth/sessions/others` | Current bearer | Revokes every other session for the account while preserving the current session. |
 | `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's W3C `did:key`, public identity key, MLS node ID and MLS credential. |
 | `GET /v1/contact-discovery/parameters` | Bearer session | OPRF public key and opaque active phone-directory membership filter. |
 | `POST /v1/contact-discovery/query` | Bearer session plus bounded blinded Ristretto points | One verifiable OPRF evaluation per blinded input. |

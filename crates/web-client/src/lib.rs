@@ -311,52 +311,79 @@ impl WebSelfSovereignIdentity {
 
     pub fn username_registration_signature(
         &self,
+        challenge_id: &str,
         handle: &str,
         device_id: &str,
         mls_node_id: &str,
-        nonce: &[u8],
+        challenge: &[u8],
+        expires_at_ms: u64,
     ) -> Result<Vec<u8>, JsValue> {
-        self.username_signature(false, handle, device_id, mls_node_id, nonce)
+        self.username_signature(
+            false,
+            challenge_id,
+            handle,
+            device_id,
+            mls_node_id,
+            challenge,
+            expires_at_ms,
+        )
     }
 
     pub fn username_login_signature(
         &self,
+        challenge_id: &str,
         handle: &str,
         device_id: &str,
         mls_node_id: &str,
-        nonce: &[u8],
+        challenge: &[u8],
+        expires_at_ms: u64,
     ) -> Result<Vec<u8>, JsValue> {
-        self.username_signature(true, handle, device_id, mls_node_id, nonce)
+        self.username_signature(
+            true,
+            challenge_id,
+            handle,
+            device_id,
+            mls_node_id,
+            challenge,
+            expires_at_ms,
+        )
     }
 
     fn username_signature(
         &self,
         login: bool,
+        challenge_id: &str,
         handle: &str,
         device_id: &str,
         mls_node_id: &str,
-        nonce: &[u8],
+        challenge: &[u8],
+        expires_at_ms: u64,
     ) -> Result<Vec<u8>, JsValue> {
+        let challenge_id = canonical_uuid(challenge_id).map_err(js_error)?;
         let device_id = canonical_uuid(device_id).map_err(js_error)?;
         let mls_node_id = canonical_uuid(mls_node_id).map_err(js_error)?;
-        let nonce: [u8; 32] = nonce
+        let challenge: [u8; 32] = challenge
             .try_into()
             .map_err(|_| js_error(CoreError::Authentication))?;
         let transcript = if login {
             links_identity::username_login_transcript(
+                challenge_id,
                 handle,
                 device_id,
                 mls_node_id,
                 &self.identity.public_key(),
-                &nonce,
+                &challenge,
+                expires_at_ms,
             )
         } else {
             links_identity::username_registration_transcript(
+                challenge_id,
                 handle,
                 device_id,
                 mls_node_id,
                 &self.identity.public_key(),
-                &nonce,
+                &challenge,
+                expires_at_ms,
             )
         }
         .map_err(js_error)?;

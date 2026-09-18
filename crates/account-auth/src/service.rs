@@ -93,27 +93,55 @@ impl Drop for StartRequest {
     }
 }
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UsernameAuthPurpose {
+    Registration,
+    Login,
+}
+impl UsernameAuthPurpose {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Registration => "registration",
+            Self::Login => "login",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UsernameRegistrationRequest {
+pub struct UsernameChallengeRequest {
     /// Canonical handle without the display-only `@` prefix.
     pub handle: String,
+    pub purpose: UsernameAuthPurpose,
     pub device_id: Uuid,
     pub mls_node_id: Uuid,
     pub public_key: String,
-    pub nonce: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UsernameChallenge {
+    pub challenge_id: Uuid,
+    pub handle: String,
+    pub purpose: String,
+    pub device_id: Uuid,
+    pub mls_node_id: Uuid,
+    pub public_key: String,
+    pub challenge: String,
+    pub expires_at_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsernameRegistrationRequest {
+    pub challenge_id: Uuid,
     pub signature: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UsernameLoginRequest {
-    /// Canonical handle without the display-only `@` prefix.
-    pub handle: String,
-    pub device_id: Uuid,
-    pub mls_node_id: Uuid,
-    pub public_key: String,
-    pub nonce: String,
+    pub challenge_id: Uuid,
     pub signature: String,
 }
 
@@ -607,29 +635,33 @@ impl AccountAuth {
         Ok(now as i64)
     }
 
-    async fn enforce_username_rate_limits(
+    async fn enforce_username_source_rate_limits(
         &self,
-        handle: &str,
         peer_ip: IpAddr,
         now: i64,
     ) -> Result<(), AuthError> {
-        // Username accounts are the explicit loopback development flow. Repeated
-        // installs and UI testing should not leave a developer locked out for an
-        // hour; production authentication modes retain the limits below.
+        // Development username auth is loopback-only. Production uses source and
+        // global admission limits; account handles are deliberately excluded so
+        // unauthenticated traffic cannot lock out a named account.
         if self.is_loopback_username_dev() {
             return Ok(());
         }
 
-        let handle_minute_key =
-            self.digest(b"links/username-handle-minute/v1\0", handle.as_bytes());
-        let handle_hour_key = self.digest(b"links/username-handle-hour/v1\0", handle.as_bytes());
-        let ip_key = self.digest(b"links/username-ip/v1\0", peer_ip.to_string().as_bytes());
+        let ip_minute_key = self.digest(
+            b"links/username-ip-minute/v2\0",
+            peer_ip.to_string().as_bytes(),
+        );
+        let ip_hour_key = self.digest(
+            b"links/username-ip-hour/v2\0",
+            peer_ip.to_string().as_bytes(),
+        );
+        let global_hour_key = self.digest(b"links/username-global-hour/v2\0", b"global");
         let mut tx = self.pool.begin().await?;
         let mut limited = false;
         for (key, window, limit) in [
-            (handle_minute_key, 60_000_i64, 3_i32),
-            (handle_hour_key, 3_600_000_i64, 10_i32),
-            (ip_key, 3_600_000_i64, 50_i32),
+            (ip_minute_key, 60_000_i64, 20_i32),
+            (ip_hour_key, 3_600_000_i64, 200_i32),
+            (global_hour_key, 3_600_000_i64, 10_000_i32),
         ] {
             let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
                 .bind(key.as_slice())
@@ -887,42 +919,111 @@ impl AccountAuth {
         mac.finalize().into_bytes().into()
     }
 
-    /// Create a pseudonymous account from a canonical handle and a device key.
-    /// The handle, account, device, MLS credential, and first session commit
-    /// atomically. No phone number or phone-derived subject is stored.
-    pub async fn register_username(
+    /// Issue a one-time server challenge for username registration or login.
+    /// The challenge is bound to the complete requested device identity before
+    /// the client signs it.
+    pub async fn start_username_challenge(
         &self,
-        request: UsernameRegistrationRequest,
+        request: UsernameChallengeRequest,
         peer_ip: IpAddr,
-    ) -> Result<UsernameAuthResponse, AuthError> {
+    ) -> Result<UsernameChallenge, AuthError> {
         validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
         }
         let public_key = decode::<32>(&request.public_key)?;
-        let nonce = decode::<32>(&request.nonce)?;
-        let signature = decode::<64>(&request.signature)?;
-        let transcript = links_identity::username_registration_transcript(
-            &request.handle,
-            request.device_id,
-            request.mls_node_id,
-            &public_key,
-            &nonce,
-        )?;
-        verify(&public_key, &transcript, &signature)?;
+        links_identity::validate_public_key(&public_key).map_err(|_| AuthError::Invalid)?;
         let now = self.now()?;
-        self.enforce_username_rate_limits(&request.handle, peer_ip, now)
+        self.enforce_username_source_rate_limits(peer_ip, now).await?;
+        let challenge_id = Uuid::new_v4();
+        let challenge = random()?;
+        let expires_at_ms = now + CHALLENGE_TTL_MS as i64;
+        let purpose = request.purpose.as_str();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE username_auth_challenges SET state='failed' WHERE handle=$1 AND device_id=$2 AND purpose=$3 AND state='pending'")
+            .bind(&request.handle)
+            .bind(request.device_id)
+            .bind(purpose)
+            .execute(&mut *tx)
             .await?;
+        sqlx::query("INSERT INTO username_auth_challenges (challenge_id,purpose,handle,device_id,mls_node_id,public_key,challenge,state,expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)")
+            .bind(challenge_id)
+            .bind(purpose)
+            .bind(&request.handle)
+            .bind(request.device_id)
+            .bind(request.mls_node_id)
+            .bind(public_key.as_slice())
+            .bind(challenge.as_slice())
+            .bind(expires_at_ms)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(UsernameChallenge {
+            challenge_id,
+            handle: request.handle,
+            purpose: purpose.to_owned(),
+            device_id: request.device_id,
+            mls_node_id: request.mls_node_id,
+            public_key: encode(&public_key),
+            challenge: encode(&challenge),
+            expires_at_ms: expires_at_ms as u64,
+        })
+    }
+
+    /// Create a pseudonymous account from a one-time server challenge and a
+    /// device-key proof. Account, device, challenge, and session commit atomically.
+    pub async fn register_username(
+        &self,
+        request: UsernameRegistrationRequest,
+    ) -> Result<UsernameAuthResponse, AuthError> {
+        let signature = decode::<64>(&request.signature)?;
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT handle,device_id,mls_node_id,public_key,challenge,state,expires_at_ms FROM username_auth_challenges WHERE challenge_id=$1 AND purpose='registration' FOR UPDATE")
+            .bind(request.challenge_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(AuthError::Denied)?;
+        let expires_at_ms: i64 = row.get("expires_at_ms");
+        if row.get::<String, _>("state") != "pending" || expires_at_ms <= self.now()? {
+            return Err(AuthError::Denied);
+        }
+        let handle: String = row.get("handle");
+        let device_id: Uuid = row.get("device_id");
+        let mls_node_id: Uuid = row.get("mls_node_id");
+        let public_key: [u8; 32] = row
+            .get::<Vec<u8>, _>("public_key")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        let challenge: [u8; 32] = row
+            .get::<Vec<u8>, _>("challenge")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        let transcript = links_identity::username_registration_transcript(
+            request.challenge_id,
+            &handle,
+            device_id,
+            mls_node_id,
+            &public_key,
+            &challenge,
+            expires_at_ms as u64,
+        )?;
+        if verify(&public_key, &transcript, &signature).is_err() {
+            sqlx::query("UPDATE username_auth_challenges SET state='failed',attempts=attempts+1 WHERE challenge_id=$1 AND state='pending'")
+                .bind(request.challenge_id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Err(AuthError::Denied);
+        }
 
         let user_id = Uuid::new_v4();
         let binding = DeviceBinding {
             user_id,
-            device_id: request.device_id,
-            mls_node_id: request.mls_node_id,
+            device_id,
+            mls_node_id,
             public_key,
         };
         let credential = binding.mls_credential()?;
-        let mut tx = self.pool.begin().await?;
         sqlx::query("INSERT INTO accounts (user_id,auth_subject_hash,account_kind) VALUES ($1,$2,'pseudonymous')")
             .bind(user_id)
             .bind(Option::<Vec<u8>>::None)
@@ -930,89 +1031,139 @@ impl AccountAuth {
             .await
             .map_err(map_username_registration_write_error)?;
         sqlx::query("INSERT INTO handles (handle,user_id) VALUES ($1,$2)")
-            .bind(&request.handle)
+            .bind(&handle)
             .bind(user_id)
             .execute(&mut *tx)
             .await
             .map_err(map_username_registration_write_error)?;
         sqlx::query("INSERT INTO devices (device_id,user_id,mls_node_id,identity_public_key,mls_credential) VALUES ($1,$2,$3,$4,$5)")
-            .bind(request.device_id)
+            .bind(device_id)
             .bind(user_id)
-            .bind(request.mls_node_id)
+            .bind(mls_node_id)
             .bind(binding.public_key.as_slice())
             .bind(&credential)
             .execute(&mut *tx)
             .await
             .map_err(map_username_registration_write_error)?;
-        let session = self
-            .issue_session(&mut tx, user_id, request.device_id)
+        let session = self.issue_session(&mut tx, user_id, device_id).await?;
+        sqlx::query("UPDATE username_auth_challenges SET state='consumed' WHERE challenge_id=$1 AND state='pending'")
+            .bind(request.challenge_id)
+            .execute(&mut *tx)
             .await?;
         tx.commit().await?;
         Ok(UsernameAuthResponse {
             session,
-            handle: request.handle,
+            handle,
             mls_credential: encode(&credential),
         })
     }
 
-    /// Log in to a username account by proving possession of the registered
-    /// device key. This keeps phone OTP out of the pseudonymous path.
+    /// Log in to a username account with a one-time server challenge and the
+    /// registered device key.
     pub async fn login_username(
         &self,
         request: UsernameLoginRequest,
-        peer_ip: IpAddr,
     ) -> Result<UsernameAuthResponse, AuthError> {
-        validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
-        if request.device_id.is_nil() || request.mls_node_id.is_nil() {
-            return Err(AuthError::Invalid);
-        }
-        let public_key = decode::<32>(&request.public_key)?;
-        let nonce = decode::<32>(&request.nonce)?;
         let signature = decode::<64>(&request.signature)?;
-        let now = self.now()?;
-        self.enforce_username_rate_limits(&request.handle, peer_ip, now)
-            .await?;
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query("SELECT a.user_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND d.device_id=$2 AND a.account_kind='pseudonymous' AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR SHARE OF a,d")
-            .bind(&request.handle)
-            .bind(request.device_id)
+        let challenge_row = sqlx::query("SELECT handle,device_id,mls_node_id,public_key,challenge,state,expires_at_ms FROM username_auth_challenges WHERE challenge_id=$1 AND purpose='login' FOR UPDATE")
+            .bind(request.challenge_id)
             .fetch_optional(&mut *tx)
             .await?
             .ok_or(AuthError::Denied)?;
+        let expires_at_ms: i64 = challenge_row.get("expires_at_ms");
+        if challenge_row.get::<String, _>("state") != "pending" || expires_at_ms <= self.now()? {
+            return Err(AuthError::Denied);
+        }
+        let handle: String = challenge_row.get("handle");
+        let device_id: Uuid = challenge_row.get("device_id");
+        let mls_node_id: Uuid = challenge_row.get("mls_node_id");
+        let public_key: [u8; 32] = challenge_row
+            .get::<Vec<u8>, _>("public_key")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        let challenge: [u8; 32] = challenge_row
+            .get::<Vec<u8>, _>("challenge")
+            .try_into()
+            .map_err(|_| AuthError::Unavailable)?;
+        let transcript = links_identity::username_login_transcript(
+            request.challenge_id,
+            &handle,
+            device_id,
+            mls_node_id,
+            &public_key,
+            &challenge,
+            expires_at_ms as u64,
+        )?;
+        if verify(&public_key, &transcript, &signature).is_err() {
+            sqlx::query("UPDATE username_auth_challenges SET state='failed',attempts=attempts+1 WHERE challenge_id=$1 AND state='pending'")
+                .bind(request.challenge_id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Err(AuthError::Denied);
+        }
+        let row = sqlx::query("SELECT a.user_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND d.device_id=$2 AND a.account_kind='pseudonymous' AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR SHARE OF a,d")
+            .bind(&handle)
+            .bind(device_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some(row) = row else {
+            sqlx::query("UPDATE username_auth_challenges SET state='failed',attempts=attempts+1 WHERE challenge_id=$1 AND state='pending'")
+                .bind(request.challenge_id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Err(AuthError::Denied);
+        };
         let user_id: Uuid = row.get("user_id");
         let stored_node: Uuid = row.get("mls_node_id");
         let stored_public: [u8; 32] = row
             .get::<Vec<u8>, _>("identity_public_key")
             .try_into()
             .map_err(|_| AuthError::Unavailable)?;
-        if stored_node != request.mls_node_id || stored_public != public_key {
+        if stored_node != mls_node_id || stored_public != public_key {
+            sqlx::query("UPDATE username_auth_challenges SET state='failed',attempts=attempts+1 WHERE challenge_id=$1 AND state='pending'")
+                .bind(request.challenge_id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
             return Err(AuthError::Denied);
         }
         let binding = DeviceBinding {
             user_id,
-            device_id: request.device_id,
-            mls_node_id: request.mls_node_id,
+            device_id,
+            mls_node_id,
             public_key,
         };
         let credential = binding.mls_credential()?;
         if row.get::<Vec<u8>, _>("mls_credential") != credential {
             return Err(AuthError::Unavailable);
         }
-        let transcript = links_identity::username_login_transcript(
-            &request.handle,
-            request.device_id,
-            request.mls_node_id,
-            &public_key,
-            &nonce,
-        )?;
-        verify(&public_key, &transcript, &signature)?;
-        let session = self
-            .issue_session(&mut tx, user_id, request.device_id)
+        let mut account_device = Vec::with_capacity(32);
+        account_device.extend(user_id.as_bytes());
+        account_device.extend(device_id.as_bytes());
+        let authenticated_key =
+            self.digest(b"links/username-authenticated-device-hour/v2\0", &account_device);
+        let allowed: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
+            .bind(authenticated_key.as_slice())
+            .bind(self.now()?)
+            .bind(3_600_000_i64)
+            .bind(120_i32)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if allowed.is_none() {
+            return Err(AuthError::RateLimited);
+        }
+        let session = self.issue_session(&mut tx, user_id, device_id).await?;
+        sqlx::query("UPDATE username_auth_challenges SET state='consumed' WHERE challenge_id=$1 AND state='pending'")
+            .bind(request.challenge_id)
+            .execute(&mut *tx)
             .await?;
         tx.commit().await?;
         Ok(UsernameAuthResponse {
             session,
-            handle: request.handle,
+            handle,
             mls_credential: encode(&credential),
         })
     }
@@ -1182,12 +1333,14 @@ impl AccountAuth {
                 .map_err(|_| AuthError::Unavailable)?;
         let cooldown = self.digest(b"links/otp-cooldown/v1\0", &subject);
         let per_phone = self.digest(b"links/otp-phone-hour/v1\0", &subject);
-        let per_ip = self.digest(b"links/otp-ip-hour/v1\0", peer_ip.to_string().as_bytes());
+        let per_ip = self.digest(b"links/otp-ip-hour/v2\0", peer_ip.to_string().as_bytes());
+        let global = self.digest(b"links/otp-global-hour/v2\0", b"global");
         let mut tx = self.pool.begin().await?;
         for (key, window, limit) in [
             (cooldown, 60_000_i64, 1_i32),
             (per_phone, 3_600_000, 5),
             (per_ip, 3_600_000, 20),
+            (global, 3_600_000, 10_000),
         ] {
             let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
                 .bind(key.as_slice()).bind(now).bind(window).bind(limit).fetch_optional(&mut *tx).await?;
@@ -1383,6 +1536,32 @@ impl AccountAuth {
             user_id: row.get("user_id"),
             device_id: row.get("device_id"),
         })
+    }
+
+    /// Revoke the presented session. A well-formed token that is already absent
+    /// is treated as logged out so callers do not learn prior session state.
+    pub async fn logout(&self, token: &str) -> Result<(), AuthError> {
+        let bytes = Zeroizing::new(decode::<32>(token).map_err(|_| AuthError::Denied)?);
+        let hash = Sha256::digest(bytes.as_slice());
+        sqlx::query("DELETE FROM auth_sessions WHERE token_hash=$1")
+            .bind(hash.as_slice())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Revoke every other session for the authenticated account while retaining
+    /// the session used to authorize this request.
+    pub async fn revoke_other_sessions(&self, token: &str) -> Result<(), AuthError> {
+        let account = self.authenticate(token).await?;
+        let bytes = Zeroizing::new(decode::<32>(token).map_err(|_| AuthError::Denied)?);
+        let hash = Sha256::digest(bytes.as_slice());
+        sqlx::query("DELETE FROM auth_sessions WHERE user_id=$1 AND token_hash<>$2")
+            .bind(account.user_id)
+            .bind(hash.as_slice())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     /// Create the account-level control-plane record for a group. MLS state is
@@ -2343,6 +2522,10 @@ impl AccountAuth {
             .await?;
         sqlx::query("DELETE FROM passkey_challenges WHERE expires_at_ms <= $1")
             .bind(now - PASSKEY_CHALLENGE_TTL_MS as i64)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM username_auth_challenges WHERE expires_at_ms <= $1")
+            .bind(now - CHALLENGE_TTL_MS as i64)
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM auth_rate_limits WHERE window_start_ms <= $1")

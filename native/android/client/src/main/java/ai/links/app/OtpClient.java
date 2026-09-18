@@ -70,6 +70,30 @@ public final class OtpClient {
         return new Session(post("/v1/auth/finish", body));
     }
 
+    /** Revoke the current bearer. Local callers must clear their session even if this fails. */
+    public void logout(String accessToken) throws IOException {
+        decodeExact(accessToken, 32);
+        HttpsURLConnection connection = null;
+        try {
+            URL endpoint = new URL(baseUrl + "/v1/auth/logout");
+            connection = (HttpsURLConnection) endpoint.openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Authorization", "Bearer " + accessToken);
+            connection.setFixedLengthStreamingMode(0);
+            connection.setDoOutput(true);
+            connection.getOutputStream().close();
+            int responseCode = connection.getResponseCode();
+            readLimited(responseCode >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (responseCode < 200 || responseCode >= 300)
+                throw new IOException("Logout service rejected request");
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
     static String encode(byte[] bytes) {
         return Base64.encodeToString(bytes, BASE64_FLAGS);
     }

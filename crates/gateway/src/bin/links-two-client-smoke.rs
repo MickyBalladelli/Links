@@ -51,12 +51,29 @@ impl Drop for Account {
 }
 
 #[derive(Serialize)]
-struct UsernameRegistrationRequest {
+struct UsernameChallengeRequest {
     handle: String,
+    purpose: &'static str,
     device_id: Uuid,
     mls_node_id: Uuid,
     public_key: String,
-    nonce: String,
+}
+
+#[derive(Deserialize)]
+struct UsernameChallenge {
+    challenge_id: Uuid,
+    handle: String,
+    purpose: String,
+    device_id: Uuid,
+    mls_node_id: Uuid,
+    public_key: String,
+    challenge: String,
+    expires_at_ms: u64,
+}
+
+#[derive(Serialize)]
+struct UsernameRegistrationRequest {
+    challenge_id: Uuid,
     signature: String,
 }
 
@@ -181,22 +198,48 @@ async fn register_account(
     let device_id = Uuid::new_v4();
     let mls_node_id = Uuid::new_v4();
     let public_key = seed.public_key();
-    let nonce = fresh_nonce();
+    let challenge = http
+        .post(format!("{auth_url}/v1/auth/username/challenge"))
+        .json(&UsernameChallengeRequest {
+            handle: handle.to_owned(),
+            purpose: "registration",
+            device_id,
+            mls_node_id,
+            public_key: URL_SAFE_NO_PAD.encode(public_key),
+        })
+        .send()
+        .await
+        .map_err(|_| SmokeFailure)?
+        .json::<UsernameChallenge>()
+        .await
+        .map_err(|_| SmokeFailure)?;
+    if challenge.handle != handle
+        || challenge.purpose != "registration"
+        || challenge.device_id != device_id
+        || challenge.mls_node_id != mls_node_id
+        || challenge.public_key != URL_SAFE_NO_PAD.encode(public_key)
+        || challenge.expires_at_ms <= now_ms()?
+    {
+        return Err(SmokeFailure);
+    }
+    let challenge_bytes: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&challenge.challenge)
+        .map_err(|_| SmokeFailure)?
+        .try_into()
+        .map_err(|_| SmokeFailure)?;
     let transcript = username_registration_transcript(
+        challenge.challenge_id,
         handle,
         device_id,
         mls_node_id,
         &public_key,
-        &nonce,
+        &challenge_bytes,
+        challenge.expires_at_ms,
     )
     .map_err(|_| SmokeFailure)?;
     let signature = seed.sign(&transcript);
     let request = UsernameRegistrationRequest {
-        handle: handle.to_owned(),
-        device_id,
-        mls_node_id,
-        public_key: URL_SAFE_NO_PAD.encode(public_key),
-        nonce: URL_SAFE_NO_PAD.encode(nonce),
+        challenge_id: challenge.challenge_id,
         signature: URL_SAFE_NO_PAD.encode(signature),
     };
     let response = http

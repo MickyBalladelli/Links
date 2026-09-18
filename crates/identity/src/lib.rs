@@ -475,60 +475,72 @@ pub fn verify_verification_badge(
 /// Proof transcript for creating a pseudonymous account or logging in with its
 /// first-party device key. The handle is the canonical form without `@`.
 pub fn username_registration_transcript(
+    challenge_id: Uuid,
     handle: &str,
     device_id: Uuid,
     mls_node_id: Uuid,
     public_key: &[u8; 32],
-    nonce: &[u8; 32],
+    challenge: &[u8; 32],
+    expires_at_ms: u64,
 ) -> Result<Vec<u8>, IdentityError> {
     username_transcript(
-        b"links/username-register/v1\0",
+        b"links/username-register/v2\0",
+        challenge_id,
         handle,
         device_id,
         mls_node_id,
         public_key,
-        nonce,
+        challenge,
+        expires_at_ms,
     )
 }
 
 /// Proof transcript for returning to a pseudonymous account without a phone.
 pub fn username_login_transcript(
+    challenge_id: Uuid,
     handle: &str,
     device_id: Uuid,
     mls_node_id: Uuid,
     public_key: &[u8; 32],
-    nonce: &[u8; 32],
+    challenge: &[u8; 32],
+    expires_at_ms: u64,
 ) -> Result<Vec<u8>, IdentityError> {
     username_transcript(
-        b"links/username-login/v1\0",
+        b"links/username-login/v2\0",
+        challenge_id,
         handle,
         device_id,
         mls_node_id,
         public_key,
-        nonce,
+        challenge,
+        expires_at_ms,
     )
 }
 
 fn username_transcript(
     domain: &[u8],
+    challenge_id: Uuid,
     handle: &str,
     device_id: Uuid,
     mls_node_id: Uuid,
     public_key: &[u8; 32],
-    nonce: &[u8; 32],
+    challenge: &[u8; 32],
+    expires_at_ms: u64,
 ) -> Result<Vec<u8>, IdentityError> {
     links_protocol::validate_handle(handle).map_err(|_| IdentityError::Invalid)?;
-    if device_id.is_nil() || mls_node_id.is_nil() {
+    if challenge_id.is_nil() || device_id.is_nil() || mls_node_id.is_nil() || expires_at_ms == 0 {
         return Err(IdentityError::Invalid);
     }
     validate_public_key(public_key)?;
     let mut bytes = domain.to_vec();
+    bytes.extend(challenge_id.as_bytes());
     bytes.push(handle.len() as u8);
     bytes.extend(handle.as_bytes());
     bytes.extend(device_id.as_bytes());
     bytes.extend(mls_node_id.as_bytes());
     bytes.extend(public_key);
-    bytes.extend(nonce);
+    bytes.extend(challenge);
+    bytes.extend(expires_at_ms.to_be_bytes());
     Ok(bytes)
 }
 

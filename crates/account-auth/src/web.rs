@@ -5,13 +5,13 @@ use crate::{
         EncryptedKeyBackupRequest, FinishRequest,
         OrganizationControlsRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
-        PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest,
+        PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest, UsernameChallengeRequest,
     },
     AuthError,
 };
 use axum::{
     body::Bytes,
-    extract::{rejection::JsonRejection, ConnectInfo, DefaultBodyLimit, Path, State},
+    extract::{rejection::JsonRejection, ConnectInfo, DefaultBodyLimit, Extension, Path, State},
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -20,12 +20,29 @@ use axum::{
 };
 use links_protocol::{v1, MAX_PREKEY_UPLOAD_BYTES};
 use prost::Message;
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
+
+#[derive(Clone, Copy)]
+struct ClientIp(IpAddr);
 
 pub fn router(auth: Arc<AccountAuth>) -> Router {
+    router_with_trusted_proxies(auth, Arc::new(HashSet::new()))
+}
+
+pub fn router_with_trusted_proxies(
+    auth: Arc<AccountAuth>,
+    trusted_proxies: Arc<HashSet<IpAddr>>,
+) -> Router {
     let mut auth_routes = Router::new()
+        .route("/v1/auth/username/challenge", post(username_challenge))
         .route("/v1/auth/username/register", post(username_register))
         .route("/v1/auth/username/login", post(username_login))
+        .route("/v1/auth/logout", post(logout))
+        .route("/v1/auth/sessions/others", delete(revoke_other_sessions))
         .route("/v1/auth/me", get(me))
         .route(
             "/v1/organization/controls",
@@ -108,23 +125,62 @@ pub fn router(auth: Arc<AccountAuth>) -> Router {
         .merge(contact_psi_routes)
         .merge(privacy_pass_routes)
         .merge(chat_pow_routes)
+        .layer(middleware::from_fn_with_state(
+            trusted_proxies,
+            resolve_client_ip,
+        ))
         .layer(middleware::from_fn(no_store))
         .with_state(auth)
 }
+
+async fn resolve_client_ip(
+    State(trusted_proxies): State<Arc<HashSet<IpAddr>>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let client_ip = client_ip_from_headers(peer.ip(), &trusted_proxies, request.headers())?;
+    request.extensions_mut().insert(ClientIp(client_ip));
+    Ok(next.run(request).await)
+}
+
+fn client_ip_from_headers(
+    peer_ip: IpAddr,
+    trusted_proxies: &HashSet<IpAddr>,
+    headers: &HeaderMap,
+) -> Result<IpAddr, StatusCode> {
+    if !trusted_proxies.contains(&peer_ip) {
+        return Ok(peer_ip);
+    }
+    let mut forwarded = headers.get_all("x-forwarded-for").iter();
+    let value = forwarded.next().ok_or(StatusCode::BAD_REQUEST)?;
+    if forwarded.next().is_some() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let value = value.to_str().map_err(|_| StatusCode::BAD_REQUEST)?.trim();
+    if value.contains(',') {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    value.parse::<IpAddr>().map_err(|_| StatusCode::BAD_REQUEST)
+}
+
 async fn no_store(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        eprintln!("Authentication rate limit saturated; inspect ingress and provider metrics.");
+    }
     response
 }
 async fn start(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     request: Result<Json<StartRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.start(request.map_err(|_| AuthError::Invalid)?.0, peer.ip())
+        auth.start(request.map_err(|_| AuthError::Invalid)?.0, peer_ip)
             .await?,
     ))
 }
@@ -137,60 +193,82 @@ async fn finish(
             .await?,
     ))
 }
+async fn username_challenge(
+    State(auth): State<Arc<AccountAuth>>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
+    request: Result<Json<UsernameChallengeRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.start_username_challenge(request.map_err(|_| AuthError::Invalid)?.0, peer_ip)
+            .await?,
+    ))
+}
 async fn username_register(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     request: Result<Json<crate::service::UsernameRegistrationRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.register_username(request.map_err(|_| AuthError::Invalid)?.0, peer.ip())
+        auth.register_username(request.map_err(|_| AuthError::Invalid)?.0)
             .await?,
     ))
 }
 async fn username_login(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     request: Result<Json<crate::service::UsernameLoginRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.login_username(request.map_err(|_| AuthError::Invalid)?.0, peer.ip())
+        auth.login_username(request.map_err(|_| AuthError::Invalid)?.0)
             .await?,
     ))
 }
+async fn logout(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.logout(bearer(&headers)?).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn revoke_other_sessions(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.revoke_other_sessions(bearer(&headers)?).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 async fn directory_lookup(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     Path(handle): Path<String>,
 ) -> Result<Response, AuthError> {
     let handle = handle.strip_prefix('@').unwrap_or(&handle);
     if handle.is_empty() || handle.starts_with('@') {
         return Err(AuthError::Invalid);
     }
-    match auth.lookup_username_directory(handle, peer.ip()).await? {
+    match auth.lookup_username_directory(handle, peer_ip).await? {
         Some(directory) => Ok(Json(directory).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
 }
 async fn contact_psi_parameters(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.contact_psi_parameters(bearer(&headers)?, peer.ip())
+        auth.contact_psi_parameters(bearer(&headers)?, peer_ip)
             .await?,
     ))
 }
 async fn contact_psi_query(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     headers: HeaderMap,
     request: Result<Json<ContactPsiQueryRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
         auth.contact_psi_query(
             bearer(&headers)?,
-            peer.ip(),
+            peer_ip,
             request.map_err(|_| AuthError::Invalid)?.0,
         )
         .await?,
@@ -203,20 +281,20 @@ async fn privacy_pass_parameters(
 }
 async fn privacy_pass_challenge(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
 ) -> Result<impl IntoResponse, AuthError> {
-    Ok(Json(auth.privacy_pass_challenge(peer.ip()).await?))
+    Ok(Json(auth.privacy_pass_challenge(peer_ip).await?))
 }
 async fn privacy_pass_issue(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     headers: HeaderMap,
     request: Result<Json<PrivacyPassIssueRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
         auth.privacy_pass_issue(
             bearer(&headers)?,
-            peer.ip(),
+            peer_ip,
             request.map_err(|_| AuthError::Invalid)?.0,
         )
         .await?,
@@ -224,34 +302,34 @@ async fn privacy_pass_issue(
 }
 async fn privacy_pass_redeem(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     request: Result<Json<PrivacyPassRedeemRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.privacy_pass_redeem(peer.ip(), request.map_err(|_| AuthError::Invalid)?.0)
+        auth.privacy_pass_redeem(peer_ip, request.map_err(|_| AuthError::Invalid)?.0)
             .await?,
     ))
 }
 async fn chat_pow_challenge(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.chat_pow_challenge(bearer(&headers)?, peer.ip())
+        auth.chat_pow_challenge(bearer(&headers)?, peer_ip)
             .await?,
     ))
 }
 async fn chat_pow_verify(
     State(auth): State<Arc<AccountAuth>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     headers: HeaderMap,
     request: Result<Json<ChatProofOfWorkVerifyRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
         auth.chat_pow_verify(
             bearer(&headers)?,
-            peer.ip(),
+            peer_ip,
             request.map_err(|_| AuthError::Invalid)?.0,
         )
         .await?,
@@ -517,5 +595,38 @@ impl IntoResponse for AuthError {
                 .insert(header::RETRY_AFTER, "3600".parse().unwrap());
         }
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untrusted_peer_cannot_spoof_forwarded_address() {
+        let peer: IpAddr = "203.0.113.10".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
+        assert_eq!(
+            client_ip_from_headers(peer, &HashSet::new(), &headers).unwrap(),
+            peer
+        );
+    }
+
+    #[test]
+    fn trusted_proxy_requires_one_canonical_forwarded_address() {
+        let proxy: IpAddr = "127.0.0.1".parse().unwrap();
+        let trusted = HashSet::from([proxy]);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "198.51.100.7".parse().unwrap());
+        assert_eq!(
+            client_ip_from_headers(proxy, &trusted, &headers).unwrap(),
+            "198.51.100.7".parse::<IpAddr>().unwrap()
+        );
+        headers.insert("x-forwarded-for", "198.51.100.7, 203.0.113.8".parse().unwrap());
+        assert_eq!(
+            client_ip_from_headers(proxy, &trusted, &headers),
+            Err(StatusCode::BAD_REQUEST)
+        );
     }
 }

@@ -3,7 +3,9 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use links_account_auth::{
     provider::{Channel, OtpProvider},
     service::{
-        encode, AccountAuth, Challenge, Clock, FinishRequest, StartRequest, CHALLENGE_TTL_MS,
+        encode, AccountAuth, Challenge, Clock, FinishRequest, StartRequest,
+        UsernameAuthPurpose, UsernameChallengeRequest, UsernameLoginRequest,
+        UsernameRegistrationRequest, CHALLENGE_TTL_MS,
     },
     AuthError,
 };
@@ -441,6 +443,125 @@ async fn sessions_expire_and_disabled_accounts_are_rechecked() {
     assert!(f.auth.authenticate(&session.access_token).await.is_err());
     f.auth.purge_expired().await.unwrap();
     assert_eq!(f.count("auth_sessions").await, 0);
+    f.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL via LINKS_TEST_DATABASE_URL"]
+async fn username_challenges_are_one_time_and_logout_revokes_session() {
+    let f = Fixture::new().await;
+    let seed = IdentitySeed::generate().unwrap();
+    let device_id = Uuid::new_v4();
+    let mls_node_id = Uuid::new_v4();
+    let public_key = seed.public_key();
+    let peer = "127.0.0.1".parse().unwrap();
+
+    let registration = f
+        .auth
+        .start_username_challenge(
+            UsernameChallengeRequest {
+                handle: "alice_test".into(),
+                purpose: UsernameAuthPurpose::Registration,
+                device_id,
+                mls_node_id,
+                public_key: encode(&public_key),
+            },
+            peer,
+        )
+        .await
+        .unwrap();
+    let registration_challenge: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&registration.challenge)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let registration_signature = encode(&seed.sign(
+        &links_identity::username_registration_transcript(
+            registration.challenge_id,
+            &registration.handle,
+            device_id,
+            mls_node_id,
+            &public_key,
+            &registration_challenge,
+            registration.expires_at_ms,
+        )
+        .unwrap(),
+    ));
+    let first = f
+        .auth
+        .register_username(UsernameRegistrationRequest {
+            challenge_id: registration.challenge_id,
+            signature: registration_signature.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(f
+        .auth
+        .register_username(UsernameRegistrationRequest {
+            challenge_id: registration.challenge_id,
+            signature: registration_signature,
+        })
+        .await
+        .is_err());
+    assert_eq!(f.count("auth_sessions").await, 1);
+
+    let login = f
+        .auth
+        .start_username_challenge(
+            UsernameChallengeRequest {
+                handle: "alice_test".into(),
+                purpose: UsernameAuthPurpose::Login,
+                device_id,
+                mls_node_id,
+                public_key: encode(&public_key),
+            },
+            peer,
+        )
+        .await
+        .unwrap();
+    let login_challenge: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&login.challenge)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let login_signature = encode(&seed.sign(
+        &links_identity::username_login_transcript(
+            login.challenge_id,
+            &login.handle,
+            device_id,
+            mls_node_id,
+            &public_key,
+            &login_challenge,
+            login.expires_at_ms,
+        )
+        .unwrap(),
+    ));
+    let second = f
+        .auth
+        .login_username(UsernameLoginRequest {
+            challenge_id: login.challenge_id,
+            signature: login_signature.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(f
+        .auth
+        .login_username(UsernameLoginRequest {
+            challenge_id: login.challenge_id,
+            signature: login_signature,
+        })
+        .await
+        .is_err());
+    assert_eq!(f.count("auth_sessions").await, 2);
+
+    f.auth.logout(&second.session.access_token).await.unwrap();
+    f.auth.logout(&second.session.access_token).await.unwrap();
+    assert!(f
+        .auth
+        .authenticate(&second.session.access_token)
+        .await
+        .is_err());
+    assert!(f.auth.authenticate(&first.session.access_token).await.is_ok());
     f.finish().await;
 }
 

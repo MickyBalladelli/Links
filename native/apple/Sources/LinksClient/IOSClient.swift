@@ -561,10 +561,24 @@ public final class IOSClient: SharedCoreIdentitySigner {
         }
         let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         try IOSUsernameAuthClient.validateHandle(cleanHandle)
-        let nonce = IOSPairingPayload.generateNonce()
+        let purpose = login ? "login" : "registration"
+        let challenge = try await api.startAuthentication(
+            handle: cleanHandle, purpose: purpose, deviceID: deviceID,
+            mlsNodeID: mlsNodeID, publicKey: identity.publicKey)
+        guard challenge.handle == cleanHandle,
+              challenge.purpose == purpose,
+              challenge.deviceID == deviceID,
+              challenge.mlsNodeID == mlsNodeID,
+              challenge.publicKey == identity.publicKey,
+              challenge.expiresAtMs > Self.nowMs(),
+              let challengeUUID = UUID(uuidString: challenge.challengeID) else {
+            throw IOSClientError.invalidMetadata
+        }
         var transcript = try usernameTranscript(
-            handle: cleanHandle, deviceID: deviceUUID, mlsNodeID: nodeUUID,
-            publicKey: identity.publicKey, nonce: nonce, login: login)
+            challengeID: challengeUUID, handle: cleanHandle,
+            deviceID: deviceUUID, mlsNodeID: nodeUUID,
+            publicKey: identity.publicKey, challenge: challenge.challenge,
+            expiresAtMs: challenge.expiresAtMs, login: login)
         var signature = try sign(transcript)
         defer {
             transcript.resetBytes(in: 0..<transcript.count)
@@ -573,12 +587,10 @@ public final class IOSClient: SharedCoreIdentitySigner {
         let session: IOSUsernameAuthSession
         if login {
             session = try await api.login(
-                handle: cleanHandle, deviceID: deviceID, mlsNodeID: mlsNodeID,
-                publicKey: identity.publicKey, nonce: nonce, signature: signature)
+                challengeID: challenge.challengeID, signature: signature)
         } else {
             session = try await api.register(
-                handle: cleanHandle, deviceID: deviceID, mlsNodeID: mlsNodeID,
-                publicKey: identity.publicKey, nonce: nonce, signature: signature)
+                challengeID: challenge.challengeID, signature: signature)
         }
         guard session.deviceID == deviceID else { throw IOSClientError.invalidMetadata }
         try setAuthenticatedSession(
@@ -590,22 +602,27 @@ public final class IOSClient: SharedCoreIdentitySigner {
         return session
     }
 
-    private func usernameTranscript(handle: String, deviceID: UUID, mlsNodeID: UUID,
-                                    publicKey: Data, nonce: Data, login: Bool) throws -> Data {
+    private func usernameTranscript(challengeID: UUID, handle: String,
+                                    deviceID: UUID, mlsNodeID: UUID,
+                                    publicKey: Data, challenge: Data,
+                                    expiresAtMs: UInt64, login: Bool) throws -> Data {
         let handleBytes = Array(handle.utf8)
         guard handleBytes.count >= 3, handleBytes.count <= 32,
-              publicKey.count == 32, nonce.count == 32 else {
+              publicKey.count == 32, challenge.count == 32, expiresAtMs > 0 else {
             throw IOSClientError.invalidMetadata
         }
         var transcript = Data((login
-            ? "links/username-login/v1\0"
-            : "links/username-register/v1\0").utf8)
+            ? "links/username-login/v2\0"
+            : "links/username-register/v2\0").utf8)
+        transcript.append(contentsOf: challengeID.bytes)
         transcript.append(UInt8(handleBytes.count))
         transcript.append(contentsOf: handleBytes)
         transcript.append(contentsOf: deviceID.bytes)
         transcript.append(contentsOf: mlsNodeID.bytes)
         transcript.append(publicKey)
-        transcript.append(nonce)
+        transcript.append(challenge)
+        var expiry = expiresAtMs.bigEndian
+        withUnsafeBytes(of: &expiry) { transcript.append(contentsOf: $0) }
         return transcript
     }
 
