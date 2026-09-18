@@ -104,15 +104,24 @@ else
   fi
 fi
 
+karine_profile="${LINKS_KARINE_PROFILE:-karine}"
 bob_profile="${LINKS_BOB_PROFILE:-bob}"
+if [[ "$karine_profile" == "$bob_profile" ]]; then
+  echo "Profiles must be different: $karine_profile" >&2
+  exit 1
+fi
+
+karine_args=(--profile "$karine_profile" --auth-url "$auth_url")
 bob_args=(--profile "$bob_profile" --auth-url "$auth_url")
 if [[ -n "$profile_root" ]]; then
   mkdir -p "$profile_root"
+  karine_args+=(--profile-root "$profile_root")
   bob_args+=(--profile-root "$profile_root")
 fi
 
+open -n "$app_path" --args "${karine_args[@]}"
 open -n "$app_path" --args "${bob_args[@]}"
-echo "Started $bob_profile"
+echo "Started $karine_profile and $bob_profile"
 
 if [[ -n "$backend_pid" ]]; then
   wait "$backend_pid"
