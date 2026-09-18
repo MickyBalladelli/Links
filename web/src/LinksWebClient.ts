@@ -223,14 +223,13 @@ export async function logoutAccountSession(
   accessToken: string,
   clearLocalSession: () => void
 ): Promise<void> {
-  const endpoint = new URL('v1/auth/logout', authBaseURL.endsWith('/') ? authBaseURL : `${authBaseURL}/`)
-  const loopbackHTTP = endpoint.protocol === 'http:' &&
-    (endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1' || endpoint.hostname === '[::1]')
-  if ((endpoint.protocol !== 'https:' && !loopbackHTTP) || !accessToken || accessToken.length > 4096) {
-    clearLocalSession()
-    throw new Error('Invalid logout request')
-  }
   try {
+    const endpoint = new URL('v1/auth/logout', authBaseURL.endsWith('/') ? authBaseURL : `${authBaseURL}/`)
+    const loopbackHTTP = endpoint.protocol === 'http:' &&
+      (endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1' || endpoint.hostname === '[::1]')
+    if ((endpoint.protocol !== 'https:' && !loopbackHTTP) || !accessToken || accessToken.length > 4096) {
+      throw new Error('Invalid logout request')
+    }
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },

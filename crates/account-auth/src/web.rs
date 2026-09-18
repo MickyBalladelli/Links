@@ -205,19 +205,21 @@ async fn username_challenge(
 }
 async fn username_register(
     State(auth): State<Arc<AccountAuth>>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     request: Result<Json<crate::service::UsernameRegistrationRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.register_username(request.map_err(|_| AuthError::Invalid)?.0)
+        auth.register_username(request.map_err(|_| AuthError::Invalid)?.0, peer_ip)
             .await?,
     ))
 }
 async fn username_login(
     State(auth): State<Arc<AccountAuth>>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
     request: Result<Json<crate::service::UsernameLoginRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(
-        auth.login_username(request.map_err(|_| AuthError::Invalid)?.0)
+        auth.login_username(request.map_err(|_| AuthError::Invalid)?.0, peer_ip)
             .await?,
     ))
 }

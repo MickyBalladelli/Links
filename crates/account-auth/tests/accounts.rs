@@ -489,18 +489,24 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
     ));
     let first = f
         .auth
-        .register_username(UsernameRegistrationRequest {
-            challenge_id: registration.challenge_id,
-            signature: registration_signature.clone(),
-        })
+        .register_username(
+            UsernameRegistrationRequest {
+                challenge_id: registration.challenge_id,
+                signature: registration_signature.clone(),
+            },
+            peer,
+        )
         .await
         .unwrap();
     assert!(f
         .auth
-        .register_username(UsernameRegistrationRequest {
-            challenge_id: registration.challenge_id,
-            signature: registration_signature,
-        })
+        .register_username(
+            UsernameRegistrationRequest {
+                challenge_id: registration.challenge_id,
+                signature: registration_signature,
+            },
+            peer,
+        )
         .await
         .is_err());
     assert_eq!(f.count("auth_sessions").await, 1);
@@ -550,6 +556,20 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         )
         .await
         .unwrap();
+    let _parallel_login = f
+        .auth
+        .start_username_challenge(
+            UsernameChallengeRequest {
+                handle: "alice_test".into(),
+                purpose: UsernameAuthPurpose::Login,
+                device_id,
+                mls_node_id,
+                public_key: encode(&public_key),
+            },
+            peer,
+        )
+        .await
+        .unwrap();
     let login_challenge: [u8; 32] = URL_SAFE_NO_PAD
         .decode(&login.challenge)
         .unwrap()
@@ -567,20 +587,140 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         )
         .unwrap(),
     ));
+    assert!(f
+        .auth
+        .register_username(
+            UsernameRegistrationRequest {
+                challenge_id: login.challenge_id,
+                signature: login_signature.clone(),
+            },
+            peer,
+        )
+        .await
+        .is_err());
+
     let auth_one = f.auth.clone();
     let auth_two = f.auth.clone();
-    let first_finish = auth_one.login_username(UsernameLoginRequest {
-        challenge_id: login.challenge_id,
-        signature: login_signature.clone(),
-    });
-    let second_finish = auth_two.login_username(UsernameLoginRequest {
-        challenge_id: login.challenge_id,
-        signature: login_signature,
-    });
+    let first_finish = auth_one.login_username(
+        UsernameLoginRequest {
+            challenge_id: login.challenge_id,
+            signature: login_signature.clone(),
+        },
+        peer,
+    );
+    let second_finish = auth_two.login_username(
+        UsernameLoginRequest {
+            challenge_id: login.challenge_id,
+            signature: login_signature,
+        },
+        peer,
+    );
     let (first_result, second_result) = tokio::join!(first_finish, second_finish);
     assert_eq!(first_result.is_ok() as u8 + second_result.is_ok() as u8, 1);
     let second = first_result.or(second_result).unwrap();
     assert_eq!(f.count("auth_sessions").await, 2);
+
+    let expiring = f
+        .auth
+        .start_username_challenge(
+            UsernameChallengeRequest {
+                handle: "alice_test".into(),
+                purpose: UsernameAuthPurpose::Login,
+                device_id,
+                mls_node_id,
+                public_key: encode(&public_key),
+            },
+            peer,
+        )
+        .await
+        .unwrap();
+    let expiring_bytes: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&expiring.challenge)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let expiring_signature = encode(
+        &seed.sign(
+            &links_identity::username_login_transcript(
+                expiring.challenge_id,
+                &expiring.handle,
+                device_id,
+                mls_node_id,
+                &public_key,
+                &expiring_bytes,
+                expiring.expires_at_ms,
+            )
+            .unwrap(),
+        ),
+    );
+    f.clock.advance(CHALLENGE_TTL_MS);
+    assert!(f
+        .auth
+        .login_username(
+            UsernameLoginRequest {
+                challenge_id: expiring.challenge_id,
+                signature: expiring_signature,
+            },
+            peer,
+        )
+        .await
+        .is_err());
+
+    let failed = f
+        .auth
+        .start_username_challenge(
+            UsernameChallengeRequest {
+                handle: "alice_test".into(),
+                purpose: UsernameAuthPurpose::Login,
+                device_id,
+                mls_node_id,
+                public_key: encode(&public_key),
+            },
+            peer,
+        )
+        .await
+        .unwrap();
+    let failed_bytes: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&failed.challenge)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let valid_after_failure = encode(
+        &seed.sign(
+            &links_identity::username_login_transcript(
+                failed.challenge_id,
+                &failed.handle,
+                device_id,
+                mls_node_id,
+                &public_key,
+                &failed_bytes,
+                failed.expires_at_ms,
+            )
+            .unwrap(),
+        ),
+    );
+    assert!(f
+        .auth
+        .login_username(
+            UsernameLoginRequest {
+                challenge_id: failed.challenge_id,
+                signature: encode(&[0_u8; 64]),
+            },
+            peer,
+        )
+        .await
+        .is_err());
+    assert!(f
+        .auth
+        .login_username(
+            UsernameLoginRequest {
+                challenge_id: failed.challenge_id,
+                signature: valid_after_failure,
+            },
+            peer,
+        )
+        .await
+        .is_err());
 
     f.auth
         .revoke_other_sessions(&second.session.access_token)

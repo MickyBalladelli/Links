@@ -162,7 +162,7 @@ public final class ClientSession {
         }
     }
 
-    /** Revoke remotely first, then clear memory-only authentication even on failure. */
+    /** Revoke remotely first, then clear memory-only authentication even on failure. Call off-main-thread. */
     public void signOut(OtpClient api) throws IOException {
         if (api == null) throw new IOException("Missing auth client");
         String token;

@@ -111,8 +111,10 @@ application, proxy, provider SDK, or analytics layer.
 
 Username challenge starts use separate registration and login buckets: 20 per
 source IP per minute and 200 per source IP per hour for each purpose, plus 10,000
-starts per purpose per hour across the service. After a valid login signature,
-one account/device pair may complete 120 logins per hour. OTP starts allow one per phone per minute, five per
+starts per purpose per hour across the service. Finish requests use separate
+per-purpose source buckets of 40 per minute and 400 per hour, plus a 10,000-per-hour
+global ceiling. After a valid login signature, one account/device pair may
+complete 120 logins per hour. OTP starts allow one per phone per minute, five per
 phone per hour, 20 per source IP per hour, and 10,000 globally per hour. These
 service ceilings are conservative defense in depth. Operations may impose tighter
 limits at ingress immediately; raising a service ceiling requires a reviewed code
@@ -183,11 +185,12 @@ the signature in a strict `links://connect?...` URI. The approving device must
 parse and verify it, confirm the displayed account identity, then submit the
 decoded fields to `POST /v1/devices`.
 
-For username-only registration, the client signs
-`links_identity::username_registration_transcript` and sends the public key,
-device/node IDs, canonical handle, nonce, and signature. Returning clients sign
-`links_identity::username_login_transcript`. A username is not a password and
-does not authenticate a copied device ID; the registered Ed25519 key is required.
+For username-only registration and login, the client first submits the canonical
+handle and public device binding to `/v1/auth/username/challenge`. It validates the
+returned binding and expiry, signs the corresponding v2 transcript, then submits
+only the challenge ID and signature to the finish route. A username is not a
+password and does not authenticate a copied device ID; the registered Ed25519 key
+is required.
 For self-sovereign creation, clients generate an English 12- or 24-word BIP-39
 phrase locally or derive the identity from a user-verified passkey PRF. The
 derived key is sealed in the platform vault before username registration. The

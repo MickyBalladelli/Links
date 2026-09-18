@@ -824,10 +824,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// encrypted local state. The bearer session is memory-only, so clearing
     /// it returns the app to account authentication without deleting data.
     func logout() {
-        var accessToken: String?
-        if let client {
-            accessToken = try? client.accessToken()
-        }
+        let signingOutClient = client
+        let accessToken = signingOutClient.flatMap { try? $0.accessToken() }
         disconnect()
         discardMessaging()
         initializedConversationIDs.removeAll()
@@ -837,16 +835,24 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         clearLastError()
 
         Task { @MainActor [weak self] in
-            guard let self else { return }
             var remoteFailure = false
-            if let accessToken, let authClient = self.authClient {
+            if let accessToken, let authClient = self?.authClient {
                 do {
                     try await authClient.logout(accessToken: accessToken)
                 } catch {
                     remoteFailure = true
                 }
             }
-            self.client?.clearAuthenticatedSession()
+            let currentToken: String?
+            if let signingOutClient {
+                currentToken = try? signingOutClient.accessToken()
+            } else {
+                currentToken = nil
+            }
+            if accessToken == nil || currentToken == accessToken {
+                signingOutClient?.clearAuthenticatedSession()
+            }
+            guard let self else { return }
             self.conversationSetupStatus = "Sign in to reconnect"
             self.actionError = remoteFailure
                 ? "Signed out locally, but remote session revocation could not be confirmed."

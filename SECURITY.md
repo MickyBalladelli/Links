@@ -17,15 +17,16 @@ Do not access another person's account or data, disrupt shared infrastructure, o
 
 Only the current default branch receives security fixes. No released version is currently supported for production use.
 
-## Open authentication findings
+## Authentication findings and remediation status
 
 ### AUTH-001 — Replayable username authentication proof
 
 **Severity:** High  
-**Affected flows:** Username login; username registration uses the same client-generated freshness model.  
+**Status:** Remediated in code; verification remains part of the release gates below.
+**Affected flows:** Username registration and login.
 **Affected code:** `crates/account-auth/src/service.rs`, `crates/identity/src/lib.rs`, and native username-auth clients.
 
-Username authentication signs a client-generated nonce. The server does not issue that nonce, persist it, or reject reuse. A captured valid login request can therefore be replayed to mint new bearer sessions. Current rate limits reduce request volume but do not prevent an attacker from maintaining access.
+The reviewed implementation signed a client-generated nonce that the server did not track, so a captured login request could mint new bearer sessions. The remediated flow uses durable, purpose-bound server challenges that are row-locked and consumed atomically with account or session creation.
 
 #### Required remediation
 
@@ -46,16 +47,17 @@ Username authentication signs a client-generated nonce. The server does not issu
 - Concurrent submissions of one challenge produce exactly one successful session.
 - A registration challenge cannot be used for login or vice versa.
 - A challenge for one handle, device, key, or node cannot authenticate another.
-- Expired, consumed, superseded, and malformed challenges fail closed.
+- Expired, consumed, failed, and malformed challenges fail closed; issuing another challenge does not invalidate an existing pending challenge.
 - Restarting the service does not make a consumed challenge reusable.
 
 ### AUTH-002 — Unauthenticated requests can lock out a username
 
 **Severity:** Medium  
+**Status:** Remediated in code; verification remains part of the release gates below.
 **Affected flow:** Username login and registration.  
-**Affected code:** `AccountAuth::enforce_username_rate_limits` and its callers.
+**Affected code:** Username challenge admission and authenticated login limits in `crates/account-auth/src/service.rs`.
 
-The per-handle buckets are incremented before the submitted device and signature are authenticated. An attacker can submit syntactically valid requests for a public handle and exhaust its minute or hourly allowance without possessing the account key.
+The reviewed implementation incremented per-handle buckets before authenticating the device. The remediated flow uses separate registration/login source and global buckets before proof, then applies account/device limits only after a valid login signature.
 
 #### Required remediation
 
@@ -76,10 +78,11 @@ The per-handle buckets are incremented before the submitted device and signature
 ### AUTH-003 — Loopback proxy address collapses IP limits into a global bucket
 
 **Severity:** Medium  
+**Status:** Application-side remediation is complete; ingress enforcement and production alert routing remain open deployment work.
 **Affected flows:** OTP start, username authentication, directory lookup, contact discovery, Privacy Pass, and proof of work.  
 **Affected code:** `crates/account-auth/src/main.rs`, `crates/account-auth/src/web.rs`, and rate-limit callers in `service.rs`.
 
-The service must bind to loopback behind a TLS terminator, while `ConnectInfo` identifies the direct socket peer. In the expected deployment that peer is the local proxy, so all users share one IP bucket. A small number of requests can exhaust a shared limit and block authentication for every user routed through that proxy.
+The reviewed implementation used the loopback TLS proxy's socket address for every source bucket. The service now accepts one strict `X-Forwarded-For` address only from explicitly allowlisted proxy socket IPs and requires that allowlist in Release builds. Ingress rate controls and external alert routing still require deployment work.
 
 #### Required remediation
 
@@ -103,10 +106,11 @@ The service must bind to loopback behind a TLS terminator, while `ConnectInfo` i
 ### AUTH-004 — Sign-out does not revoke the server session
 
 **Severity:** Medium  
+**Status:** Remediated in code; client and integration verification remains part of the release gates below.
 **Affected flows:** All bearer-authenticated operations.  
-**Affected code:** account-auth routing/session storage and iOS `signOut`/`clearAuthenticatedSession`.
+**Affected code:** account-auth routing/session storage and Apple, Android, web, and desktop session clients.
 
-Client sign-out clears the in-memory bearer but leaves its database session valid until the 15-minute expiry. A copied bearer therefore remains usable after the user signs out.
+The reviewed clients cleared only the in-memory bearer, leaving the database session valid until expiry. The remediated API revokes the current bearer idempotently and can revoke every other account session while preserving the caller.
 
 #### Required remediation
 
@@ -132,7 +136,7 @@ The PostgreSQL integration suite currently exercises the OTP flow extensively bu
 
 - [ ] Add username registration tests for valid creation, duplicate handles, duplicate device/node IDs, malformed keys, invalid signatures, atomic rollback, and disabled accounts.
 - [ ] Add username login tests for valid login, wrong handle/device/node/key, revoked devices, disabled accounts, session expiry, and service restart.
-- [ ] Add the replay, concurrent-consumption, cross-purpose, cross-account, expiry, and supersession tests required by AUTH-001.
+- [ ] Add the replay, concurrent-consumption, cross-purpose, cross-account, expiry, failed-challenge, and parallel-challenge tests required by AUTH-001.
 - [ ] Add targeted-lockout and source-limit tests required by AUTH-002 and AUTH-003.
 - [ ] Add HTTP tests for body limits, uniform error bodies, `Cache-Control: no-store`, authorization parsing, and absence of secrets in errors.
 - [ ] Add logout, repeated logout, expired-token logout, device revocation, and revoke-other-sessions tests.

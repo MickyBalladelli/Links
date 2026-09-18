@@ -18,4 +18,6 @@ not put it in `localStorage`, URLs, analytics, or logs. IndexedDB persistence,
 WebSocket reconnect and browser message UI remain host-application work. Use
 `WebTextMessaging` with a shared-core adapter for encrypted one-to-one sync;
 the adapter owns MLS, Sealed Sender, durable cursors and local inbox/outbox
-state.
+state. Browser hosts should use `logoutAccountSession`; it attempts remote
+revocation first and invokes the supplied local-clear callback even when the
+network request fails.
