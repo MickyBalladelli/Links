@@ -382,6 +382,30 @@ pub struct DeviceRevocationResponse {
     pub device_id: Uuid,
     pub revoked: bool,
 }
+
+#[derive(Serialize)]
+pub struct AdminDeviceResponse {
+    pub device_id: Uuid,
+    pub registered_at: String,
+    pub revoked_at: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AdminUserResponse {
+    pub user_id: Uuid,
+    pub handle: Option<String>,
+    pub account_kind: String,
+    pub created_at: String,
+    pub disabled_at: Option<String>,
+    pub devices: Vec<AdminDeviceResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminUserStatusRequest {
+    pub disabled: bool,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Session {
     pub access_token: String,
@@ -526,6 +550,7 @@ pub struct AccountAuth {
     clock: Arc<dyn Clock>,
     passkey: Option<PasskeyConfig>,
     mode: AccountAuthMode,
+    admin_key: Option<Zeroizing<String>>,
 }
 impl AccountAuth {
     pub fn new(
@@ -605,6 +630,12 @@ impl AccountAuth {
         if *phone_lookup_key == [0; 32] {
             return Err(AuthError::Invalid);
         }
+        let admin_key = match std::env::var("LINKS_ADMIN_KEY") {
+            Ok(value) if value.len() >= 32 => Some(Zeroizing::new(value)),
+            Ok(_) => return Err(AuthError::Invalid),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotUnicode(_)) => return Err(AuthError::Invalid),
+        };
         let privacy_pass_key = derive_privacy_pass_key(&phone_lookup_key);
         Ok(Self {
             pool,
@@ -614,6 +645,7 @@ impl AccountAuth {
             clock,
             passkey,
             mode,
+            admin_key,
         })
     }
 
@@ -623,6 +655,134 @@ impl AccountAuth {
 
     pub fn is_loopback_username_dev(&self) -> bool {
         self.mode == AccountAuthMode::LoopbackUsernameDev
+    }
+
+    pub fn authorize_admin_key(&self, provided: &str) -> Result<(), AuthError> {
+        let Some(expected) = self.admin_key.as_ref() else {
+            return Err(AuthError::Unavailable);
+        };
+        if expected.as_bytes() == provided.as_bytes() {
+            Ok(())
+        } else {
+            Err(AuthError::Denied)
+        }
+    }
+
+    pub async fn admin_users(
+        &self,
+        search: &str,
+        limit: i64,
+    ) -> Result<Vec<AdminUserResponse>, AuthError> {
+        let search = search.trim().to_lowercase();
+        let limit = limit.clamp(1, 200);
+        let rows = sqlx::query(
+            "SELECT a.user_id,a.account_kind,a.created_at::text AS created_at,a.disabled_at::text AS disabled_at,h.handle
+             FROM accounts a
+             LEFT JOIN handles h USING (user_id)
+             WHERE $1 = '' OR h.handle ILIKE '%' || $1 || '%' OR a.user_id::text = $1
+             ORDER BY a.created_at DESC
+             LIMIT $2",
+        )
+        .bind(search)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut users = Vec::with_capacity(rows.len());
+        for row in rows {
+            let user_id: Uuid = row.get("user_id");
+            let device_rows = sqlx::query(
+                "SELECT device_id,registered_at::text AS registered_at,revoked_at::text AS revoked_at
+                 FROM devices WHERE user_id=$1 ORDER BY registered_at",
+            )
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+            let devices = device_rows
+                .into_iter()
+                .map(|device| AdminDeviceResponse {
+                    device_id: device.get("device_id"),
+                    registered_at: device.get("registered_at"),
+                    revoked_at: device.get("revoked_at"),
+                })
+                .collect();
+            users.push(AdminUserResponse {
+                user_id,
+                handle: row.get("handle"),
+                account_kind: row.get("account_kind"),
+                created_at: row.get("created_at"),
+                disabled_at: row.get("disabled_at"),
+                devices,
+            });
+        }
+        Ok(users)
+    }
+
+    pub async fn admin_set_user_disabled(
+        &self,
+        user_id: Uuid,
+        disabled: bool,
+    ) -> Result<(), AuthError> {
+        if user_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let mut tx = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE accounts
+             SET disabled_at = CASE WHEN $2 THEN COALESCE(disabled_at, now()) ELSE NULL END
+             WHERE user_id=$1",
+        )
+        .bind(user_id)
+        .bind(disabled)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(AuthError::Denied);
+        }
+        if disabled {
+            sqlx::query("DELETE FROM auth_sessions WHERE user_id=$1")
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn admin_revoke_device(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<(), AuthError> {
+        if user_id.is_nil() || device_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let result = sqlx::query(
+            "WITH RECURSIVE descendants AS (
+                 SELECT device_id FROM devices WHERE device_id=$1 AND user_id=$2
+                 UNION ALL
+                 SELECT child.device_id
+                 FROM devices child
+                 JOIN descendants parent ON child.delegated_by_device_id=parent.device_id
+                 WHERE child.user_id=$2
+             )
+             UPDATE devices SET revoked_at=COALESCE(revoked_at,now())
+             WHERE device_id IN (SELECT device_id FROM descendants)
+               AND user_id=$2",
+        )
+        .bind(device_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(AuthError::Denied);
+        }
+        sqlx::query("DELETE FROM auth_sessions WHERE user_id=$1 AND device_id=$2")
+            .bind(user_id)
+            .bind(device_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     fn passkey_config(&self) -> Result<&PasskeyConfig, AuthError> {

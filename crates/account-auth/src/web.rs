@@ -11,7 +11,7 @@ use crate::{
 };
 use axum::{
     body::Bytes,
-    extract::{rejection::JsonRejection, ConnectInfo, DefaultBodyLimit, Extension, Path, State},
+    extract::{rejection::JsonRejection, ConnectInfo, DefaultBodyLimit, Extension, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -93,6 +93,14 @@ pub fn router_with_trusted_proxies(
         .route("/v1/directory/users/{user_id}", get(directory_lookup_by_user_id))
         .route("/v1/directory/{handle}", get(directory_lookup))
         .layer(DefaultBodyLimit::max(4096));
+    let admin_routes = Router::new()
+        .route("/v1/admin/users", get(admin_users))
+        .route("/v1/admin/users/{user_id}/status", put(admin_set_user_status))
+        .route(
+            "/v1/admin/users/{user_id}/devices/{device_id}",
+            delete(admin_revoke_device),
+        )
+        .layer(DefaultBodyLimit::max(16 * 1024));
     let contact_psi_routes = Router::new()
         .route(
             "/v1/contact-discovery/parameters",
@@ -123,6 +131,7 @@ pub fn router_with_trusted_proxies(
         .merge(prekey_routes)
         .merge(mls_routes)
         .merge(directory_routes)
+        .merge(admin_routes)
         .merge(contact_psi_routes)
         .merge(privacy_pass_routes)
         .merge(chat_pow_routes)
@@ -266,6 +275,57 @@ async fn directory_lookup(
         Some(directory) => Ok(Json(directory).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AdminUsersQuery {
+    #[serde(default)]
+    search: String,
+    #[serde(default = "default_admin_user_limit")]
+    limit: i64,
+}
+
+fn default_admin_user_limit() -> i64 {
+    100
+}
+
+fn require_admin(auth: &AccountAuth, headers: &HeaderMap) -> Result<(), AuthError> {
+    let key = headers
+        .get("x-links-admin-key")
+        .and_then(|value| value.to_str().ok())
+        .ok_or(AuthError::Denied)?;
+    auth.authorize_admin_key(key)
+}
+
+async fn admin_users(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    Query(query): Query<AdminUsersQuery>,
+) -> Result<impl IntoResponse, AuthError> {
+    require_admin(&auth, &headers)?;
+    Ok(Json(auth.admin_users(&query.search, query.limit).await?))
+}
+
+async fn admin_set_user_status(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    Path(user_id): Path<uuid::Uuid>,
+    request: Result<Json<crate::service::AdminUserStatusRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    require_admin(&auth, &headers)?;
+    let request = request.map_err(|_| AuthError::Invalid)?.0;
+    auth.admin_set_user_disabled(user_id, request.disabled).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn admin_revoke_device(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    Path((user_id, device_id)): Path<(uuid::Uuid, uuid::Uuid)>,
+) -> Result<impl IntoResponse, AuthError> {
+    require_admin(&auth, &headers)?;
+    auth.admin_revoke_device(user_id, device_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn contact_psi_parameters(
     State(auth): State<Arc<AccountAuth>>,

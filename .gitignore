@@ -13,6 +13,7 @@
 /native/macos/.build/
 /native/macos/.swiftpm/
 /native/macos/DerivedData/
+/native/macos/DerivedDataAdmin/
 /native/macos/build/
 /native/ios/DerivedData/
 /native/ios/build/

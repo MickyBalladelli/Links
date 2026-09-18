@@ -79,7 +79,7 @@ cp .env.example .env
 bash scripts/local-dev.sh
 ```
 
-To build and launch two separate macOS clients with `alice` and `bob`
+To build and launch two separate macOS clients with `karine` and `bob`
 profiles, run:
 
 ```sh
@@ -106,6 +106,21 @@ PostgreSQL migrations before serving and uses the Debug-only loopback username
 flow; no Twilio credentials are needed. Stop the Rust process with Ctrl-C;
 PostgreSQL data stays in the PostgreSQL instance for the next run.
 
+### macOS admin tool
+
+Set `LINKS_ADMIN_KEY` in `.env` to a random value of at least 32 characters.
+The key enables the protected admin API; it is not stored by the admin app.
+Start the local backend with `bash launch-links.sh`, then open the separate
+admin interface with:
+
+```sh
+bash launch-links-admin.sh
+```
+
+`links-admin` can list users, search by username or UUID, inspect devices, and
+disable or enable an account. Without `LINKS_ADMIN_KEY`, the admin API stays
+disabled.
+
 For the real phone OTP flow, run the migration example and account-auth binary
 separately with the same `DATABASE_URL` and `AUTH_LOOKUP_KEY`, then supply all
 `TWILIO_*` values. Never use the example credentials outside local development.
@@ -120,7 +135,7 @@ AUTH_DEV_USERNAME_MODE=1 AUTH_BIND=127.0.0.1:8080 \
   cargo run -p links-account-auth --locked
 ```
 
-Register signed lowercase usernames such as `alice` and `bob`. This mode does
+Register signed lowercase usernames such as `karine` and `bob`. This mode does
 not read Twilio credentials, removes the phone OTP routes, and remains limited
 to loopback Debug builds. `AUTH_LOOKUP_KEY` is still required.
 `AUTH_DEV_USERNAME_MODE=1` is rejected by `cargo run --release`, and every
