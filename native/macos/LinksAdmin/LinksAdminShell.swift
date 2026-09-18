@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct LinksAdminRootView: View {
@@ -26,9 +27,7 @@ private struct LinksAdminLoginView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Image(systemName: "person.2.badge.gearshape.fill")
-                .font(.system(size: 42))
-                .foregroundStyle(.tint)
+            LinksAdminIconView(size: 72)
             Text("Links Admin")
                 .font(.largeTitle.weight(.bold))
             Text("Manage accounts and devices. The admin key stays in memory and is never saved by this app.")
@@ -58,6 +57,7 @@ private struct LinksAdminDashboard: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 HStack {
+                    LinksAdminIconView(size: 32)
                     Text("Users")
                         .font(.title2.weight(.semibold))
                     Spacer()
@@ -96,6 +96,26 @@ private struct LinksAdminDashboard: View {
                 }
             }
         }
+    }
+}
+
+private struct LinksAdminIconView: View {
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let iconURL = Bundle.main.url(forResource: "icon-admin", withExtension: "png"),
+               let icon = NSImage(contentsOf: iconURL) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "person.2.badge.gearshape.fill")
+                    .foregroundStyle(.tint)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
     }
 }
 
