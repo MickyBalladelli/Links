@@ -749,6 +749,134 @@ impl AccountAuth {
         Ok(())
     }
 
+    pub async fn admin_delete_user(&self, user_id: Uuid) -> Result<(), AuthError> {
+        if user_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let device_ids = sqlx::query_scalar::<_, Uuid>(
+            "SELECT device_id FROM devices WHERE user_id=$1",
+        )
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let handle = sqlx::query_scalar::<_, String>(
+            "SELECT handle FROM handles WHERE user_id=$1",
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "DELETE FROM encrypted_payloads
+             WHERE recipient_device_id = ANY($1)",
+        )
+        .bind(&device_ids)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM encrypted_payload_cursors
+             WHERE recipient_device_id = ANY($1)",
+        )
+        .bind(&device_ids)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM auth_challenges
+             WHERE device_id = ANY($1)",
+        )
+        .bind(&device_ids)
+        .execute(&mut *tx)
+        .await?;
+        if let Some(handle) = handle {
+            sqlx::query("DELETE FROM username_auth_challenges WHERE handle=$1")
+                .bind(handle)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query(
+            "DELETE FROM username_auth_challenges
+             WHERE device_id = ANY($1)",
+        )
+        .bind(&device_ids)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE devices
+             SET delegation_role='owner',
+                 delegated_by_device_id=NULL,
+                 delegation_certificate=NULL
+             WHERE user_id=$1",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM devices WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query(
+            "DELETE FROM groups g
+             WHERE EXISTS (
+                 SELECT 1 FROM group_memberships owner_membership
+                 WHERE owner_membership.group_id=g.group_id
+                   AND owner_membership.user_id=$1
+                   AND owner_membership.role='owner'
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM group_memberships other_membership
+                 WHERE other_membership.group_id=g.group_id
+                   AND other_membership.user_id<>$1
+             )",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "WITH ownerless_groups AS (
+                 SELECT DISTINCT owner_membership.group_id
+                 FROM group_memberships owner_membership
+                 WHERE owner_membership.user_id=$1
+                   AND owner_membership.role='owner'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM group_memberships other_owner
+                       WHERE other_owner.group_id=owner_membership.group_id
+                         AND other_owner.role='owner'
+                         AND other_owner.user_id<>$1
+                   )
+             ), replacements AS (
+                 SELECT DISTINCT ON (membership.group_id)
+                     membership.group_id, membership.user_id
+                 FROM group_memberships membership
+                 JOIN ownerless_groups
+                   ON ownerless_groups.group_id=membership.group_id
+                 WHERE membership.user_id<>$1
+                 ORDER BY membership.group_id, membership.joined_at, membership.user_id
+             )
+             UPDATE group_memberships membership
+             SET role='owner'
+             FROM replacements
+             WHERE membership.group_id=replacements.group_id
+               AND membership.user_id=replacements.user_id",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let deleted = sqlx::query("DELETE FROM accounts WHERE user_id=$1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        if deleted.rows_affected() != 1 {
+            return Err(AuthError::Denied);
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn admin_revoke_device(
         &self,
         user_id: Uuid,

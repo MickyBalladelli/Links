@@ -52,6 +52,7 @@ private struct LinksAdminLoginView: View {
 
 private struct LinksAdminDashboard: View {
     @ObservedObject var model: LinksAdminModel
+    @State private var userToDelete: LinksAdminUser?
 
     var body: some View {
         NavigationSplitView {
@@ -78,7 +79,9 @@ private struct LinksAdminDashboard: View {
                     .padding(.bottom, 10)
 
                 List(model.filteredUsers, selection: $model.selectedUserID) { user in
-                    LinksAdminUserRow(user: user)
+                    LinksAdminUserRow(user: user) {
+                        userToDelete = user
+                    }
                         .tag(user.id)
                 }
             }
@@ -95,6 +98,18 @@ private struct LinksAdminDashboard: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .alert("Delete user?", isPresented: Binding(
+            get: { userToDelete != nil },
+            set: { if !$0 { userToDelete = nil } })) {
+            Button("Delete", role: .destructive) {
+                guard let user = userToDelete else { return }
+                userToDelete = nil
+                Task { await model.deleteUser(user) }
+            }
+            Button("Cancel", role: .cancel) { userToDelete = nil }
+        } message: {
+            Text("Delete \(userToDelete?.displayName ?? "this user") and all of their devices? This cannot be undone.")
         }
     }
 }
@@ -121,6 +136,7 @@ private struct LinksAdminIconView: View {
 
 private struct LinksAdminUserRow: View {
     let user: LinksAdminUser
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -134,6 +150,12 @@ private struct LinksAdminUserRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .help("Delete user")
         }
         .padding(.vertical, 4)
     }

@@ -95,6 +95,7 @@ pub fn router_with_trusted_proxies(
         .layer(DefaultBodyLimit::max(4096));
     let admin_routes = Router::new()
         .route("/v1/admin/users", get(admin_users))
+        .route("/v1/admin/users/{user_id}", delete(admin_delete_user))
         .route("/v1/admin/users/{user_id}/status", put(admin_set_user_status))
         .route(
             "/v1/admin/users/{user_id}/devices/{device_id}",
@@ -315,6 +316,16 @@ async fn admin_set_user_status(
     require_admin(&auth, &headers)?;
     let request = request.map_err(|_| AuthError::Invalid)?.0;
     auth.admin_set_user_disabled(user_id, request.disabled).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn admin_delete_user(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    Path(user_id): Path<uuid::Uuid>,
+) -> Result<impl IntoResponse, AuthError> {
+    require_admin(&auth, &headers)?;
+    auth.admin_delete_user(user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

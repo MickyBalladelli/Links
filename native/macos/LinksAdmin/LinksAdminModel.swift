@@ -122,6 +122,17 @@ final class LinksAdminModel: ObservableObject {
         }
     }
 
+    func deleteUser(_ user: LinksAdminUser) async {
+        do {
+            _ = try await request(
+                path: ["v1", "admin", "users", user.userID.uuidString],
+                method: "DELETE")
+            await refresh()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func revokeDevice(_ device: LinksAdminDevice, for user: LinksAdminUser) async {
         do {
             _ = try await request(
