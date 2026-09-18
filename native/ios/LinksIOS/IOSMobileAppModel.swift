@@ -42,9 +42,11 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
     let createdAt: Date
     var messages: [IOSMobileMessage]
     var isSecureReady: Bool
+    var unreadCount: Int
 
     init(id: String, handle: String, recipientUserID: String, deviceCount: Int,
-         createdAt: Date, messages: [IOSMobileMessage] = [], isSecureReady: Bool = false) {
+         createdAt: Date, messages: [IOSMobileMessage] = [], isSecureReady: Bool = false,
+         unreadCount: Int = 0) {
         self.id = id
         self.handle = handle
         self.recipientUserID = recipientUserID
@@ -52,10 +54,12 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
         self.createdAt = createdAt
         self.messages = messages
         self.isSecureReady = isSecureReady
+        self.unreadCount = unreadCount
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, handle, recipientUserID, deviceCount, createdAt, messages, isSecureReady
+        case id, handle, recipientUserID, deviceCount, createdAt, messages, isSecureReady,
+             unreadCount
     }
 
     init(from decoder: Decoder) throws {
@@ -67,6 +71,7 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
         createdAt = try values.decode(Date.self, forKey: .createdAt)
         messages = try values.decodeIfPresent([IOSMobileMessage].self, forKey: .messages) ?? []
         isSecureReady = try values.decodeIfPresent(Bool.self, forKey: .isSecureReady) ?? false
+        unreadCount = try values.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
     }
 }
 
@@ -157,6 +162,7 @@ final class IOSMobileAppModel: ObservableObject {
     private var keychainSecretProvider: IOSKeychainSecretProvider?
     private var localRootCertificateData: Data?
     private var otpChallenge: IOSOTPChallenge?
+    private var activeConversationID: String?
 
     init() {
         let endpointText = Bundle.main.object(forInfoDictionaryKey: "LINKS_AUTH_URL") as? String
@@ -631,7 +637,8 @@ final class IOSMobileAppModel: ObservableObject {
                     deviceCount: directory.devices.count,
                     createdAt: existing.createdAt,
                     messages: existing.messages,
-                    isSecureReady: existing.isSecureReady)
+                    isSecureReady: existing.isSecureReady,
+                    unreadCount: existing.unreadCount)
                 conversations.insert(updated, at: 0)
                 conversationCreationStatus = "Opened @\(directory.handle)."
                 persistLocalState()
@@ -837,7 +844,28 @@ final class IOSMobileAppModel: ObservableObject {
 
     func deleteConversation(_ conversation: IOSMobileConversation) {
         conversations.removeAll { $0.id == conversation.id }
+        if activeConversationID == conversation.id {
+            activeConversationID = nil
+        }
         persistLocalState()
+    }
+
+    var unreadConversationCount: Int {
+        conversations.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    func markConversationRead(_ conversationID: String) {
+        activeConversationID = conversationID
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              conversations[index].unreadCount > 0 else { return }
+        conversations[index].unreadCount = 0
+        persistLocalState()
+    }
+
+    func markConversationClosed(_ conversationID: String) {
+        if activeConversationID == conversationID {
+            activeConversationID = nil
+        }
     }
 
     func clearConversationCreationStatus() {
@@ -1018,6 +1046,9 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                 self.conversations[index].messages.append(received)
                 self.conversations[index].isSecureReady = true
                 conversationID = self.conversations[index].id
+                if self.activeConversationID != conversationID {
+                    self.conversations[index].unreadCount += 1
+                }
             } else {
                 let handle = knownContact?.handle
                     ?? "contact-\(String(message.senderUserID.prefix(8)))"
@@ -1028,7 +1059,8 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                     deviceCount: knownContact?.deviceCount ?? 1,
                     createdAt: received.sentAt,
                     messages: [received],
-                    isSecureReady: true), at: 0)
+                    isSecureReady: true,
+                    unreadCount: 1), at: 0)
                 conversationID = message.conversationID
             }
             self.persistLocalState()

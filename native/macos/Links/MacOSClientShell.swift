@@ -719,6 +719,16 @@ private struct LinksSidebar: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            .onAppear {
+                if let selectedConversationID = model.selectedConversationID {
+                    model.markConversationRead(selectedConversationID)
+                }
+            }
+            .onChange(of: model.selectedConversationID) { selectedConversationID in
+                if let selectedConversationID {
+                    model.markConversationRead(selectedConversationID)
+                }
+            }
             .alert("Remove contact?", isPresented: Binding(
                 get: { contactToRemove != nil },
                 set: { isPresented in
@@ -897,6 +907,15 @@ private struct ConversationRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            if conversation.unreadCount > 0 {
+                Text(conversation.unreadCount > 99 ? "99+" : "\(conversation.unreadCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor)
+                    .clipShape(Capsule())
             }
         }
         .padding(.vertical, 3)

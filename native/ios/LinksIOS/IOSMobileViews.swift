@@ -336,6 +336,7 @@ private struct IOSAuthenticatedShell: View {
         TabView {
             IOSChatsView(model: model)
                 .tabItem { Label("Chats", systemImage: "bubble.left.and.bubble.right.fill") }
+                .badge(model.unreadConversationCount)
             IOSPeopleView(model: model)
                 .tabItem { Label("People", systemImage: "person.2.fill") }
             IOSProfileView(model: model)
@@ -507,6 +508,15 @@ private struct IOSConversationRow: View {
                 Text(conversation.createdAt, style: .date)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                if conversation.unreadCount > 0 {
+                    Text(conversation.unreadCount > 99 ? "99+" : "\(conversation.unreadCount)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(IOSLinksPalette.cobalt)
+                        .clipShape(Capsule())
+                }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -1024,6 +1034,12 @@ private struct IOSConversationView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(conversation.map { "@\($0.handle)" } ?? "Conversation")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            model.markConversationRead(conversationID)
+        }
+        .onDisappear {
+            model.markConversationClosed(conversationID)
+        }
         .task(id: conversationID) {
             await model.prepareConversation(conversationID)
         }

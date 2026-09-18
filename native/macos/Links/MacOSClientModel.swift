@@ -19,16 +19,32 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     var recipientUserID: String
     var peerUserID: String?
     var messages: [LinksMacOSMessage]
+    var unreadCount: Int
 
     var isIncoming: Bool { recipientUserID.isEmpty }
 
     init(id: String, title: String, recipientUserID: String,
-         peerUserID: String? = nil, messages: [LinksMacOSMessage]) {
+         peerUserID: String? = nil, messages: [LinksMacOSMessage], unreadCount: Int = 0) {
         self.id = id
         self.title = title
         self.recipientUserID = recipientUserID
         self.peerUserID = peerUserID
         self.messages = messages
+        self.unreadCount = unreadCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, recipientUserID, peerUserID, messages, unreadCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        recipientUserID = try values.decode(String.self, forKey: .recipientUserID)
+        peerUserID = try values.decodeIfPresent(String.self, forKey: .peerUserID)
+        messages = try values.decodeIfPresent([LinksMacOSMessage].self, forKey: .messages) ?? []
+        unreadCount = try values.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
     }
 }
 
@@ -361,6 +377,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     var selectedConversation: LinksMacOSConversation? {
         guard let selectedConversationID else { return nil }
         return conversations.first { $0.id == selectedConversationID }
+    }
+
+    func markConversationRead(_ conversationID: String) {
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              conversations[index].unreadCount > 0 else { return }
+        conversations[index].unreadCount = 0
+        persistLocalState()
     }
 
     var hasMessagingHost: Bool { messaging != nil }
@@ -1077,9 +1100,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     title: "@\(contact.handle)",
                     recipientUserID: contact.userID,
                     peerUserID: contact.userID,
-                    messages: conversations[index].messages)
+                    messages: conversations[index].messages,
+                    unreadCount: conversations[index].unreadCount)
             }
             selectedConversationID = conversations[index].id
+            markConversationRead(conversations[index].id)
             persistLocalState()
             return
         }
@@ -1302,7 +1327,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 $0.peerUserID == message.senderUserID
                     || (!$0.isIncoming && $0.recipientUserID == message.senderUserID)
             })
-        let selectedID: String
+        let conversationID: String
         if let index {
             conversations[index].recipientUserID = message.senderUserID
             conversations[index].peerUserID = message.senderUserID
@@ -1310,25 +1335,29 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 conversations[index].title = "@\(knownContact.handle)"
             }
             conversations[index].messages.append(received)
-            selectedID = conversations[index].id
+            if selectedConversationID != conversations[index].id
+                || lifecycleStatus != "Active" {
+                conversations[index].unreadCount += 1
+            }
+            conversationID = conversations[index].id
         } else {
             conversations.append(LinksMacOSConversation(
                 id: message.conversationID,
                 title: knownContact.map { "@\($0.handle)" } ?? "Incoming conversation",
                 recipientUserID: message.senderUserID,
                 peerUserID: message.senderUserID,
-                messages: [received]))
-            selectedID = message.conversationID
+                messages: [received],
+                unreadCount: 1))
+            conversationID = message.conversationID
         }
-        selectedConversationID = selectedID
-        initializedConversationIDs.insert(selectedID)
+        initializedConversationIDs.insert(conversationID)
         conversationSetupStatus = "Secure two-user MLS conversation ready"
         actionError = nil
         clearLastError()
         persistLocalState()
         if knownContact == nil {
             resolveIncomingUsername(
-                conversationID: selectedID,
+                conversationID: conversationID,
                 senderUserID: message.senderUserID)
         }
     }
