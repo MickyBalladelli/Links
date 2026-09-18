@@ -36,9 +36,9 @@ struct IOSMobileMessage: Identifiable, Equatable, Codable {
 
 struct IOSMobileConversation: Identifiable, Equatable, Codable {
     let id: String
-    let handle: String
+    var handle: String
     let recipientUserID: String
-    let deviceCount: Int
+    var deviceCount: Int
     let createdAt: Date
     var messages: [IOSMobileMessage]
     var isSecureReady: Bool
@@ -143,6 +143,7 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var messagingStatus = "Offline"
     @Published private(set) var preKeyStatus = "Waiting for sign in"
     @Published private(set) var preparingConversationIDs = Set<String>()
+    private var resolvingIncomingUserIDs = Set<String>()
 
     let authEndpointText: String
     private var client: IOSClient?
@@ -948,6 +949,17 @@ final class IOSMobileAppModel: ObservableObject {
         }
         if client.isAuthenticated {
             configureMessagingIfPossible()
+            let unresolved = conversations.compactMap { conversation -> (String, String)? in
+                guard contacts.contains(where: { $0.userID == conversation.recipientUserID }) == false else {
+                    return nil
+                }
+                return (conversation.id, conversation.recipientUserID)
+            }
+            for (conversationID, senderUserID) in unresolved {
+                resolveIncomingUsername(
+                    conversationID: conversationID,
+                    senderUserID: senderUserID)
+            }
         }
     }
 }
@@ -991,24 +1003,75 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                 isOutgoing: false,
                 sentAt: Date(timeIntervalSince1970: TimeInterval(message.sentAtMs) / 1_000),
                 senderDeviceID: message.senderDeviceID)
+            let knownContact = self.contacts.first(where: {
+                $0.userID == message.senderUserID
+            })
+            let conversationID: String
             if let index = self.conversations.firstIndex(where: {
                 $0.id == message.conversationID || $0.recipientUserID == message.senderUserID
             }) {
+                if let knownContact {
+                    self.conversations[index].handle = knownContact.handle
+                    self.conversations[index].deviceCount = knownContact.deviceCount
+                }
                 self.conversations[index].messages.append(received)
                 self.conversations[index].isSecureReady = true
+                conversationID = self.conversations[index].id
             } else {
-                let handle = self.contacts.first(where: { $0.userID == message.senderUserID })?.handle
+                let handle = knownContact?.handle
                     ?? "contact-\(String(message.senderUserID.prefix(8)))"
                 self.conversations.insert(IOSMobileConversation(
                     id: message.conversationID,
                     handle: handle,
                     recipientUserID: message.senderUserID,
-                    deviceCount: 1,
+                    deviceCount: knownContact?.deviceCount ?? 1,
                     createdAt: received.sentAt,
                     messages: [received],
                     isSecureReady: true), at: 0)
+                conversationID = message.conversationID
             }
             self.persistLocalState()
+            if knownContact == nil {
+                self.resolveIncomingUsername(
+                    conversationID: conversationID,
+                    senderUserID: message.senderUserID)
+            }
+        }
+    }
+
+    private func resolveIncomingUsername(conversationID: String, senderUserID: String) {
+        guard !resolvingIncomingUserIDs.contains(senderUserID),
+              let usernameAuthClient,
+              let client,
+              let accessToken = try? client.accessToken() else { return }
+        resolvingIncomingUserIDs.insert(senderUserID)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.resolvingIncomingUserIDs.remove(senderUserID) }
+            do {
+                let directory = try await usernameAuthClient.lookup(
+                    userID: senderUserID, accessToken: accessToken)
+                guard let index = self.conversations.firstIndex(where: {
+                    $0.id == conversationID && $0.recipientUserID == senderUserID
+                }) else { return }
+                self.conversations[index].handle = directory.handle
+                self.conversations[index].deviceCount = directory.devices.count
+                let contact = IOSMobileContact(
+                    handle: directory.handle,
+                    userID: directory.userID,
+                    deviceCount: directory.devices.count)
+                if let contactIndex = self.contacts.firstIndex(where: {
+                    $0.userID == senderUserID
+                }) {
+                    self.contacts[contactIndex] = contact
+                } else {
+                    self.contacts.append(contact)
+                    self.contacts.sort { $0.handle < $1.handle }
+                }
+                self.persistLocalState()
+            } catch {
+                // Keep the non-identifying fallback; message receipt still succeeds.
+            }
         }
     }
 

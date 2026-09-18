@@ -16,7 +16,7 @@ struct LinksMacOSMessage: Identifiable, Equatable, Codable {
 struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     let id: String
     var title: String
-    let recipientUserID: String
+    var recipientUserID: String
     var peerUserID: String?
     var messages: [LinksMacOSMessage]
 
@@ -213,6 +213,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var directChatDirectory: (any IOSDirectChatDirectory)?
     private var initializedConversationIDs = Set<String>()
     private var initializingConversationIDs = Set<String>()
+    private var resolvingIncomingUserIDs = Set<String>()
     private var profileLogger: LinksMacOSProfileLogger?
     private var profileStatus: LinksMacOSProfileStatus?
     private let identityQueue = DispatchQueue(
@@ -1219,6 +1220,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             isOutgoing: false,
             sentAt: Date(timeIntervalSince1970: TimeInterval(message.sentAtMs) / 1000),
             senderDeviceID: message.senderDeviceID)
+        let knownContact = contacts.first(where: { $0.userID == message.senderUserID })
         let index = conversations.firstIndex(where: { $0.id == message.conversationID })
             ?? conversations.firstIndex(where: {
                 $0.peerUserID == message.senderUserID
@@ -1226,24 +1228,72 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             })
         let selectedID: String
         if let index {
+            conversations[index].recipientUserID = message.senderUserID
             conversations[index].peerUserID = message.senderUserID
+            if let knownContact {
+                conversations[index].title = "@\(knownContact.handle)"
+            }
             conversations[index].messages.append(received)
             selectedID = conversations[index].id
         } else {
             conversations.append(LinksMacOSConversation(
                 id: message.conversationID,
-                title: contacts.first(where: { $0.userID == message.senderUserID })
-                    .map { "@\($0.handle)" } ?? "Incoming conversation",
-                recipientUserID: "",
+                title: knownContact.map { "@\($0.handle)" } ?? "Incoming conversation",
+                recipientUserID: message.senderUserID,
                 peerUserID: message.senderUserID,
                 messages: [received]))
             selectedID = message.conversationID
         }
         selectedConversationID = selectedID
+        initializedConversationIDs.insert(selectedID)
         conversationSetupStatus = "Secure two-user MLS conversation ready"
         actionError = nil
         clearLastError()
         persistLocalState()
+        if knownContact == nil {
+            resolveIncomingUsername(
+                conversationID: selectedID,
+                senderUserID: message.senderUserID)
+        }
+    }
+
+    private func resolveIncomingUsername(conversationID: String, senderUserID: String) {
+        guard !resolvingIncomingUserIDs.contains(senderUserID),
+              let authClient,
+              let client,
+              let accessToken = try? client.accessToken() else { return }
+        resolvingIncomingUserIDs.insert(senderUserID)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.resolvingIncomingUserIDs.remove(senderUserID) }
+            do {
+                let directory = try await authClient.lookup(
+                    userID: senderUserID, accessToken: accessToken)
+                guard let index = self.conversations.firstIndex(where: {
+                    $0.id == conversationID && $0.peerUserID == senderUserID
+                }) else { return }
+                self.conversations[index].title = "@\(directory.handle)"
+                self.conversations[index].recipientUserID = senderUserID
+                self.initializedConversationIDs.insert(conversationID)
+                if let contactIndex = self.contacts.firstIndex(where: {
+                    $0.userID == senderUserID
+                }) {
+                    self.contacts[contactIndex] = LinksMacOSContact(
+                        handle: directory.handle,
+                        userID: directory.userID,
+                        deviceCount: directory.devices.count)
+                } else {
+                    self.contacts.append(LinksMacOSContact(
+                        handle: directory.handle,
+                        userID: directory.userID,
+                        deviceCount: directory.devices.count))
+                }
+                self.contacts.sort { $0.handle < $1.handle }
+                self.persistLocalState()
+            } catch {
+                // Keep the non-identifying placeholder; message receipt still succeeds.
+            }
+        }
     }
 
     nonisolated func directMessagingDidFail(_ messaging: IOSDirectMessaging) {
@@ -1307,6 +1357,20 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deviceStatus = "No device enrolled"
         }
         configureMessagingIfPossible()
+        if client.isAuthenticated {
+            let unresolved = conversations.compactMap { conversation -> (String, String)? in
+                guard let peerUserID = conversation.peerUserID,
+                      contacts.contains(where: { $0.userID == peerUserID }) == false else {
+                    return nil
+                }
+                return (conversation.id, peerUserID)
+            }
+            for (conversationID, peerUserID) in unresolved {
+                resolveIncomingUsername(
+                    conversationID: conversationID,
+                    senderUserID: peerUserID)
+            }
+        }
         publishProfileStatus()
     }
 

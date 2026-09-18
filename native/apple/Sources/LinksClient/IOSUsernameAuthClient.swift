@@ -256,6 +256,23 @@ public final class IOSUsernameAuthClient: Sendable {
         return try IOSUsernameDirectory(object: object)
     }
 
+    public func lookup(userID: String, accessToken: String) async throws -> IOSUsernameDirectory {
+        guard IOSClient.isCanonicalUUID(userID),
+              !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/directory/users/\(userID)"))
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let directory = try IOSUsernameDirectory(object: try await get(request))
+        guard directory.userID == userID else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return directory
+    }
+
     public func registerDevice(accessToken: String,
                                payload: IOSPairingPayload)
         async throws -> IOSPairingRegistrationResponse {

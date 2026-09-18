@@ -90,6 +90,7 @@ pub fn router_with_trusted_proxies(
         .route("/v1/mls/key-package/{device_id}", get(download_mls_key_package))
         .layer(DefaultBodyLimit::max(links_protocol::MAX_FRAME_BYTES));
     let directory_routes = Router::new()
+        .route("/v1/directory/users/{user_id}", get(directory_lookup_by_user_id))
         .route("/v1/directory/{handle}", get(directory_lookup))
         .layer(DefaultBodyLimit::max(4096));
     let contact_psi_routes = Router::new()
@@ -237,6 +238,21 @@ async fn revoke_other_sessions(
     auth.revoke_other_sessions(bearer(&headers)?).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+async fn directory_lookup_by_user_id(
+    State(auth): State<Arc<AccountAuth>>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
+    headers: HeaderMap,
+    Path(user_id): Path<uuid::Uuid>,
+) -> Result<Response, AuthError> {
+    match auth
+        .lookup_username_directory_by_user_id(bearer(&headers)?, user_id, peer_ip)
+        .await?
+    {
+        Some(directory) => Ok(Json(directory).into_response()),
+        None => Ok(StatusCode::NOT_FOUND.into_response()),
+    }
+}
+
 async fn directory_lookup(
     State(auth): State<Arc<AccountAuth>>,
     Extension(ClientIp(peer_ip)): Extension<ClientIp>,

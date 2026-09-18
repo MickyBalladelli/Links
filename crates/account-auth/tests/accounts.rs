@@ -510,6 +510,18 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         .await
         .is_err());
     assert_eq!(f.count("auth_sessions").await, 1);
+    let reverse_directory = f
+        .auth
+        .lookup_username_directory_by_user_id(
+            &first.session.access_token,
+            first.session.user_id,
+            peer,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reverse_directory.handle, "alice_test");
+    assert_eq!(reverse_directory.user_id, first.session.user_id);
 
     let attacker = IdentitySeed::generate().unwrap();
     for _ in 0..19 {

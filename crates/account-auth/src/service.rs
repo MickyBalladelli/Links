@@ -1263,6 +1263,28 @@ impl AccountAuth {
         }))
     }
 
+    /// Resolve a sender user ID to its active public username directory. This is
+    /// authenticated because it is used for inbound-conversation attribution.
+    pub async fn lookup_username_directory_by_user_id(
+        &self,
+        token: &str,
+        user_id: Uuid,
+        peer_ip: IpAddr,
+    ) -> Result<Option<UsernameDirectoryResponse>, AuthError> {
+        self.authenticate(token).await?;
+        if user_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let handle: Option<String> = sqlx::query_scalar("SELECT h.handle FROM handles h JOIN accounts a USING (user_id) WHERE h.user_id=$1 AND a.account_kind='pseudonymous' AND a.disabled_at IS NULL")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(handle) = handle else {
+            return Ok(None);
+        };
+        self.lookup_username_directory(&handle, peer_ip).await
+    }
+
     /// Issue a public verification badge after an external verification
     /// workflow has approved the account. No verification evidence enters the
     /// database; only the authority-signed claim is retained.
