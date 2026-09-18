@@ -809,6 +809,7 @@ final class IOSMobileAppModel: ObservableObject {
             messagingState = .connecting
             messagingStatus = "Connecting securely"
             preKeyStatus = "Preparing encryption keys"
+            // Authenticated sessions connect as soon as the messaging host is ready.
             try directMessaging.start()
             Task { @MainActor [weak self, weak directMessaging] in
                 guard let self, let directMessaging else { return }

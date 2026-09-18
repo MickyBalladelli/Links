@@ -824,13 +824,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             endpoint: endpoint,
             delegate: self)
         directChatDirectory = directory
-        connectionRequested = false
+        connectionRequested = true
         reconnectAfterBackground = false
-        connectionStatus = "Offline"
-        deliveryState = .offline
+        connectionStatus = LinksMacOSDeliveryState.connecting.title
+        deliveryState = .connecting
         pendingOutboxCount = 0
         actionError = nil
         publishProfileStatus()
+        connect()
     }
 
     func connect() {
