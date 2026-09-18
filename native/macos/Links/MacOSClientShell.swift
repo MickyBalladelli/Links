@@ -980,7 +980,8 @@ private struct LinksConversationDetail: View {
                 .padding(.vertical, 8)
 
                 Divider()
-                MessageList(messages: conversation.messages)
+                MessageList(messages: conversation.messages,
+                            conversationID: conversation.id)
                 Divider()
                 ComposerView(model: model)
             }
@@ -1090,6 +1091,9 @@ private struct DeliveryStatusBanner: View {
 
 private struct MessageList: View {
     let messages: [LinksMacOSMessage]
+    let conversationID: String
+
+    private let messageListBottomID = "message-list-bottom"
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -1114,12 +1118,27 @@ private struct MessageList: View {
                                 .id(message.id)
                         }
                     }
+                    Color.clear
+                        .frame(height: 1)
+                        .id(messageListBottomID)
                 }
                 .padding(24)
             }
+            .onAppear {
+                DispatchQueue.main.async {
+                    proxy.scrollTo(messageListBottomID, anchor: .bottom)
+                }
+            }
+            .onChange(of: conversationID) { _ in
+                DispatchQueue.main.async {
+                    proxy.scrollTo(messageListBottomID, anchor: .bottom)
+                }
+            }
             .onChange(of: messages.count) { _ in
-                if let lastID = messages.last?.id {
-                    withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+                DispatchQueue.main.async {
+                    withAnimation {
+                        proxy.scrollTo(messageListBottomID, anchor: .bottom)
+                    }
                 }
             }
         }
