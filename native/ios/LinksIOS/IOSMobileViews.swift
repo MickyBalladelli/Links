@@ -847,6 +847,8 @@ private struct IOSConversationView: View {
     @State private var composerText = ""
     @FocusState private var composerFocused: Bool
 
+    private let conversationBottomID = "conversation-bottom"
+
     private var conversation: IOSMobileConversation? {
         model.conversation(withID: conversationID)
     }
@@ -904,13 +906,24 @@ private struct IOSConversationView: View {
                                 IOSMessageBubble(message: message)
                                     .id(message.id)
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id(conversationBottomID)
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 16)
                     }
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                        }
+                    }
                     .onChange(of: conversation.messages.count) { _ in
-                        guard let lastID = conversation.messages.last?.id else { return }
-                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+                        DispatchQueue.main.async {
+                            withAnimation {
+                                proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                            }
+                        }
                     }
                 }
             }
