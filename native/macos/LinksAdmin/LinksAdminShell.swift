@@ -30,7 +30,7 @@ private struct LinksAdminLoginView: View {
             LinksAdminIconView(size: 72)
             Text("Links Admin")
                 .font(.largeTitle.weight(.bold))
-            Text("Manage accounts and devices. The admin key stays in memory and is never saved by this app.")
+            Text("Manage accounts and devices. The admin key can be saved securely in macOS Keychain, never in a plain file.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Account service URL", text: $model.endpointText)
@@ -38,6 +38,7 @@ private struct LinksAdminLoginView: View {
             SecureField("Admin key", text: $model.adminKey)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { model.connect() }
+            Toggle("Save admin key in macOS Keychain", isOn: $model.saveAdminKey)
             HStack {
                 Spacer()
                 Button("Connect") { model.connect() }

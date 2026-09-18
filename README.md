@@ -109,7 +109,7 @@ PostgreSQL data stays in the PostgreSQL instance for the next run.
 ### macOS admin tool
 
 Set `LINKS_ADMIN_KEY` in `.env` to a random value of at least 32 characters.
-The key enables the protected admin API; it is not stored by the admin app.
+The key enables the protected admin API. The admin app can optionally save it in macOS Keychain after a successful connection; it is never stored in a plain file.
 Start the local backend with `bash launch-links.sh`, then open the separate
 admin interface with:
 

@@ -60,12 +60,19 @@ private enum LinksAdminError: LocalizedError {
 final class LinksAdminModel: ObservableObject {
     @Published var endpointText = "http://127.0.0.1:8080"
     @Published var adminKey = ""
+    @Published var saveAdminKey = true
     @Published var searchText = ""
     @Published var selectedUserID: UUID?
     @Published private(set) var users: [LinksAdminUser] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isConnected = false
     @Published var errorMessage: String?
+
+    init() {
+        if let savedKey = try? LinksAdminKeychain.load() {
+            adminKey = savedKey
+        }
+    }
 
     var filteredUsers: [LinksAdminUser] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -102,6 +109,13 @@ final class LinksAdminModel: ObservableObject {
                 selectedUserID = users.first?.id
             }
             isConnected = true
+            if saveAdminKey {
+                do {
+                    try LinksAdminKeychain.save(adminKey)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
         } catch {
             isConnected = false
             errorMessage = error.localizedDescription
