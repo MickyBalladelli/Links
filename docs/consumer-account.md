@@ -109,6 +109,15 @@ application, proxy, provider SDK, or analytics layer.
 | `PUT /v1/groups/{group_id}/members/{user_id}/role` | Bearer session plus `role` | Applies owner/admin RBAC to add or change a member role. |
 | `DELETE /v1/groups/{group_id}/members/{user_id}` | Bearer session | Removes a permitted member, or lets the authenticated member leave. |
 
+Username challenge starts use separate registration and login buckets: 20 per
+source IP per minute and 200 per source IP per hour for each purpose, plus 10,000
+starts per purpose per hour across the service. After a valid login signature,
+one account/device pair may complete 120 logins per hour. OTP starts allow one per phone per minute, five per
+phone per hour, 20 per source IP per hour, and 10,000 globally per hour. These
+service ceilings are conservative defense in depth. Operations may impose tighter
+limits at ingress immediately; raising a service ceiling requires a reviewed code
+and deployment change so an emergency override cannot silently disable protection.
+
 The username directory is globally backed by the authoritative PostgreSQL
 control plane. It returns only active accounts and non-revoked device public
 material; disabled accounts and revoked devices disappear from the result. All
@@ -247,8 +256,9 @@ Phone lookup uses a domain-separated HMAC-SHA-256 with a required, stable server
 secret. Raw phones, codes, seeds and bearer tokens are not database fields. The
 provider necessarily receives the phone and code; its retention policy is separate.
 Do not claim this is anonymous or zero-knowledge account authentication. The
-minute cleanup job deletes expired sessions, challenges ten minutes after their
-expiry (including replay markers), and rate-limit rows after the longest window.
+minute cleanup job deletes expired sessions, OTP and username challenges ten
+minutes after expiry (including replay markers), and rate-limit rows after the
+longest window.
 Deployments must separately apply retention controls to backups and infrastructure
 logs. The secret lookup key must be backed up securely; replacing it without a
 planned migration breaks phone-to-account lookup.
@@ -267,6 +277,7 @@ these variables through a secret manager or a private local environment:
 | `TWILIO_VERIFY_SERVICE_SID` | Verify service with SMS and, when needed, WhatsApp sender enabled. |
 | `AUTH_BIND` | Defaults to `127.0.0.1:8080`; non-loopback HTTP binding is rejected. |
 | `AUTH_DEV_USERNAME_MODE` | Debug-only `1` enables loopback username-only accounts with canonical lowercase handles; disables OTP and does not read Twilio credentials. |
+| `AUTH_TRUSTED_PROXY_IPS` | Comma-separated exact socket IPs allowed to supply one replacement `X-Forwarded-For` client address. Required in Release builds. |
 | `PASSKEY_RP_ID` | WebAuthn relying-party ID; must be paired with `PASSKEY_ORIGIN`. |
 | `PASSKEY_ORIGIN` | Exact web origin used by WebAuthn client data; must be paired with `PASSKEY_RP_ID`. |
 
@@ -289,12 +300,15 @@ not mounted.
 Do not expose this service beyond loopback or use the mode in a Release build.
 
 The binary is not a TLS server: terminate TLS in a trusted local proxy before
-external access. It deliberately ignores `X-Forwarded-For`; the IP limit is based
-on the socket peer. A shared reverse proxy therefore shares this conservative
-limit. Production ingress needs its own trusted client-IP rate limits, global
-spend caps, bot protection, geographical delivery policy, connection limits and
-provider fraud controls. Do not relax the socket limit by trusting arbitrary
-forwarded headers. No production ingress or provider account was deployed here.
+external access. Release builds require `AUTH_TRUSTED_PROXY_IPS`. Only an exact
+socket-peer match in that allowlist may supply `X-Forwarded-For`, and the value
+must contain exactly one valid IP address; missing, malformed, repeated, or chained
+values fail closed. Untrusted peers cannot override their socket address. The
+proxy must replace inbound forwarding headers rather than append to them.
+Production ingress remains responsible for source-IP, connection, bot,
+geographical, provider-spend, and global controls. Service-side source and global
+ceilings remain defense in depth; repeated `429` responses emit an operational
+signal without logging identifiers or credentials.
 
 ## Native key custody
 

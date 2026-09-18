@@ -216,3 +216,30 @@ export class LinksWebClient {
     }
   }
 }
+
+/** Revoke the current server session, always clearing browser-owned local state. */
+export async function logoutAccountSession(
+  authBaseURL: string,
+  accessToken: string,
+  clearLocalSession: () => void
+): Promise<void> {
+  const endpoint = new URL('v1/auth/logout', authBaseURL.endsWith('/') ? authBaseURL : `${authBaseURL}/`)
+  const loopbackHTTP = endpoint.protocol === 'http:' &&
+    (endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1' || endpoint.hostname === '[::1]')
+  if ((endpoint.protocol !== 'https:' && !loopbackHTTP) || !accessToken || accessToken.length > 4096) {
+    clearLocalSession()
+    throw new Error('Invalid logout request')
+  }
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (!response.ok) throw new Error('Remote session revocation failed')
+  } finally {
+    clearLocalSession()
+  }
+}

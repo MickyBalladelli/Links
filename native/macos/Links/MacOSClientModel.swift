@@ -830,21 +830,28 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         disconnect()
         discardMessaging()
-        client?.clearAuthenticatedSession()
         initializedConversationIDs.removeAll()
         initializingConversationIDs.removeAll()
-        conversationSetupStatus = "Sign in to reconnect"
+        conversationSetupStatus = "Signing out…"
         actionError = nil
         clearLastError()
-        refreshClientState()
-        if let accessToken, let authClient {
-            Task { @MainActor [weak self] in
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var remoteFailure = false
+            if let accessToken, let authClient = self.authClient {
                 do {
                     try await authClient.logout(accessToken: accessToken)
                 } catch {
-                    self?.actionError = "Signed out locally, but remote session revocation could not be confirmed."
+                    remoteFailure = true
                 }
             }
+            self.client?.clearAuthenticatedSession()
+            self.conversationSetupStatus = "Sign in to reconnect"
+            self.actionError = remoteFailure
+                ? "Signed out locally, but remote session revocation could not be confirmed."
+                : nil
+            self.refreshClientState()
         }
     }
 

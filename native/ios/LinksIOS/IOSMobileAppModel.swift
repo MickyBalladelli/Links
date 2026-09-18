@@ -848,24 +848,31 @@ final class IOSMobileAppModel: ObservableObject {
             accessToken = try? client.accessToken()
         }
         stopActiveSession()
-        client?.clearAuthenticatedSession()
         UserDefaults.standard.set(true, forKey: Self.manualSignOutKey)
         requiresManualSignIn = true
         isRestoringSession = false
         usernameAction = .login
         username = client?.accountHandle ?? ""
-        status = "Signed out"
+        status = "Signing out…"
         error = nil
         conversationCreationStatus = nil
-        refreshState()
-        if let accessToken, let usernameAuthClient {
-            Task { @MainActor [weak self] in
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var remoteFailure = false
+            if let accessToken, let usernameAuthClient = self.usernameAuthClient {
                 do {
                     try await usernameAuthClient.logout(accessToken: accessToken)
                 } catch {
-                    self?.error = "Signed out on this iPhone, but remote session revocation could not be confirmed."
+                    remoteFailure = true
                 }
             }
+            self.client?.clearAuthenticatedSession()
+            self.status = "Signed out"
+            self.error = remoteFailure
+                ? "Signed out on this iPhone, but remote session revocation could not be confirmed."
+                : nil
+            self.refreshState()
         }
     }
 

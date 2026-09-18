@@ -505,6 +505,37 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         .is_err());
     assert_eq!(f.count("auth_sessions").await, 1);
 
+    let attacker = IdentitySeed::generate().unwrap();
+    for _ in 0..19 {
+        f.auth
+            .start_username_challenge(
+                UsernameChallengeRequest {
+                    handle: "alice_test".into(),
+                    purpose: UsernameAuthPurpose::Registration,
+                    device_id: Uuid::new_v4(),
+                    mls_node_id: Uuid::new_v4(),
+                    public_key: encode(&attacker.public_key()),
+                },
+                peer,
+            )
+            .await
+            .unwrap();
+    }
+    assert!(f
+        .auth
+        .start_username_challenge(
+            UsernameChallengeRequest {
+                handle: "alice_test".into(),
+                purpose: UsernameAuthPurpose::Registration,
+                device_id: Uuid::new_v4(),
+                mls_node_id: Uuid::new_v4(),
+                public_key: encode(&attacker.public_key()),
+            },
+            peer,
+        )
+        .await
+        .is_err());
+
     let login = f
         .auth
         .start_username_challenge(
@@ -536,24 +567,27 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         )
         .unwrap(),
     ));
-    let second = f
-        .auth
-        .login_username(UsernameLoginRequest {
-            challenge_id: login.challenge_id,
-            signature: login_signature.clone(),
-        })
-        .await
-        .unwrap();
-    assert!(f
-        .auth
-        .login_username(UsernameLoginRequest {
-            challenge_id: login.challenge_id,
-            signature: login_signature,
-        })
-        .await
-        .is_err());
+    let auth_one = f.auth.clone();
+    let auth_two = f.auth.clone();
+    let first_finish = auth_one.login_username(UsernameLoginRequest {
+        challenge_id: login.challenge_id,
+        signature: login_signature.clone(),
+    });
+    let second_finish = auth_two.login_username(UsernameLoginRequest {
+        challenge_id: login.challenge_id,
+        signature: login_signature,
+    });
+    let (first_result, second_result) = tokio::join!(first_finish, second_finish);
+    assert_eq!(first_result.is_ok() as u8 + second_result.is_ok() as u8, 1);
+    let second = first_result.or(second_result).unwrap();
     assert_eq!(f.count("auth_sessions").await, 2);
 
+    f.auth
+        .revoke_other_sessions(&second.session.access_token)
+        .await
+        .unwrap();
+    assert!(f.auth.authenticate(&first.session.access_token).await.is_err());
+    assert!(f.auth.authenticate(&second.session.access_token).await.is_ok());
     f.auth.logout(&second.session.access_token).await.unwrap();
     f.auth.logout(&second.session.access_token).await.unwrap();
     assert!(f
@@ -561,7 +595,6 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         .authenticate(&second.session.access_token)
         .await
         .is_err());
-    assert!(f.auth.authenticate(&first.session.access_token).await.is_ok());
     f.finish().await;
 }
 

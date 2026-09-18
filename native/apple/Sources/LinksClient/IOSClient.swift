@@ -592,7 +592,9 @@ public final class IOSClient: SharedCoreIdentitySigner {
             session = try await api.register(
                 challengeID: challenge.challengeID, signature: signature)
         }
-        guard session.deviceID == deviceID else { throw IOSClientError.invalidMetadata }
+        guard session.deviceID == deviceID, session.handle == cleanHandle else {
+            throw IOSClientError.invalidMetadata
+        }
         try setAuthenticatedSession(
             userID: session.userID,
             accessToken: session.accessToken,

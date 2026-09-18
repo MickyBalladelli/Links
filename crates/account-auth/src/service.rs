@@ -517,6 +517,7 @@ fn derive_privacy_pass_key(seed: &[u8; 32]) -> Zeroizing<[u8; 32]> {
     Zeroizing::new(hasher.finalize().into())
 }
 
+#[derive(Clone)]
 pub struct AccountAuth {
     pool: PgPool,
     provider: Arc<dyn OtpProvider>,
@@ -637,25 +638,33 @@ impl AccountAuth {
 
     async fn enforce_username_source_rate_limits(
         &self,
+        purpose: UsernameAuthPurpose,
         peer_ip: IpAddr,
         now: i64,
     ) -> Result<(), AuthError> {
-        // Development username auth is loopback-only. Production uses source and
-        // global admission limits; account handles are deliberately excluded so
-        // unauthenticated traffic cannot lock out a named account.
+        // Development username auth is loopback-only. Production uses separate
+        // registration/login source and global limits; account handles are
+        // deliberately excluded so unauthenticated traffic cannot lock out a name.
         if self.is_loopback_username_dev() {
             return Ok(());
         }
 
-        let ip_minute_key = self.digest(
-            b"links/username-ip-minute/v2\0",
-            peer_ip.to_string().as_bytes(),
-        );
-        let ip_hour_key = self.digest(
-            b"links/username-ip-hour/v2\0",
-            peer_ip.to_string().as_bytes(),
-        );
-        let global_hour_key = self.digest(b"links/username-global-hour/v2\0", b"global");
+        let (minute_domain, hour_domain, global_domain) = match purpose {
+            UsernameAuthPurpose::Registration => (
+                b"links/username-register-ip-minute/v2\0".as_slice(),
+                b"links/username-register-ip-hour/v2\0".as_slice(),
+                b"links/username-register-global-hour/v2\0".as_slice(),
+            ),
+            UsernameAuthPurpose::Login => (
+                b"links/username-login-ip-minute/v2\0".as_slice(),
+                b"links/username-login-ip-hour/v2\0".as_slice(),
+                b"links/username-login-global-hour/v2\0".as_slice(),
+            ),
+        };
+        let ip = peer_ip.to_string();
+        let ip_minute_key = self.digest(minute_domain, ip.as_bytes());
+        let ip_hour_key = self.digest(hour_domain, ip.as_bytes());
+        let global_hour_key = self.digest(global_domain, b"global");
         let mut tx = self.pool.begin().await?;
         let mut limited = false;
         for (key, window, limit) in [
@@ -931,24 +940,22 @@ impl AccountAuth {
         if request.device_id.is_nil() || request.mls_node_id.is_nil() {
             return Err(AuthError::Invalid);
         }
+        let now = self.now()?;
+        self.enforce_username_source_rate_limits(request.purpose, peer_ip, now)
+            .await?;
         let public_key = decode::<32>(&request.public_key)?;
         links_identity::validate_public_key(&public_key).map_err(|_| AuthError::Invalid)?;
-        let now = self.now()?;
-        self.enforce_username_source_rate_limits(peer_ip, now).await?;
         let challenge_id = Uuid::new_v4();
         let challenge = random()?;
         let expires_at_ms = now + CHALLENGE_TTL_MS as i64;
-        let purpose = request.purpose.as_str();
+        let purpose = request.purpose.as_str().to_owned();
         let mut tx = self.pool.begin().await?;
-        sqlx::query("UPDATE username_auth_challenges SET state='failed' WHERE handle=$1 AND device_id=$2 AND purpose=$3 AND state='pending'")
-            .bind(&request.handle)
-            .bind(request.device_id)
-            .bind(purpose)
-            .execute(&mut *tx)
-            .await?;
+        // Multiple pending challenges may coexist. Invalidating an earlier
+        // challenge here would let anyone who knows public directory fields lock
+        // out the legitimate device by repeatedly starting a newer challenge.
         sqlx::query("INSERT INTO username_auth_challenges (challenge_id,purpose,handle,device_id,mls_node_id,public_key,challenge,state,expires_at_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)")
             .bind(challenge_id)
-            .bind(purpose)
+            .bind(&purpose)
             .bind(&request.handle)
             .bind(request.device_id)
             .bind(request.mls_node_id)
@@ -961,7 +968,7 @@ impl AccountAuth {
         Ok(UsernameChallenge {
             challenge_id,
             handle: request.handle,
-            purpose: purpose.to_owned(),
+            purpose,
             device_id: request.device_id,
             mls_node_id: request.mls_node_id,
             public_key: encode(&public_key),
@@ -1336,16 +1343,19 @@ impl AccountAuth {
         let per_ip = self.digest(b"links/otp-ip-hour/v2\0", peer_ip.to_string().as_bytes());
         let global = self.digest(b"links/otp-global-hour/v2\0", b"global");
         let mut tx = self.pool.begin().await?;
-        for (key, window, limit) in [
-            (cooldown, 60_000_i64, 1_i32),
-            (per_phone, 3_600_000, 5),
-            (per_ip, 3_600_000, 20),
-            (global, 3_600_000, 10_000),
+        for (key, window, limit, global_spend_guard) in [
+            (cooldown, 60_000_i64, 1_i32, false),
+            (per_phone, 3_600_000, 5, false),
+            (per_ip, 3_600_000, 20, false),
+            (global, 3_600_000, 10_000, true),
         ] {
             let count: Option<i32> = sqlx::query_scalar("INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) VALUES ($1,$2,1) ON CONFLICT (key_hash) DO UPDATE SET attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN 1 ELSE auth_rate_limits.attempts+1 END, window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 THEN $2 ELSE auth_rate_limits.window_start_ms END WHERE auth_rate_limits.window_start_ms <= $2-$3 OR auth_rate_limits.attempts < $4 RETURNING attempts")
                 .bind(key.as_slice()).bind(now).bind(window).bind(limit).fetch_optional(&mut *tx).await?;
             if count.is_none() {
                 return Err(AuthError::RateLimited);
+            }
+            if global_spend_guard && count.is_some_and(|attempts| attempts >= 8_000) {
+                eprintln!("OTP provider spend guard is above eighty percent of its hourly ceiling.");
             }
         }
         let account = sqlx::query("SELECT user_id, disabled_at IS NULL AS active FROM accounts WHERE auth_subject_hash=$1")

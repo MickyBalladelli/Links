@@ -29,16 +29,16 @@ Username authentication signs a client-generated nonce. The server does not issu
 
 #### Required remediation
 
-- [ ] Add a PostgreSQL migration for one-time username authentication challenges. Store a random server challenge, challenge ID, purpose (`registration` or `login`), intended handle/device binding, expiry, state, and attempt metadata. Do not store private key material.
-- [ ] Add a challenge-start endpoint for username registration and login. Generate at least 32 random bytes with the existing CSPRNG and use a short expiry.
-- [ ] Define versioned registration and login transcripts that bind the operation, challenge ID, server nonce, expiry, canonical handle, device ID, MLS node ID, and public key.
-- [ ] Update `links-identity` and every FFI/native client implementation to construct the new transcript exactly.
-- [ ] Require the challenge to be pending, unexpired, and bound to the submitted operation and identity before signature verification succeeds.
-- [ ] Consume the challenge in the same database transaction that creates the account or session.
-- [ ] Serialize concurrent finishes with a row lock or conditional state update so one challenge can issue at most one session.
-- [ ] Mark ambiguous, failed, or interrupted challenge attempts unusable where replay safety cannot be guaranteed.
-- [ ] Reject legacy nonce-only login requests after updated clients are deployed. Do not leave a compatibility path that preserves replayability.
-- [ ] Add cleanup for expired username challenges without removing replay markers before their safety window ends.
+- [x] Add a PostgreSQL migration for one-time username authentication challenges. Store a random server challenge, challenge ID, purpose (`registration` or `login`), intended handle/device binding, expiry, state, and attempt metadata. Do not store private key material.
+- [x] Add a challenge-start endpoint for username registration and login. Generate at least 32 random bytes with the existing CSPRNG and use a short expiry.
+- [x] Define versioned registration and login transcripts that bind the operation, challenge ID, server nonce, expiry, canonical handle, device ID, MLS node ID, and public key.
+- [x] Update `links-identity` and every FFI/native client implementation to construct the new transcript exactly.
+- [x] Require the challenge to be pending, unexpired, and bound to the submitted operation and identity before signature verification succeeds.
+- [x] Consume the challenge in the same database transaction that creates the account or session.
+- [x] Serialize concurrent finishes with a row lock or conditional state update so one challenge can issue at most one session.
+- [x] Mark ambiguous, failed, or interrupted challenge attempts unusable where replay safety cannot be guaranteed.
+- [x] Reject legacy nonce-only login requests after updated clients are deployed. Do not leave a compatibility path that preserves replayability.
+- [x] Add cleanup for expired username challenges without removing replay markers before their safety window ends.
 
 #### Acceptance criteria
 
@@ -59,13 +59,13 @@ The per-handle buckets are incremented before the submitted device and signature
 
 #### Required remediation
 
-- [ ] Remove unauthenticated per-handle lockout from username login.
-- [ ] Apply source-oriented limits before expensive parsing, database access, and signature verification.
-- [ ] Apply account/device limits only after a server challenge and valid device signature prove possession. Successful proof should not create an attacker-controlled lockout condition.
-- [ ] Give username registration separate abuse controls from returning-device login; do not share a bucket that lets registration traffic block login.
-- [ ] Add bounded exponential backoff or risk-based controls without creating a durable denial-of-service primitive against a named account.
-- [ ] Return consistent authentication failures so invalid device IDs, signatures, and handles do not reveal private account state beyond the intentionally public directory.
-- [ ] Document exact limits and operational override procedures.
+- [x] Remove unauthenticated per-handle lockout from username login.
+- [x] Apply source-oriented limits before expensive parsing, database access, and signature verification.
+- [x] Apply account/device limits only after a server challenge and valid device signature prove possession. Successful proof should not create an attacker-controlled lockout condition.
+- [x] Give username registration separate abuse controls from returning-device login; do not share a bucket that lets registration traffic block login.
+- [x] Add bounded exponential backoff or risk-based controls without creating a durable denial-of-service primitive against a named account.
+- [x] Return consistent authentication failures so invalid device IDs, signatures, and handles do not reveal private account state beyond the intentionally public directory.
+- [x] Document exact limits and operational override procedures.
 
 #### Acceptance criteria
 
@@ -83,14 +83,14 @@ The service must bind to loopback behind a TLS terminator, while `ConnectInfo` i
 
 #### Required remediation
 
-- [ ] Define the production client-IP attribution contract between the TLS proxy and account-auth service.
+- [x] Define the production client-IP attribution contract between the TLS proxy and account-auth service.
 - [ ] Prefer enforcing source-IP, connection, bot, geographical, provider-spend, and global limits at the trusted ingress.
-- [ ] If the application consumes `Forwarded` or `X-Forwarded-For`, enable it only when the socket peer matches an explicit trusted-proxy allowlist.
+- [x] If the application consumes `Forwarded` or `X-Forwarded-For`, enable it only when the socket peer matches an explicit trusted-proxy allowlist.
 - [ ] Configure the proxy to replace untrusted forwarding headers rather than append to attacker-supplied values.
-- [ ] Parse forwarded addresses strictly, reject malformed or ambiguous chains, and never fall back to an attacker-controlled value.
-- [ ] Keep service-side global and identifier-specific safeguards that do not depend on client IP.
-- [ ] Add startup validation or deployment health checks that detect production mode without the required trusted ingress controls.
-- [ ] Add operational alerts for sudden rate-limit saturation and OTP provider spend anomalies.
+- [x] Parse forwarded addresses strictly, reject malformed or ambiguous chains, and never fall back to an attacker-controlled value.
+- [x] Keep service-side global and identifier-specific safeguards that do not depend on client IP.
+- [x] Add startup validation or deployment health checks that detect production mode without the required trusted ingress controls.
+- [ ] Add operational alerts for sudden rate-limit saturation and OTP provider spend anomalies. The service now emits non-sensitive warning signals; production alert routing remains deployment work.
 
 #### Acceptance criteria
 
@@ -110,14 +110,14 @@ Client sign-out clears the in-memory bearer but leaves its database session vali
 
 #### Required remediation
 
-- [ ] Add `POST /v1/auth/logout` authenticated by the current bearer.
-- [ ] Hash the supplied token exactly as `authenticate` does and delete only that session in one database operation.
-- [ ] Make logout idempotent and return no token or sensitive session metadata.
-- [ ] Add an authenticated “revoke other sessions” operation for account recovery and suspected compromise, while preserving or explicitly revoking the current session according to the API contract.
-- [ ] Update Apple, Android, web, and desktop clients to call server logout before clearing local session state.
-- [ ] Clear local authentication state even when the network request fails, while communicating that remote revocation could not be confirmed.
-- [ ] Ensure device revocation and account disablement continue to invalidate all associated sessions immediately.
-- [ ] Avoid logging authorization headers or token hashes during logout.
+- [x] Add `POST /v1/auth/logout` authenticated by the current bearer.
+- [x] Hash the supplied token exactly as `authenticate` does and delete only that session in one database operation.
+- [x] Make logout idempotent and return no token or sensitive session metadata.
+- [x] Add an authenticated “revoke other sessions” operation for account recovery and suspected compromise, while preserving or explicitly revoking the current session according to the API contract.
+- [x] Update Apple, Android, web, and desktop clients to call server logout before clearing local session state.
+- [x] Clear local authentication state even when the network request fails, while communicating that remote revocation could not be confirmed.
+- [x] Ensure device revocation and account disablement continue to invalidate all associated sessions immediately.
+- [x] Avoid logging authorization headers or token hashes during logout.
 
 #### Acceptance criteria
 

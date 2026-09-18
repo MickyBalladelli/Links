@@ -162,6 +162,30 @@ public final class ClientSession {
         }
     }
 
+    /** Revoke remotely first, then clear memory-only authentication even on failure. */
+    public void signOut(OtpClient api) throws IOException {
+        if (api == null) throw new IOException("Missing auth client");
+        String token;
+        synchronized (this) {
+            token = accessToken;
+        }
+        IOException revocationFailure = null;
+        try {
+            if (token != null) api.logout(token);
+        } catch (IOException error) {
+            revocationFailure = error;
+        } finally {
+            synchronized (this) {
+                accessToken = null;
+                accessTokenExpiresAtMs = 0;
+            }
+        }
+        if (revocationFailure != null) {
+            throw new IOException("Signed out locally; remote session revocation was not confirmed",
+                    revocationFailure);
+        }
+    }
+
     public synchronized OtpClient.Session finishOtp(OtpClient api, OtpClient.Challenge challenge,
             String code) throws GeneralSecurityException, IOException {
         if (api == null || identity == null) throw new GeneralSecurityException("Identity is not ready for OTP");

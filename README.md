@@ -124,7 +124,11 @@ Register signed lowercase usernames such as `alice` and `bob`. This mode does
 not read Twilio credentials, removes the phone OTP routes, and remains limited
 to loopback Debug builds. `AUTH_LOOKUP_KEY` is still required.
 `AUTH_DEV_USERNAME_MODE=1` is rejected by `cargo run --release`, and every
-account-auth mode rejects a non-loopback `AUTH_BIND`.
+account-auth mode rejects a non-loopback `AUTH_BIND`. Username registration and
+login use a durable one-time server challenge before the device signs. Release
+builds also require `AUTH_TRUSTED_PROXY_IPS`, a comma-separated allowlist of exact
+TLS-proxy socket IPs; each trusted proxy must replace `X-Forwarded-For` with one
+canonical client IP.
 
 On macOS, registering a username creates a fresh profile named after that
 username. For example, registering `alice` creates profile `alice` with its
