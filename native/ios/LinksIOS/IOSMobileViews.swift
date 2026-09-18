@@ -358,8 +358,6 @@ private struct IOSChatsView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    IOSWelcomeStrip(model: model)
-
                     if model.conversations.isEmpty {
                         IOSEmptyConversations {
                             model.clearConversationCreationStatus()
@@ -387,7 +385,20 @@ private struct IOSChatsView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Chats")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(IOSLinksPalette.mint)
+                            .frame(width: 8, height: 8)
+                        Text("Secure")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(IOSLinksPalette.mint)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(IOSLinksPalette.mint.opacity(0.11))
+                    .clipShape(Capsule())
+
                     Button {
                         model.clearConversationCreationStatus()
                         showingNewConversation = true
@@ -411,37 +422,6 @@ private struct IOSChatsView: View {
                 }
             }
         }
-    }
-}
-
-private struct IOSWelcomeStrip: View {
-    @ObservedObject var model: IOSMobileAppModel
-
-    var body: some View {
-        HStack(spacing: 13) {
-            IOSAvatar(name: model.profileName, size: 46)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Welcome back")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(model.profileName)
-                    .font(.title3.weight(.semibold))
-            }
-            Spacer()
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(IOSLinksPalette.mint)
-                    .frame(width: 8, height: 8)
-                Text("Secure")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(IOSLinksPalette.mint)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(IOSLinksPalette.mint.opacity(0.11))
-            .clipShape(Capsule())
-        }
-        .padding(.top, 6)
     }
 }
 
