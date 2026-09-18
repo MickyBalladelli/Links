@@ -211,6 +211,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var isOTPWorking = false
     @Published private(set) var preKeyStatus = "Pre-key inventory not initialized"
     @Published private(set) var conversationSetupStatus = "MLS conversation not initialized"
+    @Published private(set) var isCreatingConversation = false
+    @Published private(set) var conversationCreationStatus = ""
     @Published private(set) var contactStatus = "No contacts yet"
     @Published private(set) var isAddingContact = false
     @Published var pairingTarget = ""
@@ -1041,6 +1043,69 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         actionError = nil
         persistLocalState()
         return true
+    }
+
+    func createConversation(handle: String) async -> Bool {
+        guard let authClient, let client, client.isAuthenticated,
+              !isCreatingConversation else {
+            conversationCreationStatus = "Sign in before starting a conversation."
+            return false
+        }
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "^@", with: "", options: .regularExpression)
+        do {
+            try IOSUsernameAuthClient.validateHandle(cleanHandle)
+        } catch {
+            conversationCreationStatus = "Use 3–32 lowercase letters, numbers, or underscores."
+            return false
+        }
+
+        isCreatingConversation = true
+        conversationCreationStatus = "Finding @\(cleanHandle)…"
+        defer { isCreatingConversation = false }
+        do {
+            let directory = try await authClient.lookup(handle: cleanHandle)
+            guard directory.userID != client.userID else {
+                conversationCreationStatus = "Choose someone other than your own account."
+                return false
+            }
+            guard !directory.devices.isEmpty else {
+                conversationCreationStatus = "@\(directory.handle) has no active devices."
+                return false
+            }
+
+            let contact = LinksMacOSContact(
+                handle: directory.handle,
+                userID: directory.userID,
+                deviceCount: directory.devices.count)
+            if let contactIndex = contacts.firstIndex(where: { $0.userID == contact.userID }) {
+                contacts[contactIndex] = contact
+            } else {
+                contacts.append(contact)
+                contacts.sort { $0.handle < $1.handle }
+            }
+            startConversation(with: contact)
+            conversationCreationStatus = "Opened @\(directory.handle)."
+            return true
+        } catch let authError as IOSUsernameAuthError {
+            switch authError {
+            case .serverRejected(let statusCode) where statusCode == 404:
+                conversationCreationStatus = "No Links account uses @\(cleanHandle)."
+            case .rateLimited:
+                conversationCreationStatus = "Too many searches. Wait a moment and try again."
+            case .networkUnavailable, .cannotConnect, .timedOut:
+                conversationCreationStatus = "The directory is unavailable. Check your connection."
+            case .tlsRejected:
+                conversationCreationStatus = "The secure connection to the directory was rejected."
+            default:
+                conversationCreationStatus = "Could not find @\(cleanHandle)."
+            }
+            return false
+        } catch {
+            conversationCreationStatus = "Could not find @\(cleanHandle)."
+            return false
+        }
     }
 
     func addContact(handle: String) {

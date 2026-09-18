@@ -1274,41 +1274,46 @@ private struct ComposerView: View {
 private struct NewConversationView: View {
     @ObservedObject var model: LinksMacOSAppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var recipientUserID = ""
-    @State private var validationError: String?
+    @State private var handle = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New conversation")
                 .font(.title2.weight(.semibold))
-            TextField("Name", text: $title)
-                .textFieldStyle(.roundedBorder)
-            TextField("Recipient user ID (UUID)", text: $recipientUserID)
-                .textFieldStyle(.roundedBorder)
-            Text("The recipient ID is public routing metadata. Message text stays inside the encrypted core.")
+            Text("Find someone by username. The app resolves the recipient ID automatically.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if let validationError {
-                Text(validationError)
+            TextField("Username, for example karine", text: $handle)
+                .textFieldStyle(.roundedBorder)
+                .textContentType(.username)
+                .onSubmit { createConversation() }
+            if !model.conversationCreationStatus.isEmpty {
+                Text(model.conversationCreationStatus)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(model.conversationCreationStatus.contains("Could not")
+                                     || model.conversationCreationStatus.contains("No Links")
+                                     || model.conversationCreationStatus.contains("Choose")
+                                     ? .red : .secondary)
             }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button("Create") {
-                    if model.createConversation(title: title, recipientUserID: recipientUserID) {
-                        dismiss()
-                    } else {
-                        validationError = "Enter a name and canonical recipient UUID."
-                    }
-                }
+                Button("Create", action: createConversation)
                 .buttonStyle(.borderedProminent)
+                .disabled(handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || model.isCreatingConversation)
             }
         }
         .padding(24)
         .frame(width: 430)
+    }
+
+    private func createConversation() {
+        Task {
+            if await model.createConversation(handle: handle) {
+                dismiss()
+            }
+        }
     }
 }
 
