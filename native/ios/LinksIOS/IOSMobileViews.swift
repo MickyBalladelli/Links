@@ -13,8 +13,11 @@ struct IOSMobileRootView: View {
                 if model.isAuthenticated {
                     IOSAuthenticatedShell(model: model)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                } else {
+                } else if model.requiresManualSignIn {
                     IOSOnboardingView(model: model)
+                        .transition(.opacity)
+                } else {
+                    IOSSessionRestoreView(model: model)
                         .transition(.opacity)
                 }
             }
@@ -26,6 +29,56 @@ struct IOSMobileRootView: View {
                     model.clearError()
                 }
             }
+        }
+    }
+}
+
+private struct IOSSessionRestoreView: View {
+    @ObservedObject var model: IOSMobileAppModel
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .systemGroupedBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image(systemName: model.isRestoringSession
+                      ? "arrow.triangle.2.circlepath.circle.fill"
+                      : "exclamationmark.circle.fill")
+                    .font(.system(size: 54))
+                    .foregroundStyle(model.isRestoringSession
+                                     ? IOSLinksPalette.cobalt : IOSLinksPalette.coral)
+
+                Text(model.isRestoringSession
+                     ? "Restoring your account"
+                     : "Could not restore your account")
+                    .font(.title2.weight(.bold))
+
+                Text(model.isRestoringSession
+                     ? "Your saved iPhone identity is signing in securely."
+                     : "Try again, or log out to enter another account.")
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 300)
+
+                if model.isRestoringSession {
+                    ProgressView()
+                        .controlSize(.large)
+                } else {
+                    Button("Try again") {
+                        model.restoreSavedSession()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(IOSLinksPalette.cobalt)
+
+                    Button("Log out", role: .destructive) {
+                        model.signOut()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(28)
         }
     }
 }

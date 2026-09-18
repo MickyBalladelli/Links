@@ -116,6 +116,8 @@ private enum IOSMobileLocalStateStore {
 
 @MainActor
 final class IOSMobileAppModel: ObservableObject {
+    private static let manualSignOutKey = "ai.links.ios.manual-sign-out.v1"
+
     @Published private(set) var status = "Opening secure identity store"
     @Published private(set) var identityStatus = "No identity enrolled"
     @Published private(set) var accountStatus = "Signed out"
@@ -123,6 +125,8 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var isEnrolled = false
     @Published private(set) var isAuthenticated = false
+    @Published private(set) var isRestoringSession = false
+    @Published private(set) var requiresManualSignIn = true
     @Published private(set) var pairingStatus = "No pairing activity"
     @Published var error: String?
     @Published var username = ""
@@ -189,6 +193,16 @@ final class IOSMobileAppModel: ObservableObject {
         usernameAuthClient = loadedUsernameAuthClient
         otpClient = loadedOTPClient
         localRootCertificateData = loadedLocalRootCertificateData
+        let hasSavedAccount = loadedClient?.accountHandle != nil
+        let manuallySignedOut = UserDefaults.standard.bool(forKey: Self.manualSignOutKey)
+        requiresManualSignIn = !hasSavedAccount || manuallySignedOut
+        if let savedHandle = loadedClient?.accountHandle, manuallySignedOut {
+            usernameAction = .login
+            username = savedHandle
+        }
+        if hasSavedAccount && !manuallySignedOut && loadedUsernameAuthClient != nil {
+            isRestoringSession = true
+        }
         error = initialError
         restoreLocalState()
         if initialError != nil {
@@ -200,6 +214,8 @@ final class IOSMobileAppModel: ObservableObject {
             Task { [weak self] in
                 self?.configureMessagingIfPossible()
             }
+        } else if isRestoringSession {
+            restoreSavedSession()
         }
     }
 
@@ -319,6 +335,7 @@ final class IOSMobileAppModel: ObservableObject {
         api: IOSUsernameAuthClient,
         handle: String,
         action: IOSUsernameAction) {
+        guard !isBusy else { return }
         isBusy = true
         error = nil
         status = action == .register ? "Registering username" : "Logging in"
@@ -333,6 +350,9 @@ final class IOSMobileAppModel: ObservableObject {
                 guard let self else { return }
                 self.username = ""
                 self.isBusy = false
+                self.isRestoringSession = false
+                self.requiresManualSignIn = false
+                UserDefaults.standard.set(false, forKey: Self.manualSignOutKey)
                 self.status = action == .register ? "Username registered" : "Account authenticated"
                 self.refreshState()
             } catch let usernameError as IOSUsernameAuthError {
@@ -342,6 +362,9 @@ final class IOSMobileAppModel: ObservableObject {
                         guard let self else { return }
                         self.username = ""
                         self.isBusy = false
+                        self.isRestoringSession = false
+                        self.requiresManualSignIn = false
+                        UserDefaults.standard.set(false, forKey: Self.manualSignOutKey)
                         self.status = "Account authenticated"
                         self.refreshState()
                         return
@@ -351,15 +374,38 @@ final class IOSMobileAppModel: ObservableObject {
                 }
                 guard let self else { return }
                 self.isBusy = false
+                self.isRestoringSession = false
                 self.status = action == .register ? "Username registration failed" : "Username login failed"
                 self.error = self.usernameErrorMessage(usernameError, action: action)
             } catch {
                 guard let self else { return }
                 self.isBusy = false
+                self.isRestoringSession = false
                 self.status = action == .register ? "Username registration failed" : "Username login failed"
                 self.error = "The local identity could not complete the request. Check the profile and auth service."
             }
         }
+    }
+
+    func restoreSavedSession() {
+        guard !requiresManualSignIn,
+              !isBusy,
+              let client,
+              let usernameAuthClient,
+              client.isEnrolled,
+              let handle = client.accountHandle else {
+            isRestoringSession = false
+            return
+        }
+        if messaging != nil {
+            stopActiveSession()
+        }
+        isRestoringSession = true
+        startUsernameAuthentication(
+            using: client,
+            api: usernameAuthClient,
+            handle: handle,
+            action: .login)
     }
 
     private static func isRegistrationConflict(_ error: IOSUsernameAuthError) -> Bool {
@@ -478,6 +524,8 @@ final class IOSMobileAppModel: ObservableObject {
                 self.otpChallenge = nil
                 self.verificationCode = ""
                 self.isBusy = false
+                self.requiresManualSignIn = false
+                UserDefaults.standard.set(false, forKey: Self.manualSignOutKey)
                 self.status = "Account authenticated"
                 self.refreshState()
             } catch {
@@ -797,6 +845,11 @@ final class IOSMobileAppModel: ObservableObject {
     func signOut() {
         stopActiveSession()
         client?.clearAuthenticatedSession()
+        UserDefaults.standard.set(true, forKey: Self.manualSignOutKey)
+        requiresManualSignIn = true
+        isRestoringSession = false
+        usernameAction = .login
+        username = client?.accountHandle ?? ""
         status = "Signed out"
         error = nil
         conversationCreationStatus = nil
@@ -891,7 +944,8 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
             case .staleCursor:
                 self.messagingStatus = "Secure recovery required"
             case .authenticationRequired:
-                self.messagingStatus = "Sign in again"
+                self.messagingStatus = "Restoring session"
+                self.restoreSavedSession()
             case .dependencyOutage, .failed:
                 self.messagingStatus = "Messaging service unavailable"
             case .sendFailed:
@@ -943,7 +997,8 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
             case .staleCursor:
                 self.messagingStatus = "Secure recovery required"
             case .authenticationExpired:
-                self.messagingStatus = "Sign in again"
+                self.messagingStatus = "Restoring session"
+                self.restoreSavedSession()
             case .dependencyOutage:
                 self.messagingStatus = "Messaging service unavailable"
             case .sendFailed:
