@@ -217,11 +217,11 @@ export class LinksWebClient {
   }
 }
 
-/** Revoke the current server session, always clearing browser-owned local state. */
+/** Revoke remotely, then ask the host to clear this exact local bearer even on failure. */
 export async function logoutAccountSession(
   authBaseURL: string,
   accessToken: string,
-  clearLocalSession: () => void
+  clearLocalSession: (expectedAccessToken: string) => void
 ): Promise<void> {
   try {
     const endpoint = new URL('v1/auth/logout', authBaseURL.endsWith('/') ? authBaseURL : `${authBaseURL}/`)
@@ -239,6 +239,6 @@ export async function logoutAccountSession(
     })
     if (!response.ok) throw new Error('Remote session revocation failed')
   } finally {
-    clearLocalSession()
+    clearLocalSession(accessToken)
   }
 }

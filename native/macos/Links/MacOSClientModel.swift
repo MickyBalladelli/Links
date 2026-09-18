@@ -835,10 +835,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         clearLastError()
 
         Task { @MainActor [weak self] in
-            var remoteFailure = false
+            var remoteFailure = accessToken != nil
             if let accessToken, let authClient = self?.authClient {
                 do {
                     try await authClient.logout(accessToken: accessToken)
+                    remoteFailure = false
                 } catch {
                     remoteFailure = true
                 }

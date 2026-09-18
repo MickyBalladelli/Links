@@ -164,20 +164,24 @@ public final class ClientSession {
 
     /** Revoke remotely first, then clear memory-only authentication even on failure. Call off-main-thread. */
     public void signOut(OtpClient api) throws IOException {
-        if (api == null) throw new IOException("Missing auth client");
         String token;
         synchronized (this) {
             token = accessToken;
         }
         IOException revocationFailure = null;
         try {
-            if (token != null) api.logout(token);
+            if (token != null) {
+                if (api == null) throw new IOException("Missing auth client");
+                api.logout(token);
+            }
         } catch (IOException error) {
             revocationFailure = error;
         } finally {
             synchronized (this) {
-                accessToken = null;
-                accessTokenExpiresAtMs = 0;
+                if (token == null || token.equals(accessToken)) {
+                    accessToken = null;
+                    accessTokenExpiresAtMs = 0;
+                }
             }
         }
         if (revocationFailure != null) {

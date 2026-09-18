@@ -856,10 +856,11 @@ final class IOSMobileAppModel: ObservableObject {
         conversationCreationStatus = nil
 
         Task { @MainActor [weak self] in
-            var remoteFailure = false
+            var remoteFailure = accessToken != nil
             if let accessToken, let usernameAuthClient = self?.usernameAuthClient {
                 do {
                     try await usernameAuthClient.logout(accessToken: accessToken)
+                    remoteFailure = false
                 } catch {
                     remoteFailure = true
                 }
