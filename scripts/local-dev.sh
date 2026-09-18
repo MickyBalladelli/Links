@@ -22,6 +22,12 @@ export LINKS_GATEWAY_ENDPOINT="${LINKS_GATEWAY_ENDPOINT:-ws://127.0.0.1:8081/v1/
 
 local_auth_probe="http://${AUTH_BIND}/v1/auth/me"
 if curl -sS --max-time 1 -o /dev/null "$local_auth_probe"; then
+  local_admin_delete_probe="http://${AUTH_BIND}/v1/admin/users/00000000-0000-0000-0000-000000000000"
+  local_admin_delete_status="$(curl -sS --max-time 1 -o /dev/null -w '%{http_code}' -X DELETE "$local_admin_delete_probe")"
+  if [[ "$local_admin_delete_status" == "404" ]]; then
+    echo "Local backend is running an older build without the admin delete API. Stop it, then run this script again." >&2
+    exit 1
+  fi
   echo "Local backend already running at $local_auth_probe"
   exit 0
 fi

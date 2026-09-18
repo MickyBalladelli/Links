@@ -200,6 +200,9 @@ final class LinksAdminModel: ObservableObject {
             if httpResponse.statusCode == 503 {
                 throw LinksAdminError.server("Admin API is not configured on the account service.")
             }
+            if httpResponse.statusCode == 404 {
+                throw LinksAdminError.server("This account service is missing the admin delete API. Restart the local backend with the latest build.")
+            }
             throw LinksAdminError.server("Account service error (\(httpResponse.statusCode)).")
         }
         return data
