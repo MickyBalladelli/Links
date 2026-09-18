@@ -9,6 +9,8 @@ struct LinksRootView: View {
             Group {
                 if model.requiresOnboarding {
                     LinksOnboardingView(model: model)
+                } else if model.shouldRestoreSavedSession || model.isRestoringSession {
+                    LinksSessionRestoreView(model: model)
                 } else if model.requiresAccountAuthentication {
                     LinksAccountOnboardingView(model: model)
                 } else {
@@ -36,6 +38,51 @@ struct LinksRootView: View {
         Binding(
             get: { model.actionError != nil },
             set: { if !$0 { model.actionError = nil } })
+    }
+}
+
+private struct LinksSessionRestoreView: View {
+    @ObservedObject var model: LinksMacOSAppModel
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: model.isRestoringSession
+                  ? "arrow.triangle.2.circlepath.circle.fill"
+                  : "exclamationmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(model.isRestoringSession ? .blue : .orange)
+
+            Text(model.isRestoringSession
+                 ? "Restoring your account"
+                 : "Could not restore your account")
+                .font(.title2.weight(.semibold))
+
+            Text(model.isRestoringSession
+                 ? "Your saved Mac identity is signing in securely."
+                 : "Try again, or log out to enter another account.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 360)
+
+            if model.isRestoringSession {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                HStack(spacing: 10) {
+                    Button("Try again") {
+                        model.restoreSavedSession()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Log out", role: .destructive) {
+                        model.logout()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(48)
     }
 }
 

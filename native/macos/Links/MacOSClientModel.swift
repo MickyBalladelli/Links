@@ -149,6 +149,8 @@ private struct LinksMacOSPersistedState: Codable {
 
 @MainActor
 final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
+    private static let manualSignOutKey = "ai.links.macos.manual-sign-out.v1"
+
     @Published private(set) var identityStatus = "Checking identity"
     @Published private(set) var accountStatus = "Signed out"
     @Published private(set) var deviceStatus = "No device enrolled"
@@ -176,6 +178,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
     @Published private(set) var isEnrolling = false
+    @Published private(set) var isRestoringSession = false
+    @Published private(set) var requiresManualSignIn = true
     @Published private(set) var profileName = ClientProfile.default.name
     @Published private(set) var profileRootPath = ""
     @Published private(set) var profileLogPath = ""
@@ -200,6 +204,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var isPairing = false
 
     private let client: IOSClient?
+    private let sessionDefaults: UserDefaults?
     private let authClient: IOSUsernameAuthClient?
     private let otpClient: IOSOTPClient?
     private let preKeyAPI: IOSPreKeyHTTPClient?
@@ -273,6 +278,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 profile: profile)
             profileName = profile.name
             client = loadedClient
+            sessionDefaults = metadataDefaults
             usernameInput = loadedClient.accountHandle ?? ""
             authMode = loadedClient.accountHandle == nil ? .register : .login
             if let endpoint = try? Self.authEndpointFromArguments() {
@@ -291,11 +297,20 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 preKeyAPI = nil
                 authEndpointText = "Invalid local auth endpoint"
             }
+            let manuallySignedOut = metadataDefaults.bool(forKey: Self.manualSignOutKey)
+            requiresManualSignIn = loadedClient.accountHandle == nil || manuallySignedOut
+            if loadedClient.accountHandle != nil && !manuallySignedOut && authClient != nil {
+                isRestoringSession = true
+            }
             restoreLocalState()
             refreshClientState()
             profileLogger?.record(.launched)
+            if isRestoringSession {
+                restoreSavedSession()
+            }
         } catch {
             client = nil
+            sessionDefaults = nil
             authClient = nil
             otpClient = nil
             preKeyAPI = nil
@@ -331,6 +346,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     var requiresAccountAuthentication: Bool {
         client?.isEnrolled == true && client?.isAuthenticated != true
+    }
+
+    var shouldRestoreSavedSession: Bool {
+        !requiresManualSignIn
+            && client?.accountHandle != nil
+            && requiresAccountAuthentication
     }
 
     var otpAvailable: Bool { otpClient != nil }
@@ -498,12 +519,56 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 }
                 guard let self else { return }
                 self.isAuthenticating = false
+                self.isRestoringSession = false
+                self.requiresManualSignIn = false
+                self.sessionDefaults?.set(false, forKey: Self.manualSignOutKey)
                 self.usernameInput = client.accountHandle ?? handle
                 self.refreshClientState()
             } catch {
                 guard let self else { return }
                 self.isAuthenticating = false
+                self.isRestoringSession = false
                 self.onboardingError = Self.usernameAuthenticationErrorMessage(error)
+            }
+        }
+    }
+
+    func restoreSavedSession(reconnectAfterRestore: Bool = false) {
+        guard !requiresManualSignIn,
+              !isAuthenticating,
+              let client,
+              let authClient,
+              client.isEnrolled,
+              let handle = client.accountHandle else {
+            isRestoringSession = false
+            return
+        }
+        if messaging != nil {
+            discardMessaging()
+        }
+        connectionRequested = false
+        isRestoringSession = true
+        onboardingError = nil
+        isAuthenticating = true
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await client.loginUsername(using: authClient, handle: handle)
+                guard let self else { return }
+                self.isAuthenticating = false
+                self.isRestoringSession = false
+                self.requiresManualSignIn = false
+                self.sessionDefaults?.set(false, forKey: Self.manualSignOutKey)
+                self.usernameInput = client.accountHandle ?? handle
+                self.refreshClientState()
+                if reconnectAfterRestore {
+                    self.connect()
+                }
+            } catch {
+                guard let self else { return }
+                self.isAuthenticating = false
+                self.isRestoringSession = false
+                self.onboardingError = Self.usernameAuthenticationErrorMessage(error)
+                self.refreshClientState()
             }
         }
     }
@@ -650,6 +715,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 guard let self else { return }
                 self.otpChallenge = nil
                 self.isOTPWorking = false
+                self.isRestoringSession = false
+                self.requiresManualSignIn = false
+                self.sessionDefaults?.set(false, forKey: Self.manualSignOutKey)
                 self.otpStatus = "Phone account enrolled"
                 self.refreshClientState()
             } catch {
@@ -827,6 +895,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     func logout() {
         let signingOutClient = client
         let accessToken = signingOutClient.flatMap { try? $0.accessToken() }
+        sessionDefaults?.set(true, forKey: Self.manualSignOutKey)
+        requiresManualSignIn = true
+        isRestoringSession = false
+        authMode = .login
+        usernameInput = signingOutClient?.accountHandle ?? usernameInput
         disconnect()
         discardMessaging()
         initializedConversationIDs.removeAll()
@@ -1187,10 +1260,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         case .staleCursor:
             deliveryState = .staleCursor
         case .authenticationRequired:
+            let reconnectAfterRestore = connectionRequested
             deliveryState = .authenticationExpired
             discardMessaging()
             client?.clearAuthenticatedSession()
             connectionRequested = false
+            restoreSavedSession(reconnectAfterRestore: reconnectAfterRestore)
         case .dependencyOutage:
             deliveryState = .dependencyOutage
         case .sendFailed:
@@ -1319,10 +1394,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         case .staleCursor:
             deliveryState = .staleCursor
         case .authenticationExpired:
+            let reconnectAfterRestore = connectionRequested
             deliveryState = .authenticationExpired
             discardMessaging()
             client?.clearAuthenticatedSession()
             connectionRequested = false
+            restoreSavedSession(reconnectAfterRestore: reconnectAfterRestore)
         case .dependencyOutage:
             deliveryState = .dependencyOutage
         case .sendFailed:
