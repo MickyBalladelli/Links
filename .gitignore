@@ -1,5 +1,7 @@
 /target/
 /web/pkg/
+/web/http-client/node_modules/
+/web/http-client/dist/
 /.local-tools/
 /.env
 *.log

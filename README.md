@@ -121,6 +121,20 @@ bash launch-links-admin.sh
 disable or enable an account. Without `LINKS_ADMIN_KEY`, the admin API stays
 disabled.
 
+### HTTP workbench
+
+Run the Vite-based Links HTTP client with:
+
+```sh
+bash launch-links-http-client.sh
+```
+
+Open `http://localhost:5174`. The default `/links-api` base URL proxies requests
+to `http://127.0.0.1:8080`; set `LINKS_HTTP_TARGET` before launching to target a
+different service. The client includes Links endpoint presets, bearer and admin
+authentication, editable headers and bodies, response inspection, cURL export,
+and credential-safe local history.
+
 For the real phone OTP flow, run the migration example and account-auth binary
 separately with the same `DATABASE_URL` and `AUTH_LOOKUP_KEY`, then supply all
 `TWILIO_*` values. Never use the example credentials outside local development.
