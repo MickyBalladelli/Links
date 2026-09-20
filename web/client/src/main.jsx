@@ -18,6 +18,7 @@ import {
   UserPlusIcon,
   prismTheme
 } from '@mickyballadelli/prism'
+import linksAppIcon from './assets/links-app-icon.png'
 import './style.css'
 
 const storageKey = 'links-web-client-preview-v1'
@@ -263,7 +264,7 @@ function Sidebar() {
   return (
     <aside class={computed(() => `sidebar ${mobileSidebarOpen.value ? 'is-open' : ''}`)}>
       <div class="sidebar-brand">
-        <img class="brand-mark" src="/links-app-icon.png" alt="Links" />
+        <img class="brand-mark" src={linksAppIcon} alt="" aria-hidden="true" />
         <span><strong>Links</strong><small>Private messaging</small></span>
         <Button
           label="Close"
