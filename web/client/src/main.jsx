@@ -263,7 +263,7 @@ function Sidebar() {
   return (
     <aside class={computed(() => `sidebar ${mobileSidebarOpen.value ? 'is-open' : ''}`)}>
       <div class="sidebar-brand">
-        <span class="brand-mark"><LinkIcon size="1rem" /></span>
+        <img class="brand-mark" src="/links-app-icon.png" alt="Links" />
         <span><strong>Links</strong><small>Private messaging</small></span>
         <Button
           label="Close"
