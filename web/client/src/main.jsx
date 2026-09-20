@@ -258,7 +258,7 @@ function ContactList() {
   return computed(() => contacts.value.length ? contacts.value.map(contact => (
     <button type="button" class="contact-row" onClick={() => openConversation(contact)}>
       <Avatar name={avatarName(contact.handle)} size="small" />
-      <span>
+      <span class="contact-copy">
         <strong>@{contact.handle}</strong>
         <small>{contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
       </span>

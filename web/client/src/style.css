@@ -78,7 +78,7 @@ button, input, textarea { font: inherit; }
   object-fit: contain;
 }
 
-.sidebar-brand > span:nth-child(2), .profile-copy, .conversation-copy, .contact-row > span {
+.sidebar-brand > span:nth-child(2), .profile-copy, .conversation-copy, .contact-copy {
   min-width: 0;
   display: flex;
   flex-direction: column;
