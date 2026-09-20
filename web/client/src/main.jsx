@@ -93,6 +93,13 @@ function normalizeHandle(value) {
   return String(value || '').trim().toLowerCase().replace(/^@/, '')
 }
 
+function avatarName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@/, '')
+    .replace(/[_-]+/g, ' ')
+}
+
 function validHandle(value) {
   return /^[a-z0-9_]{3,32}$/.test(value)
 }
@@ -235,7 +242,7 @@ function ConversationList() {
       class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}
       onClick={() => selectConversation(conversation.id)}
     >
-      <Avatar name={conversation.title} size="medium" />
+      <Avatar name={avatarName(conversation.title)} size="medium" />
       <span class="conversation-copy">
         <strong>{conversation.title}</strong>
         <span>{conversation.messages.at(-1)?.text || 'No messages yet'}</span>
@@ -250,7 +257,7 @@ function ConversationList() {
 function ContactList() {
   return computed(() => contacts.value.length ? contacts.value.map(contact => (
     <button type="button" class="contact-row" onClick={() => openConversation(contact)}>
-      <Avatar name={contact.handle} size="small" />
+      <Avatar name={avatarName(contact.handle)} size="small" />
       <span>
         <strong>@{contact.handle}</strong>
         <small>{contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
@@ -304,7 +311,7 @@ function Sidebar() {
       </section>
 
       <button type="button" class="profile-card" onClick={() => { profileOpen.value = true }}>
-        <Avatar name={profileHandle} size="medium" status="online" />
+        <Avatar name={computed(() => avatarName(profileHandle.value))} size="medium" status="online" />
         <span class="profile-copy">
           <strong>{computed(() => `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
           <span><StatusDot /> {statusLabel}</span>
@@ -353,7 +360,7 @@ function ConversationDetail() {
       <main class="conversation-detail">
         <header class="conversation-header">
           <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
-          <Avatar name={conversation.title} size="large" />
+          <Avatar name={avatarName(conversation.title)} size="large" />
           <div class="conversation-heading">
             <h1>{conversation.title}</h1>
             <p>Private one-to-one conversation</p>
