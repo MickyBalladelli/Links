@@ -139,6 +139,21 @@ For the real phone OTP flow, run the migration example and account-auth binary
 separately with the same `DATABASE_URL` and `AUTH_LOOKUP_KEY`, then supply all
 `TWILIO_*` values. Never use the example credentials outside local development.
 
+### Web client interface
+
+Launch the Matrix + Prism browser client shell with:
+
+```sh
+bash launch-links-web-client.sh
+```
+
+Open `http://localhost:5175`. The interface mirrors the macOS split-view client
+with conversations, contacts, delivery state, profile settings, username
+resolution, message bubbles, and a responsive mobile layout. It is intentionally
+marked as a UI preview: directory lookup can use the local account API, while
+the shared WASM encryption core, durable stores, pairing, and live messaging
+transport still need to be composed into this host.
+
 ### Disposable username development mode
 
 For a throwaway local database, run the account service in a Debug build with
