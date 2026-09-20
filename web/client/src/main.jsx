@@ -18,7 +18,7 @@ import {
   UserPlusIcon,
   prismTheme
 } from '@mickyballadelli/prism'
-import linksAppIcon from './assets/links-app-icon.png'
+import { linksAppIcon } from './brand-icon.js'
 import './style.css'
 
 const storageKey = 'links-web-client-preview-v1'
