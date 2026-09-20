@@ -4,6 +4,7 @@
 /web/http-client/dist/
 /.local-tools/
 /.env
+node_modules/
 *.log
 .DS_Store
 /native/apple/.build/

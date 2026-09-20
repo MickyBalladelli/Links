@@ -7,7 +7,6 @@ import {
   ChatIcon,
   CloseIcon,
   EmptyState,
-  LinkIcon,
   LiveStatusIcon,
   LockIcon,
   PlusIcon,

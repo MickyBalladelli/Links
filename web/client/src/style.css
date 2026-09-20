@@ -71,15 +71,11 @@ button, input, textarea { font: inherit; }
 }
 
 .brand-mark {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
+  width: 38px;
+  height: 38px;
+  display: block;
   flex: 0 0 auto;
-  color: white;
-  background: #3349c9;
-  border-radius: 11px 11px 4px 11px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+  object-fit: contain;
 }
 
 .sidebar-brand > span:nth-child(2), .profile-copy, .conversation-copy, .contact-row > span {
