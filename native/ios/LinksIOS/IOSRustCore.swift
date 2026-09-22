@@ -411,7 +411,12 @@ private final class IOSRustSharedCore: SharedClientCore {
         let kem = max(0, 100 - Int(existing.oneTimeKEMPreKeys))
         let uploadBytes = try generatePreKeyUpload(curve: UInt32(curve), kem: UInt32(kem))
         let upload = try IOSPreKeyUpload(protobuf: uploadBytes)
-        let inventory = try await api.upload(accessToken: accessToken, upload: upload)
+        let inventory: IOSPreKeyInventory
+        do {
+            inventory = try await api.upload(accessToken: accessToken, upload: upload)
+        } catch IOSPreKeyError.conflict {
+            inventory = existing
+        }
         let package = try generateMLSKeyPackage()
         if let api = api as? IOSPreKeyHTTPClient {
             try await api.uploadMLSKeyPackage(accessToken: accessToken, keyPackage: package)

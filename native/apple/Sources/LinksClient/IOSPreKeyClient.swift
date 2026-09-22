@@ -209,6 +209,8 @@ public enum IOSPreKeyError: Error, Equatable {
     case invalidRecipient
     case invalidResponse
     case serviceRejected
+    /// The account service already has this device's pre-key profile.
+    case conflict
 }
 
 /// URLSession adapter for the account-auth protobuf pre-key routes.
@@ -274,8 +276,11 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
             accessToken: accessToken, body: keyPackage)
         do {
             let (_, response) = try await urlSession.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  http.statusCode == 204 else {
+            guard let http = response as? HTTPURLResponse else {
+                throw IOSPreKeyError.serviceRejected
+            }
+            if http.statusCode == 409 { throw IOSPreKeyError.conflict }
+            guard http.statusCode == 204 else {
                 throw IOSPreKeyError.serviceRejected
             }
         } catch let error as IOSPreKeyError {
@@ -324,8 +329,12 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
         } catch {
             throw IOSPreKeyError.serviceRejected
         }
-        guard let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode),
+        guard let http = response as? HTTPURLResponse else {
+            throw IOSPreKeyError.serviceRejected
+        }
+        if http.statusCode == 409 { throw IOSPreKeyError.conflict }
+        if http.statusCode == 401 { throw IOSPreKeyError.invalidToken }
+        guard (200..<300).contains(http.statusCode),
               data.count <= Self.maximumResponseBytes,
               Self.isProtobuf(http.value(forHTTPHeaderField: "Content-Type")) else {
             throw IOSPreKeyError.serviceRejected

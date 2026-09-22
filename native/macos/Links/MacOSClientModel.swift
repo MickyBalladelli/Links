@@ -961,6 +961,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             switch error {
             case .serviceRejected:
                 return "Pre-key service rejected the request. Check the local account service."
+            case .conflict:
+                return "Pre-key profile is already published."
             case .invalidToken:
                 return "Pre-key upload needs a fresh account login."
             case .invalidUpload:
@@ -1169,6 +1171,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                             using: preKeyAPI)
                         self.preKeyStatus = "Ready: \(inventory.oneTimeCurvePreKeys) curve, "
                             + "\(inventory.oneTimeKEMPreKeys) KEM keys"
+                        self.publishProfileStatus()
+                        self.autoInitializeSelectedConversation()
+                    } catch IOSPreKeyError.conflict {
+                        self.preKeyStatus = "Ready: pre-key profile already published"
                         self.publishProfileStatus()
                         self.autoInitializeSelectedConversation()
                     } catch {
