@@ -542,6 +542,12 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             let issue = issue(for: sharedCore, error: error,
                               fallback: client.isAuthenticated
                                   ? .dependencyOutage : .authenticationExpired)
+            // One undecryptable frame must not tear down the connection or
+            // raise a modal. The sender can still deliver the next message.
+            if issue == .dependencyOutage {
+                notifyState(.ready)
+                return
+            }
             lock.lock()
             guard connection === manager else {
                 lock.unlock()

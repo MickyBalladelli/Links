@@ -258,6 +258,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var isTerminating = false
     /// Set when this profile is being deleted so late tasks cannot recreate it.
     private var profileTornDown = false
+    private var sendAfterSetupConversationID: String?
     private var isRefreshingContactPictures = false
     private var contactPictureRefreshTask: Task<Void, Never>?
     var requestNewProfileRegistration: ((String) -> Void)?
@@ -491,6 +492,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return false
         }
         return messaging?.state == .ready && messaging?.isConnected == true
+    }
+
+    var canComposeSelectedConversation: Bool {
+        guard let conversation = selectedConversation else { return false }
+        if conversation.isIncoming {
+            return initializedConversationIDs.contains(conversation.id)
+        }
+        return true
     }
 
     var canSendSelectedConversation: Bool {
@@ -1562,6 +1571,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         actionError = nil
         publishProfileStatus()
+        if sendAfterSetupConversationID == conversationID {
+            sendAfterSetupConversationID = nil
+            if !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sendMessage()
+            }
+        }
     }
 
     private func reportConversationSetupFailure(
@@ -1571,6 +1586,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         reset: Bool
     ) {
         guard conversationSetupStillCurrent(conversationID) else { return }
+        if sendAfterSetupConversationID == conversationID {
+            sendAfterSetupConversationID = nil
+        }
         if Self.isMissingRecipientAccount(error) {
             unavailableRecipientUserIDs.insert(recipientUserID)
             guard selectedConversationID == conversationID else { return }
@@ -1625,7 +1643,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         let conversation = conversations[index]
         guard initializedConversationIDs.contains(conversation.id) else {
-            actionError = "Initialize secure chat first."
+            sendAfterSetupConversationID = conversation.id
+            conversationSetupStatus = "Starting secure chat. Your message will send when it is ready."
+            if !initializingConversationIDs.contains(conversation.id) {
+                initializeSelectedConversation()
+            }
             return
         }
         guard let messaging else {

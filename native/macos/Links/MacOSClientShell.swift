@@ -1316,7 +1316,7 @@ private struct ComposerView: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .onSubmit { model.sendMessage() }
-                .disabled(!model.canSendSelectedConversation)
+                .disabled(!model.canComposeSelectedConversation)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(Color.primary.opacity(0.06))
@@ -1331,7 +1331,8 @@ private struct ComposerView: View {
             .controlSize(.large)
             .keyboardShortcut(.return, modifiers: [.command])
             .help("Send message")
-            .disabled(!model.canSendSelectedConversation)
+            .disabled(!model.canComposeSelectedConversation
+                      || model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
