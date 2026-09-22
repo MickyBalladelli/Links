@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Public inventory returned by the authenticated pre-key service.
 public struct IOSPreKeyInventory: Equatable, Sendable {
@@ -275,17 +276,20 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
             path: "v1/mls/key-package", method: "PUT",
             accessToken: accessToken, body: keyPackage)
         do {
-            let (_, response) = try await urlSession.data(for: request)
+            let (body, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
+                Self.recordFailure(request, status: -1, body: Data())
                 throw IOSPreKeyError.serviceRejected
             }
             if http.statusCode == 409 { throw IOSPreKeyError.conflict }
             guard http.statusCode == 204 else {
+                Self.recordFailure(request, status: http.statusCode, body: body)
                 throw IOSPreKeyError.serviceRejected
             }
         } catch let error as IOSPreKeyError {
             throw error
         } catch {
+            Self.recordFailure(request, status: -1, body: Data(String(describing: error).utf8))
             throw IOSPreKeyError.serviceRejected
         }
     }
@@ -330,6 +334,7 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
             throw IOSPreKeyError.serviceRejected
         }
         guard let http = response as? HTTPURLResponse else {
+            Self.recordFailure(request, status: -1, body: data)
             throw IOSPreKeyError.serviceRejected
         }
         if http.statusCode == 409 { throw IOSPreKeyError.conflict }
@@ -337,6 +342,7 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
         guard (200..<300).contains(http.statusCode),
               data.count <= Self.maximumResponseBytes,
               Self.isProtobuf(http.value(forHTTPHeaderField: "Content-Type")) else {
+            Self.recordFailure(request, status: http.statusCode, body: data)
             throw IOSPreKeyError.serviceRejected
         }
         return data
@@ -378,6 +384,13 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
             profileRevision: revision,
             oneTimeCurvePreKeys: curveCount,
             oneTimeKEMPreKeys: kemCount)
+    }
+
+    private static func recordFailure(_ request: URLRequest, status: Int, body: Data) {
+        let path = request.url?.path ?? "?"
+        let text = String(data: body.prefix(400), encoding: .utf8) ?? "<binary>"
+        Logger(subsystem: "ai.links.Links", category: "prekeys")
+            .error("prekey failure \(request.httpMethod ?? "?", privacy: .public) \(path, privacy: .public) status=\(status) body=\(text, privacy: .public)")
     }
 
     private static func isProtobuf(_ value: String?) -> Bool {
