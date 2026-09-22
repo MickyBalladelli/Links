@@ -360,6 +360,9 @@ pub struct LinksDesktopCore {
     recipients: HashMap<String, Vec<RecipientRecord>>,
     pending_batch: Option<v1::SyncBatch>,
     discard_next_batch: bool,
+    /// Peers we have decrypted a message from. Until then, each send rebuilds
+    /// the direct group so a missed Welcome cannot leave the mailbox stuck.
+    heard_from: HashSet<String>,
 }
 
 unsafe fn input<'a>(pointer: *const u8, length: usize, maximum: usize) -> Result<&'a [u8], i32> {
@@ -772,7 +775,8 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         if recipient_user_id == self.client.user_id() || text.is_empty() || text.len() > protocol::MAX_MESSAGE_BYTES {
             return Err(CoreError::Authentication);
         }
-        self.initialize_direct_group(conversation_id, recipient_user_id, false)?;
+        let reset_group = !self.heard_from.contains(recipient_user_id);
+        self.initialize_direct_group(conversation_id, recipient_user_id, reset_group)?;
         let records = self.recipients.get(recipient_user_id).ok_or(CoreError::Authentication)?;
         if records.is_empty() || records.len() > protocol::MAX_FANOUT_DEVICES {
             return Err(CoreError::Authentication);
@@ -923,6 +927,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
             if let v1::queue_item::Entry::Envelope(envelope) = entry {
                 match self.client.open_envelope_authenticated(envelope, now_ms()) {
                     Ok(message) => {
+                        self.heard_from.insert(message.sender_user_id.clone());
                         let sender_user_id = message.sender_user_id;
                         let message = message.message;
                         if let Some(v1::message::Content::Text(text)) = message.content {
@@ -1129,6 +1134,7 @@ pub unsafe extern "C" fn links_desktop_core_create(
                 recipients: HashMap::new(),
                 pending_batch: None,
                 discard_next_batch: false,
+                heard_from: HashSet::new(),
             };
             if let Some(state) = load_state(callbacks).map_err(status)? {
                 core.restore_state(state).map_err(status)?;
