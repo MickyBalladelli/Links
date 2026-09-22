@@ -1332,21 +1332,28 @@ private struct AddContactView: View {
             TextField("Username, for example alice", text: $handle)
                 .textFieldStyle(.roundedBorder)
                 .textContentType(.username)
+                .onSubmit { addContact() }
             Text(model.contactStatus)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button("Find and add") {
-                    model.addContact(handle: handle)
-                }
+                Button("Find and add", action: addContact)
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isAddingContact)
             }
         }
         .padding(24)
         .frame(width: 460)
+    }
+
+    private func addContact() {
+        Task {
+            if await model.addContact(handle: handle) {
+                dismiss()
+            }
+        }
     }
 }
 

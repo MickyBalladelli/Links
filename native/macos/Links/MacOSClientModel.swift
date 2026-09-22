@@ -1210,43 +1210,41 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
 
-    func addContact(handle: String) {
+    func addContact(handle: String) async -> Bool {
         guard let authClient, client?.isAuthenticated == true, !isAddingContact else {
             contactStatus = "Sign in before adding contacts"
-            return
+            return false
         }
         let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased().replacingOccurrences(of: "^@", with: "", options: .regularExpression)
         guard !cleanHandle.isEmpty else {
             contactStatus = "Enter a username"
-            return
+            return false
         }
         isAddingContact = true
         contactStatus = "Looking up contact"
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let directory = try await authClient.lookup(handle: cleanHandle)
-                guard directory.userID != self.client?.userID else {
-                    throw IOSUsernameAuthError.invalidHandle
-                }
-                let contact = LinksMacOSContact(
-                    handle: directory.handle,
-                    userID: directory.userID,
-                    deviceCount: directory.devices.count)
-                if let index = self.contacts.firstIndex(where: { $0.userID == contact.userID }) {
-                    self.contacts[index] = contact
-                } else {
-                    self.contacts.append(contact)
-                }
-                self.contacts.sort { $0.handle < $1.handle }
-                self.persistLocalState()
-                self.contactStatus = "Added @\(contact.handle)"
-                self.isAddingContact = false
-            } catch {
-                self.contactStatus = "Contact not found. Use a valid lowercase username."
-                self.isAddingContact = false
+        defer { isAddingContact = false }
+        do {
+            let directory = try await authClient.lookup(handle: cleanHandle)
+            guard directory.userID != client?.userID else {
+                throw IOSUsernameAuthError.invalidHandle
             }
+            let contact = LinksMacOSContact(
+                handle: directory.handle,
+                userID: directory.userID,
+                deviceCount: directory.devices.count)
+            if let index = contacts.firstIndex(where: { $0.userID == contact.userID }) {
+                contacts[index] = contact
+            } else {
+                contacts.append(contact)
+            }
+            contacts.sort { $0.handle < $1.handle }
+            persistLocalState()
+            contactStatus = "Added @\(contact.handle)"
+            return true
+        } catch {
+            contactStatus = "Contact not found. Use a valid lowercase username."
+            return false
         }
     }
 
