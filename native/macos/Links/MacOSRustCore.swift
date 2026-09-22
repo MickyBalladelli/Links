@@ -607,6 +607,11 @@ final class MacOSRustCoreFactory: SharedClientCoreFactory {
     }
 }
 
+enum MacOSDirectoryError: Error {
+    /// The saved recipient no longer resolves to that account.
+    case accountNotFound
+}
+
 final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
     private let directoryClient: IOSUsernameAuthClient
     private let keyPackageProvider: IOSHTTPMLSKeyPackageProvider
@@ -625,9 +630,19 @@ final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
         guard let handle = handles()[recipientUserID] else {
             throw IOSPreKeyError.invalidRecipient
         }
-        let directory = try await directoryClient.lookup(handle: handle)
-        guard directory.userID == recipientUserID,
-              !directory.devices.isEmpty,
+        let directory: IOSUsernameDirectory
+        do {
+            directory = try await directoryClient.lookup(handle: handle)
+        } catch let error as IOSUsernameAuthError {
+            if case .serverRejected(let statusCode) = error, statusCode == 404 {
+                throw MacOSDirectoryError.accountNotFound
+            }
+            throw error
+        }
+        guard directory.userID == recipientUserID else {
+            throw MacOSDirectoryError.accountNotFound
+        }
+        guard !directory.devices.isEmpty,
               directory.devices.count <= 100 else {
             throw IOSPreKeyError.invalidRecipient
         }

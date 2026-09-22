@@ -166,6 +166,10 @@ private struct LinksMacOSPersistedState: Codable {
 @MainActor
 final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private static let manualSignOutKey = "ai.links.macos.manual-sign-out.v1"
+    private static let recipientPreKeyFailureMessage =
+        "Recipient pre-key verification or MLS setup failed. "
+        + "Check that the other profile is connected and its pre-keys are ready."
+    private static let missingAccountSetupStatus = "This account no longer exists"
 
     @Published private(set) var identityStatus = "Checking identity"
     @Published private(set) var accountStatus = "Signed out"
@@ -236,6 +240,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var directChatDirectory: (any IOSDirectChatDirectory)?
     private var initializedConversationIDs = Set<String>()
     private var initializingConversationIDs = Set<String>()
+    /// Conversations removed while MLS setup is still in flight. Late setup
+    /// results for these IDs must not surface an error.
+    private var discardedConnectionIDs = Set<String>()
+    /// Recipient accounts the directory no longer has. Auto-setup skips them
+    /// so opening the conversation does not raise a pre-key alert.
+    private var unavailableRecipientUserIDs = Set<String>()
     private var resolvingIncomingUserIDs = Set<String>()
     private var profileLogger: LinksMacOSProfileLogger?
     private var profileStatus: LinksMacOSProfileStatus?
@@ -415,10 +425,19 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// connection and pre-key prerequisites are already ready. The explicit
     /// action remains available for retry and recovery.
     func autoInitializeSelectedConversation() {
-        guard let conversation = selectedConversation,
-              !conversation.isIncoming,
-              !initializedConversationIDs.contains(conversation.id),
-              !initializingConversationIDs.contains(conversation.id),
+        guard let conversation = selectedConversation else { return }
+        if conversation.isIncoming || initializedConversationIDs.contains(conversation.id) {
+            conversationSetupStatus = "Secure two-user MLS conversation ready"
+            return
+        }
+        if unavailableRecipientUserIDs.contains(conversation.recipientUserID) {
+            conversationSetupStatus = Self.missingAccountSetupStatus
+            return
+        }
+        if conversationSetupStatus == Self.missingAccountSetupStatus {
+            conversationSetupStatus = "MLS conversation not initialized"
+        }
+        guard !initializingConversationIDs.contains(conversation.id),
               messaging?.state == .ready,
               messaging?.isConnected == true,
               preKeyStatus.hasPrefix("Ready:"),
@@ -426,7 +445,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
               preKeyAPI != nil else {
             return
         }
-        initializeSelectedConversation()
+        initializeSelectedConversation(reset: false)
     }
 
     func clearLastError() {
@@ -973,15 +992,19 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             actionError = "Select a conversation to remove."
             return
         }
-        guard !initializingConversationIDs.contains(conversation.id) else {
-            actionError = "Secure chat setup is still running. Try again when it finishes."
-            return
-        }
+        discardedConnectionIDs.insert(conversation.id)
+        initializingConversationIDs.remove(conversation.id)
         conversations.removeAll { $0.id == conversation.id }
         initializedConversationIDs.remove(conversation.id)
+        if !conversations.contains(where: { $0.recipientUserID == conversation.recipientUserID }) {
+            unavailableRecipientUserIDs.remove(conversation.recipientUserID)
+        }
         selectedConversationID = conversations.first?.id
         conversationSetupStatus = "MLS conversation not initialized"
         actionError = nil
+        if lastError == Self.recipientPreKeyFailureMessage {
+            clearLastError()
+        }
         persistLocalState()
     }
 
@@ -1179,12 +1202,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// Claim and verify recipient pre-keys, then stage the first two-user MLS
     /// conversation in the shared client core.
     func initializeSelectedConversation() {
+        forgetUnavailableRecipientForSelectedConversation()
         initializeSelectedConversation(reset: false)
     }
 
     /// Recreate a broken direct MLS group and release the recipient's stuck
     /// mailbox batch after the fresh bootstrap arrives.
     func resetSelectedConversation() {
+        forgetUnavailableRecipientForSelectedConversation()
         initializeSelectedConversation(reset: true)
     }
 
@@ -1224,50 +1249,115 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         guard initializingConversationIDs.insert(conversation.id).inserted else {
             return
         }
-        initializedConversationIDs.remove(conversation.id)
+        let conversationID = conversation.id
+        let recipientUserID = conversation.recipientUserID
+        initializedConversationIDs.remove(conversationID)
+        discardedConnectionIDs.remove(conversationID)
         conversationSetupStatus = reset
             ? "Repairing secure chat"
             : "Claiming recipient pre-keys"
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.initializingConversationIDs.remove(conversation.id) }
+            defer {
+                self.initializingConversationIDs.remove(conversationID)
+                self.discardedConnectionIDs.remove(conversationID)
+            }
             do {
                 if reset {
                     try await messaging.resetFirstDirectConversation(
-                        conversationID: conversation.id,
-                        recipientUserID: conversation.recipientUserID,
+                        conversationID: conversationID,
+                        recipientUserID: recipientUserID,
                         directory: directChatDirectory,
                         preKeyAPI: preKeyAPI)
                 } else {
                     try await messaging.initializeFirstDirectConversation(
-                        conversationID: conversation.id,
-                        recipientUserID: conversation.recipientUserID,
+                        conversationID: conversationID,
+                        recipientUserID: recipientUserID,
                         directory: directChatDirectory,
                         preKeyAPI: preKeyAPI)
                 }
-                self.conversationSetupStatus = "Secure two-user MLS conversation ready"
-                self.initializedConversationIDs.insert(conversation.id)
-                if self.messaging?.state == .ready {
-                    self.deliveryState = .ready
-                    self.connectionStatus = self.deliveryState.title
-                }
-                self.actionError = nil
-                self.publishProfileStatus()
+                self.finishConversationSetup(conversationID: conversationID)
             } catch {
-                if let messagingError = error as? IOSMessagingError,
-                   case .notConnected = messagingError {
-                    self.conversationSetupStatus = "Connect before initializing MLS"
-                    self.actionError = "Connection dropped. Click Connect and try again."
-                } else {
-                    self.conversationSetupStatus = reset
-                        ? "Secure chat repair failed"
-                        : "MLS conversation setup failed"
-                    self.actionError = "Recipient pre-key verification or MLS setup failed. "
-                        + "Check that the other profile is connected and its pre-keys are ready."
-                }
-                self.publishProfileStatus()
+                self.reportConversationSetupFailure(
+                    error,
+                    conversationID: conversationID,
+                    recipientUserID: recipientUserID,
+                    reset: reset)
             }
         }
+    }
+
+    private func forgetUnavailableRecipientForSelectedConversation() {
+        guard let recipientUserID = selectedConversation?.recipientUserID else { return }
+        unavailableRecipientUserIDs.remove(recipientUserID)
+    }
+
+    private func finishConversationSetup(conversationID: String) {
+        guard conversationSetupStillCurrent(conversationID) else { return }
+        initializedConversationIDs.insert(conversationID)
+        if let recipientUserID = conversations.first(where: {
+            $0.id == conversationID
+        })?.recipientUserID {
+            unavailableRecipientUserIDs.remove(recipientUserID)
+        }
+        guard selectedConversationID == conversationID else { return }
+        conversationSetupStatus = "Secure two-user MLS conversation ready"
+        if messaging?.state == .ready {
+            deliveryState = .ready
+            connectionStatus = deliveryState.title
+        }
+        actionError = nil
+        publishProfileStatus()
+    }
+
+    private func reportConversationSetupFailure(
+        _ error: Error,
+        conversationID: String,
+        recipientUserID: String,
+        reset: Bool
+    ) {
+        guard conversationSetupStillCurrent(conversationID) else { return }
+        if Self.isMissingRecipientAccount(error) {
+            unavailableRecipientUserIDs.insert(recipientUserID)
+            guard selectedConversationID == conversationID else { return }
+            conversationSetupStatus = Self.missingAccountSetupStatus
+            actionError = nil
+            if lastError == Self.recipientPreKeyFailureMessage {
+                clearLastError()
+            }
+            publishProfileStatus()
+            return
+        }
+        guard selectedConversationID == conversationID else { return }
+        if let messagingError = error as? IOSMessagingError,
+           case .notConnected = messagingError {
+            conversationSetupStatus = "Connect before initializing MLS"
+            actionError = "Connection dropped. Click Connect and try again."
+        } else {
+            conversationSetupStatus = reset
+                ? "Secure chat repair failed"
+                : "MLS conversation setup failed"
+            actionError = Self.recipientPreKeyFailureMessage
+        }
+        publishProfileStatus()
+    }
+
+    private func conversationSetupStillCurrent(_ conversationID: String) -> Bool {
+        !discardedConnectionIDs.contains(conversationID)
+            && conversations.contains { $0.id == conversationID }
+    }
+
+    private static func isMissingRecipientAccount(_ error: Error) -> Bool {
+        if let directoryError = error as? MacOSDirectoryError,
+           case .accountNotFound = directoryError {
+            return true
+        }
+        if let authError = error as? IOSUsernameAuthError,
+           case .serverRejected(let statusCode) = authError,
+           statusCode == 404 {
+            return true
+        }
+        return false
     }
 
     func sendMessage() {
