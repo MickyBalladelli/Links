@@ -134,7 +134,10 @@ button, input, textarea { font: inherit; }
 .conversation-copy strong, .contact-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
 .conversation-copy > span { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--links-muted); font-size: .72rem; }
 
-.contact-row { min-height: 47px; padding: 6px 8px; display: flex; align-items: center; gap: 9px; border-radius: 9px; }
+.contact-row { min-height: 47px; padding: 6px 8px; display: flex; align-items: center; gap: 4px; border-radius: 9px; cursor: default; }
+.contact-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; border: 0; padding: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.contact-remove { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 7px; color: var(--links-muted); background: transparent; cursor: pointer; }
+.contact-remove:hover { color: var(--links-text); background: color-mix(in srgb, var(--links-accent-soft) 80%, transparent); }
 .sidebar-empty { margin: 10px; color: var(--links-muted); font-size: .75rem; }
 .profile-card { min-height: 68px; padding: 11px 13px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; border-top: 1px solid var(--links-border); }
 .profile-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }

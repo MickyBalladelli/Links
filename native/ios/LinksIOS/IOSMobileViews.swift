@@ -620,6 +620,7 @@ private struct IOSNewConversationSheet: View {
 private struct IOSPeopleView: View {
     @ObservedObject var model: IOSMobileAppModel
     @State private var showingNewConversation = false
+    @State private var contactToRemove: IOSMobileContact?
     @State private var path = [String]()
 
     var body: some View {
@@ -671,9 +672,14 @@ private struct IOSPeopleView: View {
                                 .padding(.vertical, 5)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Remove Contact", role: .destructive) {
+                                    contactToRemove = contact
+                                }
+                            }
                             .swipeActions {
                                 Button("Remove", role: .destructive) {
-                                    model.removeContact(contact)
+                                    contactToRemove = contact
                                 }
                             }
                         }
@@ -706,6 +712,25 @@ private struct IOSPeopleView: View {
                     path.append(conversation.id)
                 }
             }
+            .alert("Remove contact?", isPresented: Binding(
+                get: { contactToRemove != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        contactToRemove = nil
+                    }
+                })) {
+                    Button("Remove", role: .destructive) {
+                        if let contact = contactToRemove {
+                            model.removeContact(contact)
+                        }
+                        contactToRemove = nil
+                    }
+                    Button("Cancel", role: .cancel) {
+                        contactToRemove = nil
+                    }
+                } message: {
+                    Text("This removes the saved contact. Existing conversations and messages stay.")
+                }
         }
     }
 }

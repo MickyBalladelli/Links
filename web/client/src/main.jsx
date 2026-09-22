@@ -32,6 +32,8 @@ const searchQuery = signal('')
 const notice = signal('')
 const newConversationOpen = signal(false)
 const addContactOpen = signal(false)
+const removeContactOpen = signal(false)
+const contactPendingRemoval = signal(null)
 const profileOpen = signal(false)
 const mobileSidebarOpen = signal(false)
 const isResolving = signal(false)
@@ -254,16 +256,53 @@ function ConversationList() {
   ))
 }
 
+function askRemoveContact(event, contact) {
+  event.preventDefault()
+  event.stopPropagation()
+  contactPendingRemoval.value = contact
+  removeContactOpen.value = true
+}
+
+function confirmRemoveContact() {
+  const contact = contactPendingRemoval.value
+  removeContactOpen.value = false
+  contactPendingRemoval.value = null
+  if (!contact) return
+  contacts.value = contacts.value.filter(item => item.userID !== contact.userID)
+  persistState()
+}
+
 function ContactList() {
   return computed(() => contacts.value.length ? contacts.value.map(contact => (
-    <button type="button" class="contact-row" onClick={() => openConversation(contact)}>
-      <Avatar name={avatarName(contact.handle)} size="small" />
-      <span class="contact-copy">
-        <strong>@{contact.handle}</strong>
-        <small>{contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
-      </span>
-    </button>
+    <div class="contact-row">
+      <button type="button" class="contact-open" onClick={() => openConversation(contact)}>
+        <Avatar name={avatarName(contact.handle)} size="small" />
+        <span class="contact-copy">
+          <strong>@{contact.handle}</strong>
+          <small>{contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
+        </span>
+      </button>
+      <button
+        type="button"
+        class="contact-remove"
+        aria-label={`Remove @${contact.handle}`}
+        title={`Remove @${contact.handle}`}
+        onClick={event => askRemoveContact(event, contact)}
+      >
+        <TrashIcon />
+      </button>
+    </div>
   )) : <p class="sidebar-empty">Add someone by username.</p>)
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M9 7V5h6v2" />
+      <path d="M8 7l1 12h6l1-12" />
+    </svg>
+  )
 }
 
 function Sidebar() {
@@ -427,6 +466,31 @@ function UsernamePopup({ open, title, description }) {
   )
 }
 
+function RemoveContactPopup() {
+  return (
+    <Popup
+      open={removeContactOpen}
+      title="Remove contact?"
+      ariaDescription="This removes the saved contact. Existing conversations and messages stay."
+      size="small"
+      onClose={() => { removeContactOpen.value = false; contactPendingRemoval.value = null }}
+      footer={() => (
+        <div class="popup-actions">
+          <Button label="Cancel" variant="secondary" onClick={() => { removeContactOpen.value = false; contactPendingRemoval.value = null }} />
+          <Button label="Remove" variant="primary" onClick={confirmRemoveContact} />
+        </div>
+      )}
+    >
+      <p>{computed(() => {
+        const contact = contactPendingRemoval.value
+        return contact
+          ? `Remove @${contact.handle}? Existing conversations and messages stay.`
+          : 'Existing conversations and messages stay.'
+      })}</p>
+    </Popup>
+  )
+}
+
 function ProfilePopup() {
   return (
     <Popup
@@ -462,6 +526,7 @@ function App() {
       <ConversationDetail />
       <UsernamePopup open={newConversationOpen} title="New conversation" description="Find someone by username and open a private conversation." />
       <UsernamePopup open={addContactOpen} title="Add contact" description="Resolve and save a Links account by username." />
+      <RemoveContactPopup />
       <ProfilePopup />
       {computed(() => notice.value && !newConversationOpen.value && !addContactOpen.value ? (
         <div class="toast" role="status">{notice}</div>
