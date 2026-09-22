@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import LinksClient
 
 struct LinksRootView: View {
@@ -795,11 +796,27 @@ private struct ProfileSummaryCard: View {
     @Binding var showingPairing: Bool
     @State private var showingDetails = false
     @State private var logoutConfirmationPresented = false
+    @State private var showingPictureImporter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 10) {
-                ProfileAvatar(title: model.profileName, size: 34)
+                Menu {
+                    Button(model.profilePictureJPEG == nil ? "Add picture" : "Change picture") {
+                        showingPictureImporter = true
+                    }
+                    if model.profilePictureJPEG != nil {
+                        Button("Remove picture", role: .destructive) {
+                            model.removeProfilePicture()
+                        }
+                    }
+                } label: {
+                    ProfileAvatar(title: model.profileName, size: 34, imageJPEG: model.profilePictureJPEG)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Profile picture")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.profileName)
                         .font(.callout.weight(.semibold))
@@ -889,20 +906,45 @@ private struct ProfileSummaryCard: View {
         } message: {
             Text("Your identity, contacts, conversations, and encrypted local state stay on this Mac. You will need to sign in again to reconnect.")
         }
+        .fileImporter(
+            isPresented: $showingPictureImporter,
+            allowedContentTypes: [.image]) { result in
+            switch result {
+            case .success(let url):
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else {
+                    model.actionError = "The picture could not be read."
+                    return
+                }
+                model.replaceProfilePicture(with: data)
+            case .failure:
+                model.actionError = "The picture could not be opened."
+            }
+        }
     }
 }
 
 private struct ProfileAvatar: View {
     let title: String
     let size: CGFloat
+    var imageJPEG: Data? = nil
 
     var body: some View {
-        Text(String(title.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).prefix(1)).uppercased())
-            .font(.system(size: size * 0.42, weight: .semibold))
-            .foregroundStyle(.tint)
-            .frame(width: size, height: size)
-            .background(Color.accentColor.opacity(0.14))
-            .clipShape(Circle())
+        Group {
+            if let imageJPEG, let image = NSImage(data: imageJPEG) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(String(title.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).prefix(1)).uppercased())
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(.tint)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Color.accentColor.opacity(0.14))
+        .clipShape(Circle())
     }
 }
 

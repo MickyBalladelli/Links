@@ -201,6 +201,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var isRestoringSession = false
     @Published private(set) var requiresManualSignIn = true
     @Published private(set) var profileName = ClientProfile.default.name
+    @Published private(set) var profilePictureJPEG: Data?
     @Published private(set) var profileRootPath = ""
     @Published private(set) var profileLogPath = ""
     @Published private(set) var profileStatusPath = ""
@@ -333,6 +334,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 isRestoringSession = true
             }
             restoreLocalState()
+            loadProfilePicture()
             refreshClientState()
             profileLogger?.record(.launched)
             if isRestoringSession {
@@ -521,6 +523,83 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     func clearLastError() {
         lastError = nil
+    }
+
+    func replaceProfilePicture(with data: Data) {
+        guard !profileTornDown else { return }
+        guard data.count <= Self.maximumProfilePictureBytes,
+              let jpeg = Self.normalizedProfilePictureJPEG(data),
+              let url = profilePictureURL else {
+            actionError = "Use a JPEG, PNG, or HEIC picture under 8 MB."
+            return
+        }
+        do {
+            try jpeg.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: NSNumber(value: 0o600)],
+                ofItemAtPath: url.path)
+            profilePictureJPEG = jpeg
+            actionError = nil
+        } catch {
+            actionError = "The profile picture could not be saved."
+        }
+    }
+
+    func removeProfilePicture() {
+        guard !profileTornDown, let url = profilePictureURL else { return }
+        if FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        profilePictureJPEG = nil
+    }
+
+    private var profilePictureURL: URL? {
+        guard profileRootPath.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: profileRootPath, isDirectory: true)
+            .appendingPathComponent(Self.profilePictureFilename)
+    }
+
+    private func loadProfilePicture() {
+        guard let url = profilePictureURL,
+              let data = try? Data(contentsOf: url),
+              data.count <= Self.maximumProfilePictureBytes,
+              NSImage(data: data) != nil else {
+            profilePictureJPEG = nil
+            return
+        }
+        profilePictureJPEG = data
+    }
+
+    private static let profilePictureFilename = "profile-picture.jpg"
+    private static let maximumProfilePictureBytes = 8 * 1024 * 1024
+    private static let profilePictureSide = 512
+
+    private static func normalizedProfilePictureJPEG(_ data: Data) -> Data? {
+        guard let image = NSImage(data: data),
+              let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              source.width > 0, source.height > 0 else {
+            return nil
+        }
+        let longest = max(source.width, source.height)
+        let scale = min(1, CGFloat(profilePictureSide) / CGFloat(longest))
+        let width = max(1, Int((CGFloat(source.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(source.height) * scale).rounded()))
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return nil
+        }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let scaled = context.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: scaled).representation(
+            using: .jpeg,
+            properties: [.compressionFactor: 0.82])
     }
 
     func scenePhaseDidChange(_ phase: ScenePhase) {

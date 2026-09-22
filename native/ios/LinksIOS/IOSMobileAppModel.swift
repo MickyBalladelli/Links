@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import UIKit
 @preconcurrency import LinksClient
 import LinksKeyStore
 import SwiftUI
@@ -147,6 +148,7 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var messagingState: IOSDirectMessaging.State = .stopped
     @Published private(set) var messagingStatus = "Offline"
     @Published private(set) var preKeyStatus = "Waiting for sign in"
+    @Published private(set) var profilePictureJPEG: Data?
     @Published private(set) var preparingConversationIDs = Set<String>()
     private var resolvingIncomingUserIDs = Set<String>()
 
@@ -212,6 +214,7 @@ final class IOSMobileAppModel: ObservableObject {
         }
         error = initialError
         restoreLocalState()
+        loadProfilePicture()
         if initialError != nil {
             status = "Identity store unavailable"
         } else {
@@ -835,6 +838,68 @@ final class IOSMobileAppModel: ObservableObject {
             messagingStatus = "Secure messaging unavailable"
             self.error = "The encrypted messaging core could not start on this iPhone."
         }
+    }
+
+    func replaceProfilePicture(with data: Data) {
+        guard data.count <= Self.maximumProfilePictureBytes,
+              let jpeg = Self.normalizedProfilePictureJPEG(data),
+              let url = profilePictureURL else {
+            error = "Use a JPEG, PNG, or HEIC picture under 8 MB."
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try jpeg.write(to: url, options: .atomic)
+            profilePictureJPEG = jpeg
+            error = nil
+        } catch {
+            self.error = "The profile picture could not be saved."
+        }
+    }
+
+    func removeProfilePicture() {
+        guard let url = profilePictureURL else { return }
+        if FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        profilePictureJPEG = nil
+    }
+
+    private var profilePictureURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("profile-picture.jpg")
+    }
+
+    private func loadProfilePicture() {
+        guard let url = profilePictureURL,
+              let data = try? Data(contentsOf: url),
+              data.count <= Self.maximumProfilePictureBytes,
+              UIImage(data: data) != nil else {
+            profilePictureJPEG = nil
+            return
+        }
+        profilePictureJPEG = data
+    }
+
+    private static let maximumProfilePictureBytes = 8 * 1024 * 1024
+    private static let profilePictureSide: CGFloat = 512
+
+    private static func normalizedProfilePictureJPEG(_ data: Data) -> Data? {
+        guard let image = UIImage(data: data),
+              image.size.width > 0, image.size.height > 0 else {
+            return nil
+        }
+        let longest = max(image.size.width, image.size.height)
+        let scale = min(1, profilePictureSide / longest)
+        let size = CGSize(
+            width: max(1, (image.size.width * scale).rounded()),
+            height: max(1, (image.size.height * scale).rounded()))
+        let scaled = UIGraphicsImageRenderer(size: size).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return scaled.jpegData(compressionQuality: 0.82)
     }
 
     func removeContact(_ contact: IOSMobileContact) {

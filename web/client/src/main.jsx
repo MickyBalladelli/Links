@@ -23,7 +23,12 @@ import './style.css'
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
 const accessToken = signal('')
+const profilePictureKey = 'links-web-client-profile-picture-v1'
 const profileHandle = signal('micky')
+const profilePicture = signal('')
+const profilePictureSrc = signal('')
+const profilePictureError = signal('')
+let profilePictureObjectURL = ''
 const connectionState = signal('preview')
 const selectedConversationID = signal('karine')
 const composerText = signal('')
@@ -93,6 +98,82 @@ function persistState() {
 
 function normalizeHandle(value) {
   return String(value || '').trim().toLowerCase().replace(/^@/, '')
+}
+
+function rememberProfilePicture(dataUrl) {
+  if (profilePictureObjectURL) URL.revokeObjectURL(profilePictureObjectURL)
+  profilePictureObjectURL = ''
+  profilePicture.value = dataUrl
+  if (!dataUrl) {
+    profilePictureSrc.value = ''
+    localStorage.removeItem(profilePictureKey)
+    return
+  }
+  profilePictureObjectURL = URL.createObjectURL(dataUrlToBlob(dataUrl))
+  profilePictureSrc.value = profilePictureObjectURL
+  try {
+    localStorage.setItem(profilePictureKey, dataUrl)
+  } catch {
+    profilePictureError.value = 'The picture could not be saved in this browser.'
+  }
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, body] = String(dataUrl).split(',')
+  const mime = header.match(/data:(.*?);/)?.[1] || 'image/jpeg'
+  const binary = atob(body || '')
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return new Blob([bytes], { type: mime })
+}
+
+function setProfilePicture(file) {
+  profilePictureError.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/') || file.size > 8 * 1024 * 1024) {
+    profilePictureError.value = 'Use an image under 8 MB.'
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    const image = new Image()
+    image.onload = () => {
+      const longest = Math.max(image.width, image.height)
+      const scale = longest ? Math.min(1, 512 / longest) : 1
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.width * scale))
+      canvas.height = Math.max(1, Math.round(image.height * scale))
+      const context = canvas.getContext('2d')
+      if (!context) {
+        profilePictureError.value = 'The picture could not be saved.'
+        return
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      rememberProfilePicture(canvas.toDataURL('image/jpeg', 0.82))
+    }
+    image.onerror = () => { profilePictureError.value = 'The picture could not be read.' }
+    image.src = String(reader.result || '')
+  }
+  reader.onerror = () => { profilePictureError.value = 'The picture could not be read.' }
+  reader.readAsDataURL(file)
+}
+
+function removeProfilePicture() {
+  profilePictureError.value = ''
+  rememberProfilePicture('')
+}
+
+try {
+  rememberProfilePicture(localStorage.getItem(profilePictureKey) || '')
+} catch {
+  profilePictureError.value = 'The saved profile picture could not be opened.'
+  rememberProfilePicture('')
+}
+
+function ProfilePicture({ size = 'medium' }) {
+  return computed(() => profilePictureSrc.value
+    ? <img class={`profile-picture is-${size}`} src={profilePictureSrc.value} alt="" />
+    : <Avatar name={avatarName(profileHandle.value)} size={size} status={size === 'medium' ? 'online' : undefined} />)
 }
 
 function avatarName(value) {
@@ -350,7 +431,7 @@ function Sidebar() {
       </section>
 
       <button type="button" class="profile-card" onClick={() => { profileOpen.value = true }}>
-        <Avatar name={computed(() => avatarName(profileHandle.value))} size="medium" status="online" />
+        <ProfilePicture />
         <span class="profile-copy">
           <strong>{computed(() => `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
           <span><StatusDot /> {statusLabel}</span>
@@ -506,6 +587,26 @@ function ProfilePopup() {
       )}
     >
       <div class="profile-form">
+        <div class="profile-picture-editor">
+          <ProfilePicture size="large" />
+          <div class="profile-picture-actions">
+            <label class="picture-picker">
+              {computed(() => profilePicture.value ? 'Change picture' : 'Add picture')}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={event => {
+                  setProfilePicture(event.currentTarget.files?.[0])
+                  event.currentTarget.value = ''
+                }}
+              />
+            </label>
+            {computed(() => profilePicture.value
+              ? <Button label="Remove picture" variant="tertiary" onClick={removeProfilePicture} />
+              : null)}
+          </div>
+          {computed(() => profilePictureError.value ? <Alert tone="error">{profilePictureError}</Alert> : null)}
+        </div>
         <label for="profile-handle">Profile username</label>
         <TextField id="profile-handle" value={profileHandle} placeholder="username" autocomplete="username" />
         <label for="auth-base">Account service</label>

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import LinksClient
 
@@ -740,13 +741,38 @@ private struct IOSProfileView: View {
     @State private var showingPairDevice = false
     @State private var showingSignOut = false
     @State private var showingNewUsername = false
+    @State private var pictureItem: PhotosPickerItem?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     VStack(spacing: 12) {
-                        IOSAvatar(name: model.profileName, size: 82)
+                        IOSAvatar(name: model.profileName, size: 82, imageJPEG: model.profilePictureJPEG)
+                        HStack(spacing: 10) {
+                            PhotosPicker(selection: $pictureItem, matching: .images) {
+                                Label(model.profilePictureJPEG == nil ? "Add picture" : "Change picture",
+                                      systemImage: "photo")
+                            }
+                            .buttonStyle(.bordered)
+                            if model.profilePictureJPEG != nil {
+                                Button("Remove picture", role: .destructive) {
+                                    model.removeProfilePicture()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .onChange(of: pictureItem) { item in
+                            guard let item else { return }
+                            Task {
+                                if let data = try? await item.loadTransferable(type: Data.self) {
+                                    model.replaceProfilePicture(with: data)
+                                } else {
+                                    model.error = "The picture could not be read."
+                                }
+                                pictureItem = nil
+                            }
+                        }
                         Text(model.profileName)
                             .font(.title2.weight(.bold))
                         Label("Identity protected on this iPhone", systemImage: "checkmark.shield.fill")
@@ -1080,6 +1106,7 @@ private struct IOSMessageBubble: View {
 private struct IOSAvatar: View {
     let name: String
     let size: CGFloat
+    var imageJPEG: Data? = nil
 
     private var initial: String {
         String(name.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).prefix(1)).uppercased()
@@ -1092,15 +1119,23 @@ private struct IOSAvatar: View {
     }
 
     var body: some View {
-        Text(initial)
-            .font(.system(size: size * 0.40, weight: .bold, design: .rounded))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(
-                LinearGradient(colors: [accent, accent.opacity(0.72)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing))
-            .clipShape(Circle())
-            .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 1))
+        Group {
+            if let imageJPEG, let image = UIImage(data: imageJPEG) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(initial)
+                    .font(.system(size: size * 0.40, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(
+            LinearGradient(colors: [accent, accent.opacity(0.72)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing))
+        .clipShape(Circle())
+        .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 1))
     }
 }
 
