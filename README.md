@@ -79,7 +79,7 @@ cp .env.example .env
 bash scripts/local-dev.sh
 ```
 
-To build and launch two separate macOS clients with `karine` and `bob`
+To build and launch two separate macOS clients with `karine` and `micky`
 profiles, run:
 
 ```sh
