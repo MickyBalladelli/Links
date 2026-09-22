@@ -800,24 +800,15 @@ private struct ProfileSummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 10) {
-                Menu {
-                    Button(model.profilePictureJPEG == nil ? "Add picture" : "Change picture") {
-                        showingPictureImporter = true
-                    }
-                    if model.profilePictureJPEG != nil {
-                        Button("Remove picture", role: .destructive) {
-                            model.removeProfilePicture()
-                        }
-                    }
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    showingPictureImporter = true
                 } label: {
                     ProfileAvatar(title: model.profileName, size: 34, imageJPEG: model.profilePictureJPEG)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Profile picture")
-                VStack(alignment: .leading, spacing: 2) {
+                .buttonStyle(.plain)
+                .help(model.profilePictureJPEG == nil ? "Add picture" : "Change picture")
+                VStack(alignment: .leading, spacing: 4) {
                     Text(model.profileName)
                         .font(.callout.weight(.semibold))
                         .lineLimit(1)
@@ -825,8 +816,22 @@ private struct ProfileSummaryCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Button(model.profilePictureJPEG == nil ? "Add picture" : "Change picture") {
+                            showingPictureImporter = true
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        if model.profilePictureJPEG != nil {
+                            Button("Remove picture", role: .destructive) {
+                                model.removeProfilePicture()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
 
             HStack(spacing: 7) {
