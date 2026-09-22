@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import LinksClient
@@ -796,14 +797,11 @@ private struct ProfileSummaryCard: View {
     @Binding var showingPairing: Bool
     @State private var showingDetails = false
     @State private var logoutConfirmationPresented = false
-    @State private var showingPictureImporter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .top, spacing: 10) {
-                Button {
-                    showingPictureImporter = true
-                } label: {
+                Button(action: chooseProfilePicture) {
                     ProfileAvatar(title: model.profileName, size: 34, imageJPEG: model.profilePictureJPEG)
                 }
                 .buttonStyle(.plain)
@@ -817,9 +815,8 @@ private struct ProfileSummaryCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     HStack(spacing: 8) {
-                        Button(model.profilePictureJPEG == nil ? "Add picture" : "Change picture") {
-                            showingPictureImporter = true
-                        }
+                        Button(model.profilePictureJPEG == nil ? "Add picture" : "Change picture",
+                               action: chooseProfilePicture)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         if model.profilePictureJPEG != nil {
@@ -911,22 +908,24 @@ private struct ProfileSummaryCard: View {
         } message: {
             Text("Your identity, contacts, conversations, and encrypted local state stay on this Mac. You will need to sign in again to reconnect.")
         }
-        .fileImporter(
-            isPresented: $showingPictureImporter,
-            allowedContentTypes: [.image]) { result in
-            switch result {
-            case .success(let url):
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                guard let data = try? Data(contentsOf: url) else {
-                    model.actionError = "The picture could not be read."
-                    return
-                }
-                model.replaceProfilePicture(with: data)
-            case .failure:
-                model.actionError = "The picture could not be opened."
-            }
+    }
+
+    private func chooseProfilePicture() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = "Add"
+        panel.message = "Choose a profile picture"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            model.actionError = "The picture could not be read."
+            return
         }
+        model.replaceProfilePicture(with: data)
     }
 }
 
