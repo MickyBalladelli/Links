@@ -71,6 +71,12 @@ public final class MacOSEncryptedStateStore {
             : "links/macos-state/\(namespace)/v1\0"
     }
 
+    /// Delete the Keychain key for this state file. The ciphertext file is removed
+    /// with the profile directory.
+    public func eraseKey() {
+        _ = SecItemDelete(keychainQuery() as CFDictionary)
+    }
+
     /// Return decrypted state, or nil when this profile has no saved state.
     public func read() throws -> Data? {
         guard fileManager.fileExists(atPath: stateURL.path) else { return nil }

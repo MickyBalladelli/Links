@@ -254,6 +254,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var connectionRequested = false
     private var reconnectAfterBackground = false
     private var isTerminating = false
+    /// Set when this profile is being deleted so late tasks cannot recreate it.
+    private var profileTornDown = false
     var requestNewProfileRegistration: ((String) -> Void)?
 
     init(profileOverride: ClientProfile? = nil) {
@@ -368,6 +370,75 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return true
         }
         return FileManager.default.fileExists(atPath: root.url.path)
+    }
+
+    /// `true` when the username is registered, `false` when it is gone, and `nil`
+    /// when the directory could not be checked.
+    func directoryAccountExists(handle: String) async -> Bool? {
+        guard let authClient else { return nil }
+        do {
+            _ = try await authClient.lookup(handle: handle)
+            return true
+        } catch let authError as IOSUsernameAuthError {
+            if case .serverRejected(let statusCode) = authError, statusCode == 404 {
+                return false
+            }
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
+    /// Stop writers before deleting the profile this model has open.
+    func prepareForProfileDeletion() {
+        profileTornDown = true
+        connectionRequested = false
+        reconnectAfterBackground = false
+        messaging?.shutdown()
+        messaging = nil
+        directChatDirectory = nil
+        profileLogger = nil
+        profileStatus = nil
+        encryptedStateStore = nil
+        coreStateStore = nil
+        durableMessagingStore = nil
+        coreFactory = nil
+        keychainSecretProvider = nil
+        client?.erasePersistedIdentity()
+    }
+
+    /// Remove one local profile's identity, Keychain material, and files.
+    /// Used after links-admin deletes the account so the username can be created again.
+    static func removeLocalProfile(_ profile: ClientProfile) throws {
+        let (root, hasExplicitRoot) = try profileRootFromArguments(profile: profile)
+        let namespace = hasExplicitRoot ? root.keychainNamespace : nil
+        let defaults = try metadataDefaults(for: root, hasExplicitRoot: hasExplicitRoot)
+        let seedProvider = MacOSKeychainSeedProvider(
+            profile: profile, keychainNamespace: namespace)
+        let identityStore = HardwareIdentityStore(seedProvider: seedProvider)
+        if let existing = try? IOSClient(
+            identityStore: identityStore, defaults: defaults, profile: profile) {
+            existing.erasePersistedIdentity()
+        }
+        if hasExplicitRoot || profile != .default {
+            defaults.removePersistentDomain(forName: root.metadataSuiteName)
+        } else {
+            defaults.removeObject(forKey: "links.client.metadata.v1")
+            defaults.removeObject(forKey: manualSignOutKey)
+        }
+        MacOSKeychainSecretProvider(
+            profile: profile, keychainNamespace: namespace).eraseProfile()
+        for stateNamespace in ["state", "core", "messaging"] {
+            let store = try? MacOSEncryptedStateStore(
+                profile: profile,
+                rootURL: root.url,
+                keychainNamespace: namespace,
+                namespace: stateNamespace)
+            store?.eraseKey()
+        }
+        if FileManager.default.fileExists(atPath: root.url.path) {
+            try FileManager.default.removeItem(at: root.url)
+        }
     }
 
     var requiresOnboarding: Bool { client?.isEnrolled != true }
@@ -638,6 +709,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     return "Too many login attempts. Try again in about \(minutes) minutes."
                 }
                 return "Too many login attempts. Wait and try again."
+            case .serverRejected(let statusCode) where statusCode == 401:
+                return "This profile is not the device registered for that username. Open the profile that created the account."
+            case .serverRejected(let statusCode) where statusCode == 404:
+                return "No Links account uses that username."
+            case .networkUnavailable, .cannotConnect, .timedOut:
+                return "The local account service is unavailable."
+            case .tlsRejected:
+                return "The secure connection to the account service was rejected."
             default:
                 break
             }
@@ -1604,7 +1683,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     private func refreshClientState() {
-        guard let client else { return }
+        guard !profileTornDown, let client else { return }
         identityStatus = client.isEnrolled ? "Identity enrolled" : "Identity not enrolled"
         if let handle = client.accountHandle {
             accountStatus = client.isAuthenticated
@@ -1637,7 +1716,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     private func configureMessagingIfPossible() {
-        guard messaging == nil,
+        guard !profileTornDown,
+              messaging == nil,
               let client,
               client.isAuthenticated,
               let factory = coreFactory,
@@ -1665,7 +1745,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     private func publishProfileStatus() {
-        guard let profileStatus else { return }
+        guard !profileTornDown, let profileStatus else { return }
         let authenticated = client?.isAuthenticated == true
         let connected = messaging?.isConnected == true
         let state: LinksMacOSProfileStatus.State
@@ -1724,7 +1804,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     private func persistLocalState() {
-        guard let encryptedStateStore else { return }
+        guard !profileTornDown, let encryptedStateStore else { return }
         let state = LinksMacOSPersistedState(
             conversations: conversations, selectedConversationID: selectedConversationID,
             contacts: contacts)
@@ -1867,20 +1947,49 @@ final class LinksMacOSProfileSession: ObservableObject {
             return
         }
 
-        if profile.name == model.profileName && !model.hasBoundAccount {
+        if profile.name == model.profileName && !model.hasBoundAccount
+            && !LinksMacOSAppModel.profileExists(profile) {
             model.beginUsernameRegistration(handle: cleanHandle)
             return
         }
 
-        guard !LinksMacOSAppModel.profileExists(profile) else {
-            model.actionError = "The profile \(profile.name) already exists. Use that profile to log in."
+        guard LinksMacOSAppModel.profileExists(profile) else {
+            replaceModel(with: profile, handle: cleanHandle, deletingCurrent: false)
             return
         }
 
-        model.logout()
+        Task { @MainActor in
+            await self.registerIfAccountWasDeleted(profile, handle: cleanHandle)
+        }
+    }
+
+    private func registerIfAccountWasDeleted(_ profile: ClientProfile, handle: String) async {
+        guard await model.directoryAccountExists(handle: handle) == false else {
+            model.actionError = "The profile \(profile.name) already exists. Use that profile to log in."
+            return
+        }
+        let deletingCurrent = profile.name == model.profileName
+        if deletingCurrent {
+            model.prepareForProfileDeletion()
+        }
+        do {
+            try LinksMacOSAppModel.removeLocalProfile(profile)
+        } catch {
+            model.actionError = "The saved profile \(profile.name) could not be removed."
+            return
+        }
+        replaceModel(with: profile, handle: handle, deletingCurrent: deletingCurrent)
+    }
+
+    private func replaceModel(with profile: ClientProfile,
+                              handle: String,
+                              deletingCurrent: Bool) {
+        if !deletingCurrent {
+            model.logout()
+        }
         let newModel = LinksMacOSAppModel(profileOverride: profile)
         model = newModel
         attachProfileRegistrationHandler()
-        newModel.beginUsernameRegistration(handle: cleanHandle)
+        newModel.beginUsernameRegistration(handle: handle)
     }
 }

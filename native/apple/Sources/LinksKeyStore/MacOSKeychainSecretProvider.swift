@@ -106,6 +106,30 @@ public final class MacOSKeychainSecretProvider: @unchecked Sendable {
         return Data(plaintext.dropFirst(prefix.count))
     }
 
+    /// Remove every secret and wrapping key stored for this profile.
+    public func eraseProfile() {
+        let listQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(listQuery as CFDictionary, &result)
+        if status == errSecSuccess, let items = result as? [[String: Any]] {
+            for item in items {
+                guard let account = item[kSecAttrAccount as String] as? String else { continue }
+                try? deleteRecord(account)
+                _ = SecItemDelete(legacyPrivateKeyQuery(account) as CFDictionary)
+            }
+        }
+        _ = SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service
+        ] as CFDictionary)
+        _ = SecItemDelete(wrappingPrivateKeyQuery() as CFDictionary)
+    }
+
     public func delete(_ key: String) throws {
         guard !key.isEmpty, key.utf8.count <= 128 else { throw SecretError.invalidInput }
         let account = accountName(for: key)

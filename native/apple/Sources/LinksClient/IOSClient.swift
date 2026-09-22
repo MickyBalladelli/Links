@@ -300,6 +300,24 @@ public final class IOSClient: SharedCoreIdentitySigner {
         try identityStore.validateIdentity(identity)
     }
 
+    /// Drop this profile's saved identity so a deleted account can be created again.
+    /// The seed is removed from Keychain and the public metadata record is cleared.
+    public func erasePersistedIdentity() {
+        if let identity {
+            try? identityStore.deleteIdentity(identity)
+        }
+        defaults.removeObject(forKey: metadataKey)
+        identity = nil
+        deviceID = nil
+        mlsNodeID = nil
+        userID = nil
+        accountHandle = nil
+        mlsCredential = nil
+        sessionLock.lock()
+        authenticated = nil
+        sessionLock.unlock()
+    }
+
     /// OTP onboarding calls this after the server returns a device-bound
     /// session. The bearer stays in memory and is never written to disk.
     public func setAuthenticatedSession(userID: String, accessToken: String,
