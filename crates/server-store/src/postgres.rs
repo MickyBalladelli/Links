@@ -758,7 +758,20 @@ impl RelationalStore {
         .execute(&mut *tx)
         .await?;
 
+        // Two replenishments can both observe a pool just below the cap and
+        // upload the same shortfall. The device row is locked above, so the
+        // second transaction sees the first commit and must keep the stored
+        // pools at the cap instead of failing the whole upload.
+        let mut curve_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_curve_one_time_prekeys WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_one(&mut *tx)
+        .await?;
         for key in &upload.one_time_curve_prekeys {
+            if curve_count >= MAX_ONE_TIME_PREKEYS as i64 {
+                break;
+            }
             let result = sqlx::query("INSERT INTO device_curve_one_time_prekeys (device_id,prekey_id,public_key) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING")
                 .bind(device_id).bind(key.id as i64).bind(&key.public_key).execute(&mut *tx).await?;
             if result.rows_affected() == 0 {
@@ -767,9 +780,20 @@ impl RelationalStore {
                 if !same {
                     return Err(StoreError::Conflict);
                 }
+            } else {
+                curve_count += 1;
             }
         }
+        let mut kem_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_kem_one_time_prekeys WHERE device_id=$1",
+        )
+        .bind(device_id)
+        .fetch_one(&mut *tx)
+        .await?;
         for key in &upload.one_time_kem_prekeys {
+            if kem_count >= MAX_ONE_TIME_PREKEYS as i64 {
+                break;
+            }
             let result = sqlx::query("INSERT INTO device_kem_one_time_prekeys (device_id,prekey_id,public_key,signature) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING")
                 .bind(device_id).bind(key.id as i64).bind(&key.public_key).bind(&key.signature).execute(&mut *tx).await?;
             if result.rows_affected() == 0 {
@@ -778,22 +802,9 @@ impl RelationalStore {
                 if !same {
                     return Err(StoreError::Conflict);
                 }
+            } else {
+                kem_count += 1;
             }
-        }
-        let curve_count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM device_curve_one_time_prekeys WHERE device_id=$1",
-        )
-        .bind(device_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let kem_count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM device_kem_one_time_prekeys WHERE device_id=$1",
-        )
-        .bind(device_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if curve_count > MAX_ONE_TIME_PREKEYS as i64 || kem_count > MAX_ONE_TIME_PREKEYS as i64 {
-            return Err(StoreError::Invalid);
         }
         sqlx::query("INSERT INTO device_prekey_uploads (device_id,upload_id,profile_revision,upload_digest) VALUES ($1,$2,$3,$4)")
             .bind(device_id).bind(upload_id).bind(revision).bind(upload_digest.as_slice()).execute(&mut *tx).await?;
@@ -1301,8 +1312,57 @@ impl EncryptedPayloadStore for RelationalStore {
         .bind(now_ms)
         .execute(&mut *tx)
         .await?;
+        sqlx::query("DELETE FROM device_mls_bootstraps WHERE recipient_device_id=$1")
+            .bind(device_id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn put_pending_mls_bootstrap(
+        &self,
+        recipient_device_id: &str,
+        bootstrap: &v1::MlsBootstrap,
+    ) -> Result<(), StoreError> {
+        if bootstrap.recipient_device_id != recipient_device_id {
+            return Err(StoreError::Invalid);
+        }
+        let recipient = Uuid::parse_str(recipient_device_id).map_err(|_| StoreError::Invalid)?;
+        let conversation =
+            Uuid::parse_str(&bootstrap.conversation_id).map_err(|_| StoreError::Invalid)?;
+        let bytes = bootstrap.encode_to_vec();
+        if bytes.is_empty() || bytes.len() > 2 * MAX_FRAME_BYTES {
+            return Err(StoreError::Invalid);
+        }
+        sqlx::query(
+            "INSERT INTO device_mls_bootstraps (recipient_device_id,conversation_id,bootstrap) VALUES ($1,$2,$3) ON CONFLICT (recipient_device_id,conversation_id) DO UPDATE SET bootstrap=EXCLUDED.bootstrap, updated_at=now()",
+        )
+        .bind(recipient)
+        .bind(conversation)
+        .bind(&bytes)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn pending_mls_bootstraps(
+        &self,
+        recipient_device_id: &str,
+    ) -> Result<Vec<v1::MlsBootstrap>, StoreError> {
+        let recipient = Uuid::parse_str(recipient_device_id).map_err(|_| StoreError::Invalid)?;
+        let rows = sqlx::query(
+            "SELECT bootstrap FROM device_mls_bootstraps WHERE recipient_device_id=$1 ORDER BY updated_at",
+        )
+        .bind(recipient)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                let bytes: Vec<u8> = row.get("bootstrap");
+                v1::MlsBootstrap::decode(bytes.as_slice()).map_err(|_| StoreError::Invalid)
+            })
+            .collect()
     }
 
     async fn purge_expired(&self, now_ms: u64, limit: u32) -> Result<u64, StoreError> {

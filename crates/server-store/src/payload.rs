@@ -102,6 +102,26 @@ pub trait EncryptedPayloadStore: Send + Sync {
     /// Enforce the <=30 day payload lifetime. Production requires scheduled GC and
     /// backup/replication policies, not a promise that backend TTL is instantaneous.
     async fn purge_expired(&self, now_ms: u64, limit: u32) -> Result<u64, StoreError>;
+
+    /// Remember the newest MLS welcome for one recipient conversation. A
+    /// later session replays it before any ciphertext from that conversation.
+    async fn put_pending_mls_bootstrap(
+        &self,
+        recipient_device_id: &str,
+        bootstrap: &v1::MlsBootstrap,
+    ) -> Result<(), StoreError> {
+        let _ = (recipient_device_id, bootstrap);
+        Ok(())
+    }
+
+    /// Welcomes still required before this device can decrypt its mailbox.
+    async fn pending_mls_bootstraps(
+        &self,
+        recipient_device_id: &str,
+    ) -> Result<Vec<v1::MlsBootstrap>, StoreError> {
+        let _ = recipient_device_id;
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]

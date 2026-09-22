@@ -500,10 +500,6 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         if state == .ready, let sharedCore {
             do {
                 try sharedCore.retryOutbox(transport: manager)
-                let pending = sharedCore.pendingOutboxCount
-                if pending > 0 {
-                    notifyState(.reconnecting)
-                }
                 scheduleRetry(for: manager)
             } catch {
                 let issue = issue(for: sharedCore, error: error, fallback: .sendFailed)
@@ -648,10 +644,6 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         lock.unlock()
         do {
             try sharedCore.retryOutbox(transport: manager)
-            let pending = sharedCore.pendingOutboxCount
-            if pending > 0 {
-                notifyState(.reconnecting)
-            }
             if sharedCore.pendingRetryCount == 0 {
                 retryTimer?.cancel()
                 retryTimer = nil

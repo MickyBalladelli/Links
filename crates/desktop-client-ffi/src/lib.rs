@@ -880,7 +880,10 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                     return Err(CoreError::Authentication);
                 }
                 self.insert_binding(binding.clone())?;
-                if bootstrap.reset_group {
+                // A parked mailbox means this device never joined the sender's
+                // group. Replacing any local group with the welcome is what
+                // makes those ciphertext envelopes decryptable.
+                if bootstrap.reset_group || self.pending_batch.is_some() {
                     self.client
                         .mls_mut()
                         .reset_direct_group_from_welcome(

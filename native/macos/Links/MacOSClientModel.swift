@@ -255,6 +255,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         label: "ai.links.macos.identity", qos: .userInitiated)
     private var connectionRequested = false
     private var reconnectAfterBackground = false
+    private var preKeyMaintenanceTask: Task<Void, Never>?
+    private var preKeyMaintenanceFollowUp = false
     private var isTerminating = false
     /// Set when this profile is being deleted so late tasks cannot recreate it.
     private var profileTornDown = false
@@ -1162,29 +1164,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             profileLogger?.record(.connectionStarted)
             pendingOutboxCount = messaging.pendingOutboxCount
             actionError = nil
-            if let preKeyAPI {
-                preKeyStatus = "Preparing pre-key inventory"
-                Task { @MainActor [weak self] in
-                    guard let self, let messaging = self.messaging else { return }
-                    do {
-                        let inventory = try await messaging.maintainPreKeyInventory(
-                            using: preKeyAPI)
-                        self.preKeyStatus = "Ready: \(inventory.oneTimeCurvePreKeys) curve, "
-                            + "\(inventory.oneTimeKEMPreKeys) KEM keys"
-                        self.publishProfileStatus()
-                        self.autoInitializeSelectedConversation()
-                    } catch IOSPreKeyError.conflict {
-                        self.preKeyStatus = "Ready: pre-key profile already published"
-                        self.publishProfileStatus()
-                        self.autoInitializeSelectedConversation()
-                    } catch {
-                        let message = Self.preKeySetupErrorMessage(error)
-                        self.preKeyStatus = message
-                        self.actionError = message
-                        self.publishProfileStatus()
-                    }
-                }
-            }
+            schedulePreKeyMaintenance()
         } catch {
             profileLogger?.record(.connectionFailed)
             connectionRequested = false
@@ -1195,8 +1175,67 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
 
+    /// Connect can be entered again while the first replenishment is still
+    /// uploading. A second in-flight upload of the same shortfall used to hit
+    /// the server pool cap and stick the pre-key banner on screen.
+    private func schedulePreKeyMaintenance() {
+        guard preKeyAPI != nil, messaging != nil else { return }
+        if preKeyMaintenanceTask != nil {
+            preKeyMaintenanceFollowUp = true
+            return
+        }
+        preKeyStatus = "Preparing pre-key inventory"
+        preKeyMaintenanceTask = Task { @MainActor [weak self] in
+            await self?.runPreKeyMaintenance()
+            guard let self else { return }
+            self.preKeyMaintenanceTask = nil
+            if self.preKeyMaintenanceFollowUp {
+                self.preKeyMaintenanceFollowUp = false
+                if self.connectionRequested, self.messaging != nil {
+                    self.schedulePreKeyMaintenance()
+                }
+            }
+        }
+    }
+
+    private func runPreKeyMaintenance() async {
+        guard let messaging, let preKeyAPI, connectionRequested else { return }
+        do {
+            let inventory = try await messaging.maintainPreKeyInventory(using: preKeyAPI)
+            guard self.messaging === messaging, connectionRequested else { return }
+            preKeyStatus = "Ready: \(inventory.oneTimeCurvePreKeys) curve, "
+                + "\(inventory.oneTimeKEMPreKeys) KEM keys"
+            clearPreKeyRejection()
+            publishProfileStatus()
+            autoInitializeSelectedConversation()
+        } catch IOSPreKeyError.conflict {
+            guard self.messaging === messaging, connectionRequested else { return }
+            preKeyStatus = "Ready: pre-key profile already published"
+            clearPreKeyRejection()
+            publishProfileStatus()
+            autoInitializeSelectedConversation()
+        } catch {
+            guard self.messaging === messaging, connectionRequested else { return }
+            let message = Self.preKeySetupErrorMessage(error)
+            preKeyStatus = message
+            actionError = message
+            publishProfileStatus()
+        }
+    }
+
+    private func clearPreKeyRejection() {
+        let rejected = Self.preKeySetupErrorMessage(IOSPreKeyError.serviceRejected)
+        if actionError == rejected {
+            actionError = nil
+        }
+        if lastError == rejected {
+            clearLastError()
+        }
+    }
+
     func disconnect() {
         connectionRequested = false
+        preKeyMaintenanceFollowUp = false
         reconnectAfterBackground = false
         messaging?.stop()
         profileLogger?.record(.connectionStopped)

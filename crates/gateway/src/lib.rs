@@ -399,6 +399,12 @@ where
                 heartbeat_seconds: (HEARTBEAT_INTERVAL_MS / 1000) as u32,
             })),
         })];
+        for bootstrap in self.queue.pending_mls_bootstraps(&hello.device_id).await? {
+            actions.push(GatewayAction::Server(v1::ServerFrame {
+                request_id: request_id.clone(),
+                body: Some(v1::server_frame::Body::MlsBootstrap(bootstrap)),
+            }));
+        }
         if !batch.items.is_empty() {
             actions.push(sync_batch_action(request_id, batch, sync_compression)?);
         }
@@ -677,12 +683,15 @@ where
                 {
                     return Err(GatewayError::Invalid);
                 }
+                self.queue
+                    .put_pending_mls_bootstrap(&bootstrap.recipient_device_id, &bootstrap)
+                    .await?;
                 let Some(lease) = self
                     .state
                     .route(&bootstrap.recipient_device_id, now_ms)
                     .await?
                 else {
-                    return Ok(vec![temporary_unavailable(request_id)]);
+                    return Ok(vec![accepted_request(request_id)]);
                 };
                 if lease.gateway_id != self.config.gateway_id {
                     return Err(GatewayError::Unavailable);
