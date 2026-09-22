@@ -39,6 +39,7 @@ const newConversationOpen = signal(false)
 const addContactOpen = signal(false)
 const removeContactOpen = signal(false)
 const contactPendingRemoval = signal(null)
+const contactPictures = signal({})
 const profileOpen = signal(false)
 const mobileSidebarOpen = signal(false)
 const isResolving = signal(false)
@@ -149,7 +150,9 @@ function setProfilePicture(file) {
         return
       }
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
-      rememberProfilePicture(canvas.toDataURL('image/jpeg', 0.82))
+      const jpeg = canvas.toDataURL('image/jpeg', 0.82)
+      rememberProfilePicture(jpeg)
+      publishProfilePictureBytes(jpeg)
     }
     image.onerror = () => { profilePictureError.value = 'The picture could not be read.' }
     image.src = String(reader.result || '')
@@ -161,7 +164,69 @@ function setProfilePicture(file) {
 function removeProfilePicture() {
   profilePictureError.value = ''
   rememberProfilePicture('')
+  publishProfilePictureRemoval()
 }
+
+function authBase() {
+  return authBaseURL.value.trim().replace(/\/$/, '')
+}
+
+async function publishProfilePictureBytes(dataUrl) {
+  const token = accessToken.value.trim()
+  if (!token || !dataUrl) return
+  await fetch(`${authBase()}/v1/profile/picture`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'image/jpeg'
+    },
+    body: dataUrlToBlob(dataUrl),
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+}
+
+async function publishProfilePictureRemoval() {
+  const token = accessToken.value.trim()
+  if (!token) return
+  await fetch(`${authBase()}/v1/profile/picture`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+}
+
+async function refreshContactPictures() {
+  const next = { ...contactPictures.value }
+  await Promise.all(contacts.value.map(async contact => {
+    try {
+      const response = await fetch(`${authBase()}/v1/directory/${encodeURIComponent(contact.handle)}/picture`, {
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error'
+      })
+      if (response.status === 404) {
+        if (next[contact.userID]) URL.revokeObjectURL(next[contact.userID])
+        delete next[contact.userID]
+        return
+      }
+      if (!response.ok) return
+      const blob = await response.blob()
+      if (!blob.type.includes('jpeg') && blob.size < 3) return
+      if (next[contact.userID]) URL.revokeObjectURL(next[contact.userID])
+      next[contact.userID] = URL.createObjectURL(blob)
+    } catch {
+      // Keep the last picture when a contact is temporarily unreachable.
+    }
+  }))
+  contactPictures.value = next
+}
+
+setInterval(() => { refreshContactPictures() }, 10000)
+refreshContactPictures()
 
 try {
   rememberProfilePicture(localStorage.getItem(profilePictureKey) || '')
@@ -325,7 +390,9 @@ function ConversationList() {
       class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}
       onClick={() => selectConversation(conversation.id)}
     >
-      <Avatar name={avatarName(conversation.title)} size="medium" />
+      {contactPictures.value[conversation.recipientUserID]
+        ? <img class="profile-picture is-medium" src={contactPictures.value[conversation.recipientUserID]} alt="" />
+        : <Avatar name={avatarName(conversation.title)} size="medium" />}
       <span class="conversation-copy">
         <strong>{conversation.title}</strong>
         <span>{conversation.messages.at(-1)?.text || 'No messages yet'}</span>
@@ -357,7 +424,9 @@ function ContactList() {
   return computed(() => contacts.value.length ? contacts.value.map(contact => (
     <div class="contact-row">
       <button type="button" class="contact-open" onClick={() => openConversation(contact)}>
-        <Avatar name={avatarName(contact.handle)} size="small" />
+        {contactPictures.value[contact.userID]
+          ? <img class="profile-picture is-small" src={contactPictures.value[contact.userID]} alt="" />
+          : <Avatar name={avatarName(contact.handle)} size="small" />}
         <span class="contact-copy">
           <strong>@{contact.handle}</strong>
           <small>{contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
@@ -480,7 +549,9 @@ function ConversationDetail() {
       <main class="conversation-detail">
         <header class="conversation-header">
           <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
-          <Avatar name={avatarName(conversation.title)} size="large" />
+          {contactPictures.value[conversation.recipientUserID]
+            ? <img class="profile-picture is-large" src={contactPictures.value[conversation.recipientUserID]} alt="" />
+            : <Avatar name={avatarName(conversation.title)} size="large" />}
           <div class="conversation-heading">
             <h1>{conversation.title}</h1>
             <p>Private one-to-one conversation</p>

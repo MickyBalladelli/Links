@@ -27,6 +27,15 @@ pub const SESSION_TTL_MS: u64 = 15 * 60 * 1000;
 pub const PASSKEY_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PRIVACY_PASS_CHALLENGE_TTL_MS: u64 = 10 * 60 * 1000;
 pub const PROOF_OF_WORK_CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
+const MAX_PROFILE_PICTURE_BYTES: usize = 131_072;
+
+fn is_profile_jpeg(jpeg: &[u8]) -> bool {
+    jpeg.len() >= 3
+        && jpeg.len() <= MAX_PROFILE_PICTURE_BYTES
+        && jpeg[0] == 0xFF
+        && jpeg[1] == 0xD8
+        && jpeg[2] == 0xFF
+}
 
 fn map_username_registration_write_error(error: sqlx::Error) -> AuthError {
     match &error {
@@ -1497,6 +1506,57 @@ impl AccountAuth {
             handle,
             mls_credential: encode(&credential),
         })
+    }
+
+    /// Replace the authenticated account's public profile picture.
+    /// Callers must send a JPEG no larger than 128 KiB.
+    pub async fn put_profile_picture(&self, token: &str, jpeg: Vec<u8>) -> Result<(), AuthError> {
+        if !is_profile_jpeg(&jpeg) {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        sqlx::query(
+            "INSERT INTO account_profile_pictures (user_id, jpeg) VALUES ($1, $2)
+             ON CONFLICT (user_id) DO UPDATE SET jpeg = EXCLUDED.jpeg, updated_at = now()",
+        )
+        .bind(account.user_id)
+        .bind(&jpeg)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Remove the authenticated account's public profile picture.
+    pub async fn delete_profile_picture(&self, token: &str) -> Result<(), AuthError> {
+        let account = self.authenticate(token).await?;
+        sqlx::query("DELETE FROM account_profile_pictures WHERE user_id = $1")
+            .bind(account.user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Return the current public JPEG for a username, if one is published.
+    pub async fn lookup_profile_picture(
+        &self,
+        handle: &str,
+        peer_ip: IpAddr,
+    ) -> Result<Option<Vec<u8>>, AuthError> {
+        validate_handle(handle).map_err(|_| AuthError::Invalid)?;
+        if !self.is_loopback_username_dev() {
+            self.enforce_directory_rate_limits(handle, peer_ip, self.now()?)
+                .await?;
+        }
+        let jpeg: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT p.jpeg FROM account_profile_pictures p
+             JOIN handles h ON h.user_id = p.user_id
+             JOIN accounts a ON a.user_id = p.user_id
+             WHERE h.handle = $1 AND a.disabled_at IS NULL AND a.account_kind = 'pseudonymous'",
+        )
+        .bind(handle)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(jpeg.filter(|bytes| is_profile_jpeg(bytes)))
     }
 
     /// Return the active public device directory for a canonical username.

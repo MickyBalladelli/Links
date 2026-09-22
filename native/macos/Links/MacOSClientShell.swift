@@ -683,7 +683,9 @@ private struct LinksSidebar: View {
                             .padding(.vertical, 5)
                     } else {
                         ForEach(model.conversations) { conversation in
-                            ConversationRow(conversation: conversation)
+                            ConversationRow(
+                                conversation: conversation,
+                                imageJPEG: model.pictureJPEG(for: conversation))
                                 .tag(conversation.id as String?)
                         }
                     }
@@ -704,7 +706,9 @@ private struct LinksSidebar: View {
                                 Button {
                                     model.startConversation(with: contact)
                                 } label: {
-                                    ContactRow(contact: contact)
+                                    ContactRow(
+                                        contact: contact,
+                                        imageJPEG: model.contactPictures[contact.userID])
                                 }
                                 .buttonStyle(.plain)
                                 Spacer(minLength: 0)
@@ -954,10 +958,11 @@ private struct ProfileAvatar: View {
 
 private struct ConversationRow: View {
     let conversation: LinksMacOSConversation
+    var imageJPEG: Data? = nil
 
     var body: some View {
         HStack(spacing: 10) {
-            ProfileAvatar(title: conversation.title, size: 30)
+            ProfileAvatar(title: conversation.title, size: 30, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 3) {
                 Text(conversation.title)
                     .font(.callout.weight(.medium))
@@ -983,10 +988,11 @@ private struct ConversationRow: View {
 
 private struct ContactRow: View {
     let contact: LinksMacOSContact
+    var imageJPEG: Data? = nil
 
     var body: some View {
         HStack(spacing: 10) {
-            ProfileAvatar(title: contact.handle, size: 30)
+            ProfileAvatar(title: contact.handle, size: 30, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 3) {
                 Text("@\(contact.handle)")
                     .font(.callout.weight(.medium))
@@ -1044,7 +1050,10 @@ private struct LinksConversationDetail: View {
         if let conversation = model.selectedConversation {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    ProfileAvatar(title: conversation.title, size: 38)
+                    ProfileAvatar(
+                        title: conversation.title,
+                        size: 38,
+                        imageJPEG: model.pictureJPEG(for: conversation))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(conversation.title)
                             .font(.title2.weight(.semibold))

@@ -202,6 +202,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var requiresManualSignIn = true
     @Published private(set) var profileName = ClientProfile.default.name
     @Published private(set) var profilePictureJPEG: Data?
+    @Published private(set) var contactPictures: [String: Data] = [:]
     @Published private(set) var profileRootPath = ""
     @Published private(set) var profileLogPath = ""
     @Published private(set) var profileStatusPath = ""
@@ -257,6 +258,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var isTerminating = false
     /// Set when this profile is being deleted so late tasks cannot recreate it.
     private var profileTornDown = false
+    private var isRefreshingContactPictures = false
+    private var contactPictureRefreshTask: Task<Void, Never>?
     var requestNewProfileRegistration: ((String) -> Void)?
 
     init(profileOverride: ClientProfile? = nil) {
@@ -335,7 +338,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             }
             restoreLocalState()
             loadProfilePicture()
+            loadCachedContactPictures()
             refreshClientState()
+            startContactPictureRefresh()
             profileLogger?.record(.launched)
             if isRestoringSession {
                 restoreSavedSession()
@@ -394,6 +399,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// Stop writers before deleting the profile this model has open.
     func prepareForProfileDeletion() {
         profileTornDown = true
+        contactPictureRefreshTask?.cancel()
+        contactPictureRefreshTask = nil
         connectionRequested = false
         reconnectAfterBackground = false
         messaging?.shutdown()
@@ -540,6 +547,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 ofItemAtPath: url.path)
             profilePictureJPEG = jpeg
             actionError = nil
+            Task { await self.publishProfilePicture() }
         } catch {
             actionError = "The profile picture could not be saved."
         }
@@ -551,6 +559,38 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             try? FileManager.default.removeItem(at: url)
         }
         profilePictureJPEG = nil
+        Task { await self.deletePublishedProfilePicture() }
+    }
+
+    func pictureJPEG(for conversation: LinksMacOSConversation) -> Data? {
+        let userID = conversation.peerUserID ?? conversation.recipientUserID
+        if !userID.isEmpty, let picture = contactPictures[userID] {
+            return picture
+        }
+        let handle = conversation.title.trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
+            .lowercased()
+        guard let contact = contacts.first(where: { $0.handle == handle }) else { return nil }
+        return contactPictures[contact.userID]
+    }
+
+    func refreshContactPictures() async {
+        guard !profileTornDown, let authClient, !isRefreshingContactPictures else { return }
+        isRefreshingContactPictures = true
+        defer { isRefreshingContactPictures = false }
+        var updated = contactPictures
+        for contact in contacts {
+            do {
+                if let jpeg = try await authClient.downloadProfilePicture(handle: contact.handle) {
+                    updated[contact.userID] = jpeg
+                    cacheContactPicture(jpeg, userID: contact.userID)
+                } else if updated.removeValue(forKey: contact.userID) != nil {
+                    removeCachedContactPicture(userID: contact.userID)
+                }
+            } catch {
+                continue
+            }
+        }
+        contactPictures = updated
     }
 
     private var profilePictureURL: URL? {
@@ -568,6 +608,64 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         profilePictureJPEG = data
+    }
+
+    private func publishProfilePicture() async {
+        guard !profileTornDown, let authClient, let jpeg = profilePictureJPEG,
+              let token = try? client?.accessToken() else { return }
+        try? await authClient.uploadProfilePicture(accessToken: token, jpeg: jpeg)
+    }
+
+    private func deletePublishedProfilePicture() async {
+        guard !profileTornDown, let authClient,
+              let token = try? client?.accessToken() else { return }
+        try? await authClient.deleteProfilePicture(accessToken: token)
+    }
+
+    private func startContactPictureRefresh() {
+        contactPictureRefreshTask?.cancel()
+        contactPictureRefreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                await self?.publishProfilePicture()
+                await self?.refreshContactPictures()
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+        }
+    }
+
+    private var contactPictureDirectory: URL? {
+        guard profileRootPath.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: profileRootPath, isDirectory: true)
+            .appendingPathComponent("contact-pictures", isDirectory: true)
+    }
+
+    private func loadCachedContactPictures() {
+        guard let directory = contactPictureDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil) else { return }
+        var loaded: [String: Data] = [:]
+        for file in files where file.pathExtension == "jpg" {
+            let userID = file.deletingPathExtension().lastPathComponent
+            guard IOSClient.isCanonicalUUID(userID),
+                  let data = try? Data(contentsOf: file),
+                  data.starts(with: Data([0xFF, 0xD8, 0xFF])) else { continue }
+            loaded[userID] = data
+        }
+        contactPictures = loaded
+    }
+
+    private func cacheContactPicture(_ jpeg: Data, userID: String) {
+        guard let directory = contactPictureDirectory else { return }
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("\(userID).jpg")
+        try? jpeg.write(to: url, options: .atomic)
+    }
+
+    private func removeCachedContactPicture(userID: String) {
+        guard let directory = contactPictureDirectory else { return }
+        try? FileManager.default.removeItem(
+            at: directory.appendingPathComponent("\(userID).jpg"))
     }
 
     private static let profilePictureFilename = "profile-picture.jpg"

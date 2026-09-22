@@ -93,6 +93,16 @@ pub fn router_with_trusted_proxies(
         .route("/v1/directory/users/{user_id}", get(directory_lookup_by_user_id))
         .route("/v1/directory/{handle}", get(directory_lookup))
         .layer(DefaultBodyLimit::max(4096));
+    let profile_picture_routes = Router::new()
+        .route(
+            "/v1/profile/picture",
+            put(put_profile_picture).delete(delete_profile_picture),
+        )
+        .route(
+            "/v1/directory/{handle}/picture",
+            get(directory_profile_picture),
+        )
+        .layer(DefaultBodyLimit::max(131_072));
     let admin_routes = Router::new()
         .route("/v1/admin/users", get(admin_users))
         .route("/v1/admin/users/{user_id}", delete(admin_delete_user))
@@ -132,6 +142,7 @@ pub fn router_with_trusted_proxies(
         .merge(prekey_routes)
         .merge(mls_routes)
         .merge(directory_routes)
+        .merge(profile_picture_routes)
         .merge(admin_routes)
         .merge(contact_psi_routes)
         .merge(privacy_pass_routes)
@@ -259,6 +270,36 @@ async fn directory_lookup_by_user_id(
         .await?
     {
         Some(directory) => Ok(Json(directory).into_response()),
+        None => Ok(StatusCode::NOT_FOUND.into_response()),
+    }
+}
+
+async fn put_profile_picture(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.put_profile_picture(bearer(&headers)?, body.to_vec())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_profile_picture(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.delete_profile_picture(bearer(&headers)?).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn directory_profile_picture(
+    State(auth): State<Arc<AccountAuth>>,
+    Extension(ClientIp(peer_ip)): Extension<ClientIp>,
+    Path(handle): Path<String>,
+) -> Result<Response, AuthError> {
+    let handle = handle.strip_prefix('@').unwrap_or(&handle);
+    match auth.lookup_profile_picture(handle, peer_ip).await? {
+        Some(jpeg) => Ok(([(header::CONTENT_TYPE, "image/jpeg")], jpeg).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
 }

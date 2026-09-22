@@ -141,6 +141,7 @@ button, input, textarea { font: inherit; }
 .sidebar-empty { margin: 10px; color: var(--links-muted); font-size: .75rem; }
 .profile-card { min-height: 68px; padding: 11px 13px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; border-top: 1px solid var(--links-border); }
 .profile-picture { display: block; border-radius: 50%; object-fit: cover; }
+.profile-picture.is-small { width: 32px; height: 32px; }
 .profile-picture.is-medium { width: 40px; height: 40px; }
 .profile-picture.is-large { width: 72px; height: 72px; }
 .profile-picture-editor { display: flex; align-items: center; gap: 14px; }

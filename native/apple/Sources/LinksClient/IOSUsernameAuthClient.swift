@@ -244,6 +244,60 @@ public final class IOSUsernameAuthClient: Sendable {
         }
     }
 
+    public func uploadProfilePicture(accessToken: String, jpeg: Data) async throws {
+        guard !accessToken.isEmpty, accessToken.count <= 4096,
+              jpeg.count >= 3, jpeg.count <= 131_072,
+              jpeg.starts(with: Data([0xFF, 0xD8, 0xFF])) else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/profile/picture"))
+        request.httpMethod = "PUT"
+        request.httpShouldHandleCookies = false
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = jpeg
+        let (_, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 204 else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+    }
+
+    public func deleteProfilePicture(accessToken: String) async throws {
+        guard !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/profile/picture"))
+        request.httpMethod = "DELETE"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 204 else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+    }
+
+    /// Returns the published JPEG, or nil when this username has no picture.
+    public func downloadProfilePicture(handle: String) async throws -> Data? {
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().replacingOccurrences(of: "^@", with: "", options: .regularExpression)
+        try Self.validateHandle(cleanHandle)
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/directory/\(cleanHandle)/picture"))
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+        let (data, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+        if http.statusCode == 404 { return nil }
+        guard http.statusCode == 200,
+              data.count >= 3, data.count <= 131_072,
+              data.starts(with: Data([0xFF, 0xD8, 0xFF])) else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return data
+    }
+
     public func lookup(handle: String) async throws -> IOSUsernameDirectory {
         let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased().replacingOccurrences(of: "^@", with: "", options: .regularExpression)

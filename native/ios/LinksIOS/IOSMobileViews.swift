@@ -368,7 +368,9 @@ private struct IOSChatsView: View {
                         LazyVStack(spacing: 10) {
                             ForEach(model.conversations) { conversation in
                                 NavigationLink(value: conversation.id) {
-                                    IOSConversationRow(conversation: conversation)
+                                    IOSConversationRow(
+                                        conversation: conversation,
+                                        imageJPEG: model.contactPictures[conversation.recipientUserID])
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
@@ -472,10 +474,11 @@ private struct IOSEmptyConversations: View {
 
 private struct IOSConversationRow: View {
     let conversation: IOSMobileConversation
+    var imageJPEG: Data? = nil
 
     var body: some View {
         HStack(spacing: 13) {
-            IOSAvatar(name: conversation.handle, size: 52)
+            IOSAvatar(name: conversation.handle, size: 52, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 5) {
                 Text("@\(conversation.handle)")
                     .font(.headline)
@@ -656,7 +659,10 @@ private struct IOSPeopleView: View {
                                 }
                             } label: {
                                 HStack(spacing: 13) {
-                                    IOSAvatar(name: contact.handle, size: 46)
+                                    IOSAvatar(
+                                        name: contact.handle,
+                                        size: 46,
+                                        imageJPEG: model.contactPictures[contact.userID])
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("@\(contact.handle)")
                                             .font(.headline)
