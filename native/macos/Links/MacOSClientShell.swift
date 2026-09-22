@@ -698,12 +698,25 @@ private struct LinksSidebar: View {
                             .padding(.vertical, 5)
                     } else {
                         ForEach(model.contacts) { contact in
-                            Button {
-                                model.startConversation(with: contact)
-                            } label: {
-                                ContactRow(contact: contact)
+                            HStack(spacing: 8) {
+                                Button {
+                                    model.startConversation(with: contact)
+                                } label: {
+                                    ContactRow(contact: contact)
+                                }
+                                .buttonStyle(.plain)
+                                Spacer(minLength: 0)
+                                Button {
+                                    contactToRemove = contact
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove @\(contact.handle)")
+                                .accessibilityLabel("Remove @\(contact.handle)")
                             }
-                            .buttonStyle(.plain)
                             .contextMenu {
                                 Button("Remove Contact", role: .destructive) {
                                     contactToRemove = contact
