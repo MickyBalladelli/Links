@@ -536,7 +536,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
               preKeyAPI != nil else {
             return
         }
-        initializeSelectedConversation(reset: false)
+        initializeSelectedConversation(reset: false, userInitiated: false)
     }
 
     func clearLastError() {
@@ -1511,17 +1511,19 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// conversation in the shared client core.
     func initializeSelectedConversation() {
         forgetUnavailableRecipientForSelectedConversation()
-        initializeSelectedConversation(reset: false)
+        initializeSelectedConversation(reset: false, userInitiated: true)
     }
 
     /// Recreate a broken direct MLS group and release the recipient's stuck
     /// mailbox batch after the fresh bootstrap arrives.
     func resetSelectedConversation() {
         forgetUnavailableRecipientForSelectedConversation()
-        initializeSelectedConversation(reset: true)
+        initializeSelectedConversation(reset: true, userInitiated: true)
     }
 
-    private func initializeSelectedConversation(reset: Bool) {
+    /// Automatic setup (opening a chat, sending before it is ready) reports
+    /// failures inline; only the explicit buttons raise an alert.
+    private func initializeSelectedConversation(reset: Bool, userInitiated: Bool) {
         guard let selectedConversationID,
               let conversation = conversations.first(where: {
                   $0.id == selectedConversationID
@@ -1590,7 +1592,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     error,
                     conversationID: conversationID,
                     recipientUserID: recipientUserID,
-                    reset: reset)
+                    reset: reset,
+                    userInitiated: userInitiated)
             }
         }
     }
@@ -1628,7 +1631,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         _ error: Error,
         conversationID: String,
         recipientUserID: String,
-        reset: Bool
+        reset: Bool,
+        userInitiated: Bool
     ) {
         guard conversationSetupStillCurrent(conversationID) else { return }
         if sendAfterSetupConversationID == conversationID {
@@ -1650,11 +1654,17 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
            case .notConnected = messagingError {
             conversationSetupStatus = "Connect before initializing MLS"
             actionError = "Connection dropped. Click Connect and try again."
-        } else {
+        } else if userInitiated {
             conversationSetupStatus = reset
                 ? "Secure chat repair failed"
                 : "MLS conversation setup failed"
             actionError = Self.recipientPreKeyFailureMessage
+        } else {
+            conversationSetupStatus =
+                "Secure chat is not ready yet. Ask the other person to open Links, then open this chat again."
+            if lastError == Self.recipientPreKeyFailureMessage {
+                clearLastError()
+            }
         }
         publishProfileStatus()
     }
@@ -1691,7 +1701,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             sendAfterSetupConversationID = conversation.id
             conversationSetupStatus = "Starting secure chat. Your message will send when it is ready."
             if !initializingConversationIDs.contains(conversation.id) {
-                initializeSelectedConversation()
+                forgetUnavailableRecipientForSelectedConversation()
+                initializeSelectedConversation(reset: false, userInitiated: false)
             }
             return
         }

@@ -668,8 +668,12 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
     /// Publish one last-resort KeyPackage per core state. Generating a new one
     /// on every connection grew the persisted MLS storage without bound.
     fn key_package(&mut self) -> Result<Vec<u8>, CoreError> {
+        // Republish when the saved package would be rejected by peers, so a
+        // bad package from an older build cannot block new conversations.
         if let Some(package) = &self.published_key_package {
-            return Ok(package.clone());
+            if self.client.mls().accepts_key_package(package) {
+                return Ok(package.clone());
+            }
         }
         let package = self.client.mls_mut().generate_key_package()?;
         self.published_key_package = Some(package.clone());

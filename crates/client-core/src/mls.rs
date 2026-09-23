@@ -361,6 +361,11 @@ where
             .map_err(|_| CoreError::Provider)
     }
 
+    /// Whether a peer would accept this KeyPackage when building a group.
+    pub fn accepts_key_package(&self, bytes: &[u8]) -> bool {
+        self.validate_key_package(bytes).is_ok()
+    }
+
     /// Return whether a conversation is ready for one-to-one application
     /// messages. Each physical device is a leaf, so this does not require two
     /// leaves when either user has multiple devices.
@@ -1326,6 +1331,8 @@ mod key_package_tests {
         let mut alice = engine();
         let mut bob = engine();
         let package = bob.generate_key_package().unwrap();
+        assert!(bob.accepts_key_package(&package));
+        assert!(alice.accepts_key_package(&package));
 
         let first = random_id().to_string();
         let welcome = start_direct(&mut alice, &first, &package);
