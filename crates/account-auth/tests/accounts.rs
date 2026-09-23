@@ -3,9 +3,9 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use links_account_auth::{
     provider::{Channel, OtpProvider},
     service::{
-        encode, AccountAuth, Challenge, Clock, FinishRequest, StartRequest,
-        UsernameAuthPurpose, UsernameChallengeRequest, UsernameLoginRequest,
-        UsernameRegistrationRequest, CHALLENGE_TTL_MS,
+        encode, AccountAuth, Challenge, Clock, FinishRequest, StartRequest, UsernameAuthPurpose,
+        UsernameChallengeRequest, UsernameLoginRequest, UsernameRegistrationRequest,
+        CHALLENGE_TTL_MS,
     },
     AuthError,
 };
@@ -475,18 +475,20 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         .unwrap()
         .try_into()
         .unwrap();
-    let registration_signature = encode(&seed.sign(
-        &links_identity::username_registration_transcript(
-            registration.challenge_id,
-            &registration.handle,
-            device_id,
-            mls_node_id,
-            &public_key,
-            &registration_challenge,
-            registration.expires_at_ms,
-        )
-        .unwrap(),
-    ));
+    let registration_signature = encode(
+        &seed.sign(
+            &links_identity::username_registration_transcript(
+                registration.challenge_id,
+                &registration.handle,
+                device_id,
+                mls_node_id,
+                &public_key,
+                &registration_challenge,
+                registration.expires_at_ms,
+            )
+            .unwrap(),
+        ),
+    );
     let first = f
         .auth
         .register_username(
@@ -587,18 +589,20 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         .unwrap()
         .try_into()
         .unwrap();
-    let login_signature = encode(&seed.sign(
-        &links_identity::username_login_transcript(
-            login.challenge_id,
-            &login.handle,
-            device_id,
-            mls_node_id,
-            &public_key,
-            &login_challenge,
-            login.expires_at_ms,
-        )
-        .unwrap(),
-    ));
+    let login_signature = encode(
+        &seed.sign(
+            &links_identity::username_login_transcript(
+                login.challenge_id,
+                &login.handle,
+                device_id,
+                mls_node_id,
+                &public_key,
+                &login_challenge,
+                login.expires_at_ms,
+            )
+            .unwrap(),
+        ),
+    );
     assert!(f
         .auth
         .register_username(
@@ -665,7 +669,7 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
             .unwrap(),
         ),
     );
-    f.clock.advance(CHALLENGE_TTL_MS);
+    f.clock.0.fetch_add(CHALLENGE_TTL_MS, Ordering::SeqCst);
     assert!(f
         .auth
         .login_username(
@@ -738,8 +742,16 @@ async fn username_challenges_are_one_time_and_logout_revokes_session() {
         .revoke_other_sessions(&second.session.access_token)
         .await
         .unwrap();
-    assert!(f.auth.authenticate(&first.session.access_token).await.is_err());
-    assert!(f.auth.authenticate(&second.session.access_token).await.is_ok());
+    assert!(f
+        .auth
+        .authenticate(&first.session.access_token)
+        .await
+        .is_err());
+    assert!(f
+        .auth
+        .authenticate(&second.session.access_token)
+        .await
+        .is_ok());
     f.auth.logout(&second.session.access_token).await.unwrap();
     f.auth.logout(&second.session.access_token).await.unwrap();
     assert!(f
@@ -765,13 +777,20 @@ async fn http_flow_has_no_store_and_rejects_malformed_payloads() {
     let app = links_account_auth::web::router(f.auth.clone());
     let start = client.start();
     let json = serde_json::json!({"phone":start.phone,"channel":"sms","device_id":start.device_id,"mls_node_id":start.mls_node_id,"public_key":start.public_key,"signature":start.signature});
-    let mut request = Request::post("/v1/auth/start")
-        .header("content-type", "application/json")
-        .body(Body::from(json.to_string()))
-        .unwrap();
-    request.extensions_mut().insert(ConnectInfo(
-        "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
-    ));
+    // The router resolves the client IP for every request, as the real
+    // server does through `into_make_service_with_connect_info`.
+    let with_peer = |mut request: Request<Body>| {
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+        request
+    };
+    let request = with_peer(
+        Request::post("/v1/auth/start")
+            .header("content-type", "application/json")
+            .body(Body::from(json.to_string()))
+            .unwrap(),
+    );
     let response = app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["cache-control"], "no-store");
@@ -781,12 +800,12 @@ async fn http_flow_has_no_store_and_rejects_malformed_payloads() {
     let json = serde_json::json!({"challenge_id":finish.challenge_id,"code":finish.code,"signature":finish.signature});
     let response = app
         .clone()
-        .oneshot(
+        .oneshot(with_peer(
             Request::post("/v1/auth/finish")
                 .header("content-type", "application/json")
                 .body(Body::from(json.to_string()))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -794,23 +813,23 @@ async fn http_flow_has_no_store_and_rejects_malformed_payloads() {
     let session: links_account_auth::service::Session = serde_json::from_slice(&bytes).unwrap();
     let response = app
         .clone()
-        .oneshot(
+        .oneshot(with_peer(
             Request::get("/v1/auth/me")
                 .header("authorization", format!("Bearer {}", session.access_token))
                 .body(Body::empty())
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let response = app
         .clone()
-        .oneshot(
+        .oneshot(with_peer(
             Request::post("/v1/auth/finish")
                 .header("content-type", "application/json")
                 .body(Body::from("{\"code\":\"private\"}"))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
