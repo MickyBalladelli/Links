@@ -335,9 +335,19 @@ where
     /// several welcomes can target the same package. Last resort keeps its
     /// private material after the first join.
     pub fn generate_key_package(&self) -> Result<Vec<u8>, CoreError> {
+        // LastResort is not a default extension, so the leaf must advertise it
+        // or every sender rejects the KeyPackage as unsupported.
+        let ciphersuites = self.provider.crypto().supported_ciphersuites();
+        let capabilities = Capabilities::new(
+            None,
+            Some(&ciphersuites),
+            Some(&[ExtensionType::LastResort]),
+            None,
+            None,
+        );
         let bundle = KeyPackage::builder()
             .mark_as_last_resort()
-            .leaf_node_capabilities(Capabilities::for_provider(self.provider.crypto()))
+            .leaf_node_capabilities(capabilities)
             .build(
                 MLS_CIPHERSUITE,
                 &self.provider,
@@ -1246,4 +1256,102 @@ fn conversation_id(group_id: &GroupId) -> Result<String, CoreError> {
     let value = uuid.hyphenated().to_string();
     protocol::validate_id(&value)?;
     Ok(value)
+}
+
+#[cfg(test)]
+mod key_package_tests {
+    use super::*;
+    use openmls_rust_crypto::MemoryStorage;
+
+    struct Seed(links_identity::IdentitySeed);
+
+    impl crate::prekeys::PreKeySigner for Seed {
+        fn public_key(&self) -> Result<[u8; 32], CoreError> {
+            Ok(self.0.public_key())
+        }
+        fn sign(&self, transcript: &[u8]) -> Result<[u8; 64], CoreError> {
+            Ok(self.0.sign(transcript))
+        }
+    }
+
+    fn random_id() -> Uuid {
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes).unwrap();
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        Uuid::from_bytes(bytes)
+    }
+
+    fn accept(_: &DeviceBinding) -> Result<(), CoreError> {
+        Ok(())
+    }
+
+    type Engine = OpenMlsEngine<
+        RustCryptoProvider<MemoryStorage>,
+        Seed,
+        fn(&DeviceBinding) -> Result<(), CoreError>,
+    >;
+
+    fn engine() -> Engine {
+        let seed = links_identity::IdentitySeed::generate().unwrap();
+        let binding = DeviceBinding {
+            user_id: random_id(),
+            device_id: random_id(),
+            mls_node_id: random_id(),
+            public_key: seed.public_key(),
+        };
+        let credential = binding.mls_credential().unwrap();
+        OpenMlsEngine::new(
+            RustCryptoProvider::new(MemoryStorage::default()),
+            Seed(seed),
+            &credential,
+            accept as fn(&DeviceBinding) -> Result<(), CoreError>,
+        )
+        .unwrap()
+    }
+
+    fn start_direct(sender: &mut Engine, conversation: &str, package: &[u8]) -> Vec<u8> {
+        let pending = sender
+            .ensure_direct_group(conversation, &[package])
+            .unwrap()
+            .expect("new group needs a welcome");
+        sender.merge_pending_direct_commit(conversation).unwrap();
+        pending.welcome.unwrap()
+    }
+
+    /// Senders cache the directory KeyPackage, so the same package must be
+    /// accepted and joinable for more than one welcome.
+    #[test]
+    fn published_key_package_is_accepted_and_reusable() {
+        let mut alice = engine();
+        let mut bob = engine();
+        let package = bob.generate_key_package().unwrap();
+
+        let first = random_id().to_string();
+        let welcome = start_direct(&mut alice, &first, &package);
+        bob.join_direct_group(&first, &welcome).unwrap();
+        assert!(bob.direct_group_ready(&first).unwrap());
+
+        let second = random_id().to_string();
+        let welcome = start_direct(&mut alice, &second, &package);
+        bob.join_direct_group(&second, &welcome).unwrap();
+        assert!(bob.direct_group_ready(&second).unwrap());
+    }
+
+    /// A replayed or stale reset welcome must not delete a working group.
+    #[test]
+    fn failed_reset_welcome_keeps_existing_group() {
+        let mut alice = engine();
+        let mut bob = engine();
+        let package = bob.generate_key_package().unwrap();
+        let conversation = random_id().to_string();
+        let welcome = start_direct(&mut alice, &conversation, &package);
+        bob.join_direct_group(&conversation, &welcome).unwrap();
+
+        let unrelated = engine().generate_key_package().unwrap();
+        let mut carol = engine();
+        let foreign = start_direct(&mut carol, &conversation, &unrelated);
+        assert!(bob.reset_direct_group_from_welcome(&conversation, &foreign).is_err());
+        assert!(bob.direct_group_ready(&conversation).unwrap());
+    }
 }

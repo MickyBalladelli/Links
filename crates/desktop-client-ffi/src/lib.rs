@@ -115,7 +115,9 @@ struct PersistedState {
     bootstrap_outbox: Vec<Vec<u8>>,
     #[prost(bool, tag = "8")]
     discard_next_batch: bool,
-    #[prost(bytes, optional, tag = "10")]
+    // Tag 10 held KeyPackages without the LastResort capability, which
+    // senders reject. Those are ignored so a valid one is published.
+    #[prost(bytes, optional, tag = "11")]
     published_key_package: Option<Vec<u8>>,
     #[prost(message, repeated, tag = "9")]
     recipients: Vec<PersistedRecipient>,
