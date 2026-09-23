@@ -44,10 +44,16 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
     var messages: [IOSMobileMessage]
     var isSecureReady: Bool
     var unreadCount: Int
+    /// MLS conversation the peer last wrote in. Both sides may have created
+    /// their own direct chat; replying in the peer's one uses a group both
+    /// devices are members of.
+    var deliveryConversationID: String?
+
+    var mlsConversationID: String { deliveryConversationID ?? id }
 
     init(id: String, handle: String, recipientUserID: String, deviceCount: Int,
          createdAt: Date, messages: [IOSMobileMessage] = [], isSecureReady: Bool = false,
-         unreadCount: Int = 0) {
+         unreadCount: Int = 0, deliveryConversationID: String? = nil) {
         self.id = id
         self.handle = handle
         self.recipientUserID = recipientUserID
@@ -56,11 +62,12 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
         self.messages = messages
         self.isSecureReady = isSecureReady
         self.unreadCount = unreadCount
+        self.deliveryConversationID = deliveryConversationID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, handle, recipientUserID, deviceCount, createdAt, messages, isSecureReady,
-             unreadCount
+             unreadCount, deliveryConversationID
     }
 
     init(from decoder: Decoder) throws {
@@ -73,6 +80,8 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
         messages = try values.decodeIfPresent([IOSMobileMessage].self, forKey: .messages) ?? []
         isSecureReady = try values.decodeIfPresent(Bool.self, forKey: .isSecureReady) ?? false
         unreadCount = try values.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
+        deliveryConversationID = try values.decodeIfPresent(
+            String.self, forKey: .deliveryConversationID)
     }
 }
 
@@ -646,7 +655,8 @@ final class IOSMobileAppModel: ObservableObject {
                     createdAt: existing.createdAt,
                     messages: existing.messages,
                     isSecureReady: existing.isSecureReady,
-                    unreadCount: existing.unreadCount)
+                    unreadCount: existing.unreadCount,
+                    deliveryConversationID: existing.deliveryConversationID)
                 conversations.insert(updated, at: 0)
                 conversationCreationStatus = "Opened @\(directory.handle)."
                 persistLocalState()
@@ -707,7 +717,7 @@ final class IOSMobileAppModel: ObservableObject {
         let conversation = conversations[index]
         do {
             try await messaging.initializeFirstDirectConversation(
-                conversationID: conversation.id,
+                conversationID: conversation.mlsConversationID,
                 recipientUserID: conversation.recipientUserID,
                 directory: directChatDirectory,
                 preKeyAPI: preKeyAPI)
@@ -740,7 +750,7 @@ final class IOSMobileAppModel: ObservableObject {
         }
         do {
             try messaging.sendText(
-                conversationID: conversationID,
+                conversationID: conversations[index].mlsConversationID,
                 recipientUserID: conversations[index].recipientUserID,
                 text: cleanText)
             conversations[index].messages.append(IOSMobileMessage(
@@ -1190,6 +1200,9 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                 }
                 self.conversations[index].messages.append(received)
                 self.conversations[index].isSecureReady = true
+                if self.conversations[index].mlsConversationID != message.conversationID {
+                    self.conversations[index].deliveryConversationID = message.conversationID
+                }
                 conversationID = self.conversations[index].id
                 if self.activeConversationID != conversationID {
                     self.conversations[index].unreadCount += 1

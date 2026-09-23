@@ -20,8 +20,13 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     var peerUserID: String?
     var messages: [LinksMacOSMessage]
     var unreadCount: Int
+    /// MLS conversation the peer last wrote in. Both sides may have created
+    /// their own direct chat; replying in the peer's one uses a group both
+    /// devices are members of.
+    var deliveryConversationID: String?
 
     var isIncoming: Bool { recipientUserID.isEmpty }
+    var mlsConversationID: String { deliveryConversationID ?? id }
 
     init(id: String, title: String, recipientUserID: String,
          peerUserID: String? = nil, messages: [LinksMacOSMessage], unreadCount: Int = 0) {
@@ -34,7 +39,8 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, recipientUserID, peerUserID, messages, unreadCount
+        case id, title, recipientUserID, peerUserID, messages, unreadCount,
+             deliveryConversationID
     }
 
     init(from decoder: Decoder) throws {
@@ -45,6 +51,8 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
         peerUserID = try values.decodeIfPresent(String.self, forKey: .peerUserID)
         messages = try values.decodeIfPresent([LinksMacOSMessage].self, forKey: .messages) ?? []
         unreadCount = try values.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
+        deliveryConversationID = try values.decodeIfPresent(
+            String.self, forKey: .deliveryConversationID)
     }
 }
 
@@ -1560,6 +1568,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         let conversationID = conversation.id
+        let mlsConversationID = conversation.mlsConversationID
         let recipientUserID = conversation.recipientUserID
         initializedConversationIDs.remove(conversationID)
         discardedConnectionIDs.remove(conversationID)
@@ -1575,13 +1584,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             do {
                 if reset {
                     try await messaging.resetFirstDirectConversation(
-                        conversationID: conversationID,
+                        conversationID: mlsConversationID,
                         recipientUserID: recipientUserID,
                         directory: directChatDirectory,
                         preKeyAPI: preKeyAPI)
                 } else {
                     try await messaging.initializeFirstDirectConversation(
-                        conversationID: conversationID,
+                        conversationID: mlsConversationID,
                         recipientUserID: recipientUserID,
                         directory: directChatDirectory,
                         preKeyAPI: preKeyAPI)
@@ -1712,7 +1721,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         do {
             try messaging.sendText(
-                conversationID: conversation.id,
+                conversationID: conversation.mlsConversationID,
                 recipientUserID: conversation.recipientUserID,
                 text: text)
             pendingOutboxCount = messaging.pendingOutboxCount
@@ -1818,6 +1827,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         if let index {
             conversations[index].recipientUserID = message.senderUserID
             conversations[index].peerUserID = message.senderUserID
+            if conversations[index].mlsConversationID != message.conversationID {
+                conversations[index].deliveryConversationID = message.conversationID
+            }
             if let knownContact {
                 conversations[index].title = "@\(knownContact.handle)"
             }
