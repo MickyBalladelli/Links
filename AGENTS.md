@@ -1,0 +1,1 @@
+do not write any file outside of the project folder. Use Trash if you need temporary files, or need to build a target.
