@@ -331,8 +331,12 @@ where
 
     /// Generate one offline-initiation KeyPackage. The private init and leaf
     /// encryption keys are written by OpenMLS into the provider's storage.
+    /// The directory holds one KeyPackage per device and senders cache it, so
+    /// several welcomes can target the same package. Last resort keeps its
+    /// private material after the first join.
     pub fn generate_key_package(&self) -> Result<Vec<u8>, CoreError> {
         let bundle = KeyPackage::builder()
+            .mark_as_last_resort()
             .leaf_node_capabilities(Capabilities::for_provider(self.provider.crypto()))
             .build(
                 MLS_CIPHERSUITE,
@@ -617,6 +621,18 @@ where
         bytes: &[u8],
         max_users: usize,
     ) -> Result<(), CoreError> {
+        self.stage_welcome(expected_group_id, bytes, max_users)?
+            .into_group(&self.provider)
+            .map(|_| ())
+            .map_err(|_| CoreError::Provider)
+    }
+
+    fn stage_welcome(
+        &self,
+        expected_group_id: GroupId,
+        bytes: &[u8],
+        max_users: usize,
+    ) -> Result<StagedWelcome, CoreError> {
         let input =
             MlsMessageIn::tls_deserialize_exact(bytes).map_err(|_| CoreError::Authentication)?;
         let welcome = match input.extract() {
@@ -652,10 +668,7 @@ where
         {
             return Err(CoreError::Authentication);
         }
-        staged
-            .into_group(&self.provider)
-            .map(|_| ())
-            .map_err(|_| CoreError::Provider)
+        Ok(staged)
     }
 
     fn process_commit_for_group(
@@ -883,6 +896,9 @@ where
         welcome: &[u8],
     ) -> Result<(), CoreError> {
         let group_id = group_id(conversation_id)?;
+        // Validate the welcome before dropping the current group, so a stale
+        // or replayed welcome cannot destroy a working conversation.
+        let staged = self.stage_welcome(group_id.clone(), welcome, DIRECT_MAX_USERS)?;
         if let Some(mut group) = MlsGroup::load(self.provider.storage(), &group_id)
             .map_err(|_| CoreError::Provider)?
         {
@@ -890,7 +906,10 @@ where
                 .delete(self.provider.storage())
                 .map_err(|_| CoreError::Provider)?;
         }
-        self.join_group_with_id(group_id, welcome, DIRECT_MAX_USERS)
+        staged
+            .into_group(&self.provider)
+            .map(|_| ())
+            .map_err(|_| CoreError::Provider)
     }
 
     fn reset_direct_group(

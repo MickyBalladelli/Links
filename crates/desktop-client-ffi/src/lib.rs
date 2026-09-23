@@ -33,6 +33,9 @@ pub const LINKS_DESKTOP_PROVIDER: i32 = 4;
 pub const LINKS_DESKTOP_STALE_CURSOR: i32 = 5;
 const ABI_VERSION: u32 = 1;
 const MAX_OUTPUT_BYTES: usize = protocol::MAX_FRAME_BYTES;
+/// Persisted core state holds MLS storage, recipients and both outboxes, so it
+/// is not bounded by one frame. Matches the host encrypted state store limit.
+const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 pub type SignCallback = unsafe extern "C" fn(
     *mut c_void,
@@ -112,6 +115,8 @@ struct PersistedState {
     bootstrap_outbox: Vec<Vec<u8>>,
     #[prost(bool, tag = "8")]
     discard_next_batch: bool,
+    #[prost(bytes, optional, tag = "10")]
+    published_key_package: Option<Vec<u8>>,
     #[prost(message, repeated, tag = "9")]
     recipients: Vec<PersistedRecipient>,
 }
@@ -360,9 +365,7 @@ pub struct LinksDesktopCore {
     recipients: HashMap<String, Vec<RecipientRecord>>,
     pending_batch: Option<v1::SyncBatch>,
     discard_next_batch: bool,
-    /// Peers we have decrypted a message from. Until then, each send rebuilds
-    /// the direct group so a missed Welcome cannot leave the mailbox stuck.
-    heard_from: HashSet<String>,
+    published_key_package: Option<Vec<u8>>,
 }
 
 unsafe fn input<'a>(pointer: *const u8, length: usize, maximum: usize) -> Result<&'a [u8], i32> {
@@ -447,7 +450,7 @@ fn load_state(callbacks: LinksDesktopCoreCallbacks) -> Result<Option<PersistedSt
     if length == 0 {
         return Ok(None);
     }
-    if length > MAX_OUTPUT_BYTES {
+    if length > MAX_STATE_BYTES {
         return Err(CoreError::Provider);
     }
     let mut bytes = vec![0u8; length];
@@ -475,6 +478,7 @@ impl LinksDesktopCore {
             outbox: self.outbox.clone(),
             bootstrap_outbox: self.bootstrap_outbox.clone(),
             discard_next_batch: self.discard_next_batch,
+            published_key_package: self.published_key_package.clone(),
             bindings: bindings.values().map(|binding| PersistedBinding {
                 user_id: binding.user_id.as_bytes().to_vec(),
                 device_id: binding.device_id.as_bytes().to_vec(),
@@ -594,6 +598,9 @@ impl LinksDesktopCore {
         }
         self.bootstrap_outbox = state.bootstrap_outbox;
         self.discard_next_batch = state.discard_next_batch;
+        self.published_key_package = state
+            .published_key_package
+            .filter(|package| !package.is_empty() && package.len() <= MAX_OUTPUT_BYTES);
         self.recover_group_bindings()?;
         Ok(())
     }
@@ -656,8 +663,14 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         Ok(bytes)
     }
 
+    /// Publish one last-resort KeyPackage per core state. Generating a new one
+    /// on every connection grew the persisted MLS storage without bound.
     fn key_package(&mut self) -> Result<Vec<u8>, CoreError> {
+        if let Some(package) = &self.published_key_package {
+            return Ok(package.clone());
+        }
         let package = self.client.mls_mut().generate_key_package()?;
+        self.published_key_package = Some(package.clone());
         self.save()?;
         Ok(package)
     }
@@ -775,8 +788,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         if recipient_user_id == self.client.user_id() || text.is_empty() || text.len() > protocol::MAX_MESSAGE_BYTES {
             return Err(CoreError::Authentication);
         }
-        let reset_group = !self.heard_from.contains(recipient_user_id);
-        self.initialize_direct_group(conversation_id, recipient_user_id, reset_group)?;
+        self.initialize_direct_group(conversation_id, recipient_user_id, false)?;
         let records = self.recipients.get(recipient_user_id).ok_or(CoreError::Authentication)?;
         if records.is_empty() || records.len() > protocol::MAX_FANOUT_DEVICES {
             return Err(CoreError::Authentication);
@@ -858,49 +870,8 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                 _ => Err(CoreError::Provider),
             },
             v1::server_frame::Body::MlsBootstrap(bootstrap) => {
-                protocol::validate_id(&bootstrap.conversation_id)?;
-                if bootstrap.recipient_device_id != self.client.device_id()
-                    || bootstrap.commit.is_empty()
-                    || bootstrap.welcome.is_empty()
-                    || bootstrap.sender_identity_public_key.len() != 32
-                {
-                    return Err(CoreError::Authentication);
-                }
-                let binding = parse_binding(&bootstrap.sender_mls_credential)?;
-                let sender_public_key: [u8; 32] = bootstrap.sender_identity_public_key
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| CoreError::Authentication)?;
-                let local_device = self
-                    .client
-                    .device_id()
-                    .parse::<Uuid>()
-                    .map_err(|_| CoreError::Authentication)?;
-                if binding.device_id == local_device || binding.public_key != sender_public_key {
-                    return Err(CoreError::Authentication);
-                }
-                self.insert_binding(binding.clone())?;
-                // A parked mailbox means this device never joined the sender's
-                // group. Replacing any local group with the welcome is what
-                // makes those ciphertext envelopes decryptable.
-                if bootstrap.reset_group || self.pending_batch.is_some() {
-                    self.client
-                        .mls_mut()
-                        .reset_direct_group_from_welcome(
-                            &bootstrap.conversation_id,
-                            &bootstrap.welcome,
-                        )?;
-                } else {
-                    self.client
-                        .mls_mut()
-                        .join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
-                }
-                self.save()?;
-                if bootstrap.reset_group {
-                    self.discard_pending_batch()?;
-                }
-                self.retry_pending_batch()
-            }.map_err(local_frame_error),
+                self.handle_mls_bootstrap(bootstrap).map_err(local_frame_error)
+            }
             v1::server_frame::Body::Batch(batch) => self.handle_batch(batch).map_err(local_frame_error),
             v1::server_frame::Body::CompressedBatch(batch) => {
                 let batch = protocol::decompress_sync_batch(&batch)?;
@@ -910,27 +881,65 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         }
     }
 
+    fn handle_mls_bootstrap(&mut self, bootstrap: v1::MlsBootstrap) -> Result<(), CoreError> {
+        protocol::validate_id(&bootstrap.conversation_id)?;
+        if bootstrap.recipient_device_id != self.client.device_id()
+            || bootstrap.commit.is_empty()
+            || bootstrap.welcome.is_empty()
+            || bootstrap.sender_identity_public_key.len() != 32
+        {
+            return Err(CoreError::Authentication);
+        }
+        let binding = parse_binding(&bootstrap.sender_mls_credential)?;
+        let sender_public_key: [u8; 32] = bootstrap.sender_identity_public_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| CoreError::Authentication)?;
+        let local_device = self
+            .client
+            .device_id()
+            .parse::<Uuid>()
+            .map_err(|_| CoreError::Authentication)?;
+        if binding.device_id == local_device || binding.public_key != sender_public_key {
+            return Err(CoreError::Authentication);
+        }
+        self.insert_binding(binding.clone())?;
+        if bootstrap.reset_group {
+            self.client
+                .mls_mut()
+                .reset_direct_group_from_welcome(&bootstrap.conversation_id, &bootstrap.welcome)?;
+        } else {
+            self.client
+                .mls_mut()
+                .join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
+        }
+        self.save()?;
+        if bootstrap.reset_group {
+            self.discard_pending_batch()?;
+        }
+        self.retry_pending_batch()
+    }
+
     fn handle_batch(&mut self, batch: v1::SyncBatch) -> Result<(), CoreError> {
         protocol::validate_sync_batch(&batch)?;
         if batch.recipient_device_id != self.client.device_id() || batch.after_cursor != self.cursor {
             return Err(CoreError::InvalidSync);
         }
-        let storage_backup = self
-            .client
-            .mls()
-            .provider()
-            .storage()
-            .values
-            .read()
-            .map_err(|_| CoreError::Provider)?
-            .clone();
         let mut rendered = Vec::new();
         for item in &batch.items {
             let Some(entry) = item.entry.as_ref() else { return Err(CoreError::InvalidSync) };
             if let v1::queue_item::Entry::Envelope(envelope) = entry {
+                let storage_backup = self
+                    .client
+                    .mls()
+                    .provider()
+                    .storage()
+                    .values
+                    .read()
+                    .map_err(|_| CoreError::Provider)?
+                    .clone();
                 match self.client.open_envelope_authenticated(envelope, now_ms()) {
                     Ok(message) => {
-                        self.heard_from.insert(message.sender_user_id.clone());
                         let sender_user_id = message.sender_user_id;
                         let message = message.message;
                         if let Some(v1::message::Content::Text(text)) = message.content {
@@ -944,35 +953,13 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                             ));
                         }
                     }
+                    // The gateway delivers every stored welcome before the
+                    // mailbox, so an envelope that still cannot be opened
+                    // never will. Skipping it keeps later messages flowing.
                     Err(CoreError::Authentication) => {
-                        {
-                            let storage = self.client.mls_mut().provider_mut().storage();
-                            let mut values = storage.values.write().map_err(|_| CoreError::Provider)?;
-                            *values = storage_backup;
-                        }
-                        if self.discard_next_batch {
-                            self.discard_next_batch = batch.next_cursor < batch.high_watermark;
-                            self.cursor = batch.next_cursor;
-                            self.save()?;
-                            let ack = self.encode_client_frame(v1::client_frame::Body::Ack(
-                                v1::QueueAck {
-                                    through_cursor: self.cursor,
-                                },
-                            ))?;
-                            self.send_frame(&ack)?;
-                            if self.cursor < batch.high_watermark {
-                                let replay = self.encode_client_frame(
-                                    v1::client_frame::Body::Replay(v1::Replay {
-                                        after_cursor: self.cursor,
-                                        limit: protocol::MAX_BATCH_ITEMS as u32,
-                                    }),
-                                )?;
-                                self.send_frame(&replay)?;
-                            }
-                            return Ok(());
-                        }
-                        self.pending_batch = Some(batch);
-                        return Ok(())
+                        let storage = self.client.mls_mut().provider_mut().storage();
+                        let mut values = storage.values.write().map_err(|_| CoreError::Provider)?;
+                        *values = storage_backup;
                     }
                     Err(error) => return Err(error),
                 }
@@ -1137,7 +1124,7 @@ pub unsafe extern "C" fn links_desktop_core_create(
                 recipients: HashMap::new(),
                 pending_batch: None,
                 discard_next_batch: false,
-                heard_from: HashSet::new(),
+                published_key_package: None,
             };
             if let Some(state) = load_state(callbacks).map_err(status)? {
                 core.restore_state(state).map_err(status)?;
