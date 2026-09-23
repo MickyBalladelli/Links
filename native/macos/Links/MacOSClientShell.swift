@@ -608,18 +608,23 @@ private struct LinksMessagingView: View {
     @State private var showingNewConversation = false
     @State private var showingAddContact = false
     @State private var showingPairing = false
+    @State private var showingNewGroup = false
 
     var body: some View {
         NavigationSplitView {
             LinksSidebar(model: model,
                          showingNewConversation: $showingNewConversation,
                          showingAddContact: $showingAddContact,
-                         showingPairing: $showingPairing)
+                         showingPairing: $showingPairing,
+                         showingNewGroup: $showingNewGroup)
         } detail: {
             LinksConversationDetail(model: model)
         }
         .sheet(isPresented: $showingNewConversation) {
             NewConversationView(model: model)
+        }
+        .sheet(isPresented: $showingNewGroup) {
+            NewGroupView(model: model)
         }
         .sheet(isPresented: $showingAddContact) {
             AddContactView(model: model)
@@ -635,6 +640,7 @@ private struct LinksSidebar: View {
     @Binding var showingNewConversation: Bool
     @Binding var showingAddContact: Bool
     @Binding var showingPairing: Bool
+    @Binding var showingNewGroup: Bool
     @State private var contactToRemove: LinksMacOSContact?
 
     var body: some View {
@@ -663,6 +669,14 @@ private struct LinksSidebar: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Add contact")
+                Button {
+                    showingNewGroup = true
+                } label: {
+                    Image(systemName: "person.3")
+                }
+                .buttonStyle(.borderless)
+                .help("New group")
+                .accessibilityLabel("New group")
                 Button {
                     showingNewConversation = true
                 } label: {
@@ -962,7 +976,16 @@ private struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ProfileAvatar(title: conversation.title, size: 30, imageJPEG: imageJPEG)
+            if conversation.isGroup {
+                Image(systemName: "person.3.fill")
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.15))
+                    .clipShape(Circle())
+            } else {
+                ProfileAvatar(title: conversation.title, size: 30, imageJPEG: imageJPEG)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(conversation.title)
                     .font(.callout.weight(.medium))
@@ -1045,6 +1068,13 @@ private struct LinksConversationDetail: View {
     @ObservedObject var model: LinksMacOSAppModel
     @State private var repairConfirmationPresented = false
     @State private var removeConnectionConfirmationPresented = false
+    @State private var showingGroupMembers = false
+
+    private func groupSubtitle(_ conversation: LinksMacOSConversation) -> String {
+        guard conversation.groupActive else { return "Group · you are no longer a member" }
+        let count = model.groupMembers.count
+        return count == 0 ? "Encrypted group" : "Encrypted group · \(count) members"
+    }
 
     var body: some View {
         if let conversation = model.selectedConversation {
@@ -1057,13 +1087,25 @@ private struct LinksConversationDetail: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(conversation.title)
                             .font(.title2.weight(.semibold))
-                        Text("Private one-to-one conversation")
+                        Text(conversation.isGroup
+                             ? groupSubtitle(conversation)
+                             : "Private one-to-one conversation")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 7) {
                         HStack(spacing: 7) {
+                            if conversation.isGroup {
+                                Button {
+                                    showingGroupMembers = true
+                                } label: {
+                                    Label("Members", systemImage: "person.3")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("Group members")
+                            } else {
                             if model.canInitializeSelectedConversation {
                                 Button {
                                     model.initializeSelectedConversation()
@@ -1090,6 +1132,7 @@ private struct LinksConversationDetail: View {
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("Remove this local connection")
+                            }
                         }
                         StatusPill(title: model.connectionStatus,
                                    color: linksStatusColor(model.connectionStatus))
@@ -1115,11 +1158,15 @@ private struct LinksConversationDetail: View {
 
                 Divider()
                 MessageList(messages: conversation.messages,
-                            conversationID: conversation.id)
+                            conversationID: conversation.id,
+                            senderLabel: { model.senderLabel(for: $0) })
                 Divider()
                 ComposerView(model: model)
             }
             .background(Color.primary.opacity(0.015))
+            .sheet(isPresented: $showingGroupMembers) {
+                GroupMembersView(model: model)
+            }
             .alert("Repair secure chat?", isPresented: $repairConfirmationPresented) {
                 Button("Repair", role: .destructive) {
                     model.resetSelectedConversation()
@@ -1226,6 +1273,7 @@ private struct DeliveryStatusBanner: View {
 private struct MessageList: View {
     let messages: [LinksMacOSMessage]
     let conversationID: String
+    var senderLabel: (LinksMacOSMessage) -> String? = { _ in nil }
 
     private let messageListBottomID = "message-list-bottom"
 
@@ -1248,7 +1296,7 @@ private struct MessageList: View {
                         .padding(.top, 76)
                     } else {
                         ForEach(messages) { message in
-                            MessageBubble(message: message)
+                            MessageBubble(message: message, senderLabel: senderLabel(message))
                                 .id(message.id)
                         }
                     }
@@ -1281,11 +1329,17 @@ private struct MessageList: View {
 
 private struct MessageBubble: View {
     let message: LinksMacOSMessage
+    var senderLabel: String? = nil
 
     var body: some View {
         HStack(alignment: .bottom) {
             if message.isOutgoing { Spacer(minLength: 90) }
             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
+                if let senderLabel {
+                    Text(senderLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 Text(message.text)
                     .font(.body)
                     .textSelection(.enabled)
@@ -1456,5 +1510,218 @@ private struct PairingView: View {
         }
         .padding(24)
         .frame(width: 520)
+    }
+}
+
+private struct ContactPicker: View {
+    let contacts: [LinksMacOSContact]
+    @Binding var selection: Set<String>
+
+    var body: some View {
+        if contacts.isEmpty {
+            Text("Add contacts first, then invite them here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(contacts) { contact in
+                        Toggle(isOn: Binding(
+                            get: { selection.contains(contact.userID) },
+                            set: { isOn in
+                                if isOn { selection.insert(contact.userID) } else { selection.remove(contact.userID) }
+                            })) {
+                            Text("@\(contact.handle)")
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 180)
+        }
+    }
+}
+
+private struct NewGroupView: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var selection = Set<String>()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New group")
+                .font(.title2.weight(.semibold))
+            Text("Messages are end-to-end encrypted. The server stores who is in the group, never its name or messages.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Group name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Text("Invite")
+                .font(.headline)
+            ContactPicker(contacts: model.contacts, selection: $selection)
+            if !model.groupStatus.isEmpty {
+                Text(model.groupStatus)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            HStack {
+                if model.isUpdatingGroup {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Create") {
+                    Task {
+                        if await model.createGroup(name: name, memberUserIDs: Array(selection)) {
+                            dismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || selection.isEmpty || model.isUpdatingGroup)
+            }
+        }
+        .padding(24)
+        .frame(width: 430)
+    }
+}
+
+private struct GroupMembersView: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection = Set<String>()
+    @State private var name = ""
+    @State private var memberToRemove: LinksMacOSGroupMember?
+    @State private var leaveConfirmationPresented = false
+
+    private var invitableContacts: [LinksMacOSContact] {
+        let members = Set(model.groupMembers.map(\.userID))
+        return model.contacts.filter { !members.contains($0.userID) }
+    }
+
+    private func canRemove(_ member: LinksMacOSGroupMember) -> Bool {
+        guard model.canManageSelectedGroup, !member.isSelf, member.role != .owner else { return false }
+        return model.selectedGroupRole == .owner || member.role != .admin
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(model.selectedConversation?.title ?? "Group")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                if model.isUpdatingGroup { ProgressView().controlSize(.small) }
+            }
+            if model.canManageSelectedGroup {
+                HStack {
+                    TextField("Group name", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Rename") {
+                        Task { await model.renameSelectedGroup(name) }
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || name == model.selectedConversation?.title)
+                }
+            }
+            Text("Members")
+                .font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.groupMembers) { member in
+                        HStack {
+                            Text(member.isSelf ? "\(member.displayName) (you)" : member.displayName)
+                            if let role = member.role, role != .member {
+                                Text(role == .owner ? "Owner" : "Admin")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                            Spacer()
+                            if model.selectedGroupRole == .owner, !member.isSelf, member.role == .member {
+                                Button("Make admin") {
+                                    Task { await model.makeAdminInSelectedGroup(member.userID) }
+                                }
+                                .controlSize(.small)
+                            }
+                            if canRemove(member) {
+                                Button {
+                                    memberToRemove = member
+                                } label: {
+                                    Image(systemName: "person.badge.minus")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove \(member.displayName)")
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 200)
+            if model.canManageSelectedGroup {
+                Text("Add people")
+                    .font(.headline)
+                ContactPicker(contacts: invitableContacts, selection: $selection)
+                HStack {
+                    Spacer()
+                    Button("Add") {
+                        let chosen = Array(selection)
+                        selection.removeAll()
+                        Task { await model.addMembersToSelectedGroup(chosen) }
+                    }
+                    .disabled(selection.isEmpty || model.isUpdatingGroup)
+                }
+            }
+            if !model.groupStatus.isEmpty {
+                Text(model.groupStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                if model.selectedConversation?.groupActive == true {
+                    Button("Leave group", role: .destructive) {
+                        leaveConfirmationPresented = true
+                    }
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .onAppear {
+            name = model.selectedConversation?.title ?? ""
+            Task { await model.refreshSelectedGroupMembers() }
+        }
+        .alert("Remove \(memberToRemove?.displayName ?? "member")?",
+               isPresented: Binding(get: { memberToRemove != nil },
+                                    set: { if !$0 { memberToRemove = nil } })) {
+            Button("Remove", role: .destructive) {
+                if let member = memberToRemove {
+                    Task { await model.removeFromSelectedGroup(member.userID) }
+                }
+                memberToRemove = nil
+            }
+            Button("Cancel", role: .cancel) { memberToRemove = nil }
+        } message: {
+            Text("They stop receiving new messages. Messages they already have stay on their device.")
+        }
+        .alert("Leave this group?", isPresented: $leaveConfirmationPresented) {
+            Button("Leave", role: .destructive) {
+                Task {
+                    await model.leaveSelectedGroup()
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You stop receiving messages. The conversation history stays on this Mac.")
+        }
     }
 }

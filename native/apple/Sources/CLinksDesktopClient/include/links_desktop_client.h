@@ -28,6 +28,19 @@ typedef int32_t (*LinksDesktopTextCallback)(void *context, const uint8_t *conver
                                              size_t sender_length, const uint8_t *text,
                                              size_t text_length, uint64_t sequence_id,
                                              uint64_t sent_at_ms);
+/* kind: LINKS_DESKTOP_GROUP_*; payload is the UTF-8 name for RENAMED. */
+typedef int32_t (*LinksDesktopGroupCallback)(void *context, const uint8_t *conversation,
+                                              size_t conversation_length, uint32_t kind,
+                                              const uint8_t *sender_user,
+                                              size_t sender_user_length, const uint8_t *payload,
+                                              size_t payload_length);
+
+enum {
+    LINKS_DESKTOP_GROUP_JOINED = 1,
+    LINKS_DESKTOP_GROUP_RENAMED = 2,
+    LINKS_DESKTOP_GROUP_MEMBERS_CHANGED = 3,
+    LINKS_DESKTOP_GROUP_REMOVED = 4
+};
 
 typedef struct LinksDesktopCoreCallbacks {
     uint32_t abi_version;
@@ -41,6 +54,7 @@ typedef struct LinksDesktopCoreCallbacks {
     LinksDesktopSendFrameCallback send_frame;
     LinksDesktopTextCallback on_text;
     uint8_t identity_public_key[32];
+    LinksDesktopGroupCallback on_group;
 } LinksDesktopCoreCallbacks;
 
 enum {
@@ -96,5 +110,37 @@ int32_t links_desktop_core_send_text(LinksDesktopCore *core, const uint8_t *conv
                                      size_t conversation_id_length, const uint8_t *recipient_user_id,
                                      size_t recipient_user_id_length, const uint8_t *text,
                                      size_t text_length);
+
+int32_t links_desktop_core_create_group(LinksDesktopCore *core, const uint8_t *conversation_id,
+                                        size_t conversation_id_length);
+/* user_ids: newline-separated account IDs already registered as recipients. */
+int32_t links_desktop_core_add_group_members(LinksDesktopCore *core,
+                                             const uint8_t *conversation_id,
+                                             size_t conversation_id_length,
+                                             const uint8_t *user_ids, size_t user_ids_length);
+int32_t links_desktop_core_remove_group_member(LinksDesktopCore *core,
+                                               const uint8_t *conversation_id,
+                                               size_t conversation_id_length,
+                                               const uint8_t *user_id, size_t user_id_length);
+int32_t links_desktop_core_leave_group(LinksDesktopCore *core, const uint8_t *conversation_id,
+                                       size_t conversation_id_length);
+int32_t links_desktop_core_send_group_text(LinksDesktopCore *core,
+                                           const uint8_t *conversation_id,
+                                           size_t conversation_id_length, const uint8_t *text,
+                                           size_t text_length);
+int32_t links_desktop_core_set_group_name(LinksDesktopCore *core,
+                                          const uint8_t *conversation_id,
+                                          size_t conversation_id_length, const uint8_t *name,
+                                          size_t name_length);
+/* Newline-separated account IDs. */
+int32_t links_desktop_core_group_members(const LinksDesktopCore *core,
+                                         const uint8_t *conversation_id,
+                                         size_t conversation_id_length, uint8_t *output,
+                                         size_t capacity, size_t *length);
+int32_t links_desktop_core_group_missing_recipients(const LinksDesktopCore *core,
+                                                    const uint8_t *conversation_id,
+                                                    size_t conversation_id_length,
+                                                    uint8_t *output, size_t capacity,
+                                                    size_t *length);
 
 #endif

@@ -39,6 +39,31 @@ pub struct PendingCommit {
     pub epoch: u64,
 }
 
+/// What a raw MLS message in the ciphertext mailbox carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MlsHandshake {
+    Welcome,
+    Commit { conversation_id: String },
+    Proposal { conversation_id: String },
+    Application { conversation_id: String },
+}
+
+/// Classify raw MLS bytes delivered through the ciphertext mailbox.
+pub fn mls_handshake_kind(bytes: &[u8]) -> Result<MlsHandshake, CoreError> {
+    let input =
+        MlsMessageIn::tls_deserialize_exact(bytes).map_err(|_| CoreError::Authentication)?;
+    if matches!(input.extract(), MlsMessageBodyIn::Welcome(_)) {
+        return Ok(MlsHandshake::Welcome);
+    }
+    let message = parse_protocol_message(bytes)?;
+    let conversation_id = conversation_id(message.group_id())?;
+    Ok(match message.content_type() {
+        ContentType::Commit => MlsHandshake::Commit { conversation_id },
+        ContentType::Application => MlsHandshake::Application { conversation_id },
+        ContentType::Proposal => MlsHandshake::Proposal { conversation_id },
+    })
+}
+
 /// Core MLS operations used by the envelope layer.
 pub trait MlsEngine {
     fn create_group(&mut self, conversation_id: &str, credential: &[u8]) -> Result<(), CoreError>;
@@ -599,6 +624,76 @@ where
             .map_err(|_| CoreError::Provider)
     }
 
+    /// Join a many-to-many group from a mailbox Welcome and return its
+    /// conversation ID. Refuses to replace a group that already exists.
+    pub fn join_group_from_welcome(&mut self, welcome: &[u8]) -> Result<String, CoreError> {
+        let staged = self.stage_welcome(None, welcome, MAX_GROUP_USERS)?;
+        let group_id = staged.group_context().group_id().clone();
+        let conversation = conversation_id(&group_id)?;
+        if MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|_| CoreError::Provider)?
+            .is_some()
+        {
+            return Err(CoreError::Authentication);
+        }
+        staged
+            .into_group(&self.provider)
+            .map_err(|_| CoreError::Provider)?;
+        Ok(conversation)
+    }
+
+    /// Apply a group commit from another member. Returns whether this device
+    /// is still a member afterwards.
+    pub fn process_group_commit(
+        &mut self,
+        conversation_id: &str,
+        commit: &[u8],
+    ) -> Result<bool, CoreError> {
+        let group_id = group_id(conversation_id)?;
+        self.process_commit_for_group(group_id.clone(), commit, MAX_GROUP_USERS)?;
+        Ok(self.load_group(&group_id)?.is_active())
+    }
+
+    /// Current members as (leaf index, verified device binding).
+    pub fn group_member_leaves(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<(u32, DeviceBinding)>, CoreError> {
+        let group = self.load_group(&group_id(conversation_id)?)?;
+        group
+            .members()
+            .map(|member| {
+                verify_credential(&self.verifier, &member.credential, &member.signature_key)
+                    .map(|binding| (member.index.u32(), binding))
+            })
+            .collect()
+    }
+
+    /// Create a group that initially contains only this device.
+    pub fn create_group_for(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        let group_id = group_id(conversation_id)?;
+        if MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|_| CoreError::Provider)?
+            .is_some()
+        {
+            return Err(CoreError::Authentication);
+        }
+        self.create_group_with_id(group_id)
+    }
+
+    /// Forget local MLS state for a group this device left or was removed from.
+    pub fn delete_group(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        let group_id = group_id(conversation_id)?;
+        if let Some(mut group) =
+            MlsGroup::load(self.provider.storage(), &group_id).map_err(|_| CoreError::Provider)?
+        {
+            group
+                .delete(self.provider.storage())
+                .map_err(|_| CoreError::Provider)?;
+        }
+        Ok(())
+    }
+
     fn load_group(&self, group_id: &GroupId) -> Result<MlsGroup, CoreError> {
         MlsGroup::load(self.provider.storage(), group_id)
             .map_err(|_| CoreError::Provider)?
@@ -636,7 +731,7 @@ where
         bytes: &[u8],
         max_users: usize,
     ) -> Result<(), CoreError> {
-        self.stage_welcome(expected_group_id, bytes, max_users)?
+        self.stage_welcome(Some(expected_group_id), bytes, max_users)?
             .into_group(&self.provider)
             .map(|_| ())
             .map_err(|_| CoreError::Provider)
@@ -644,7 +739,7 @@ where
 
     fn stage_welcome(
         &self,
-        expected_group_id: GroupId,
+        expected_group_id: Option<GroupId>,
         bytes: &[u8],
         max_users: usize,
     ) -> Result<StagedWelcome, CoreError> {
@@ -656,7 +751,10 @@ where
         };
         let staged = StagedWelcome::new_from_welcome(&self.provider, &join_config(), welcome, None)
             .map_err(|_| CoreError::Authentication)?;
-        if staged.group_context().group_id() != &expected_group_id {
+        if expected_group_id
+            .as_ref()
+            .is_some_and(|expected| staged.group_context().group_id() != expected)
+        {
             return Err(CoreError::Authentication);
         }
         let own_leaf = staged.own_leaf_node().ok_or(CoreError::Authentication)?;
@@ -913,7 +1011,7 @@ where
         let group_id = group_id(conversation_id)?;
         // Validate the welcome before dropping the current group, so a stale
         // or replayed welcome cannot destroy a working conversation.
-        let staged = self.stage_welcome(group_id.clone(), welcome, DIRECT_MAX_USERS)?;
+        let staged = self.stage_welcome(Some(group_id.clone()), welcome, DIRECT_MAX_USERS)?;
         if let Some(mut group) = MlsGroup::load(self.provider.storage(), &group_id)
             .map_err(|_| CoreError::Provider)?
         {
@@ -1343,6 +1441,61 @@ mod key_package_tests {
         let welcome = start_direct(&mut alice, &second, &package);
         bob.join_direct_group(&second, &welcome).unwrap();
         assert!(bob.direct_group_ready(&second).unwrap());
+    }
+
+    fn device_of(engine: &Engine) -> String {
+        engine.local_binding.device_id.to_string()
+    }
+
+    #[test]
+    fn group_create_invite_message_and_remove() {
+        let mut alice = engine();
+        let mut bob = engine();
+        let mut carol = engine();
+        let bob_package = bob.generate_key_package().unwrap();
+        let carol_package = carol.generate_key_package().unwrap();
+        let group = random_id().to_string();
+
+        alice.create_group_for(&group).unwrap();
+        let invite = alice
+            .add_group_members(&group, &[&bob_package, &carol_package])
+            .unwrap();
+        alice.merge_pending_commit(&group).unwrap();
+        let welcome = invite.welcome.unwrap();
+        assert_eq!(mls_handshake_kind(&welcome).unwrap(), MlsHandshake::Welcome);
+        assert_eq!(bob.join_group_from_welcome(&welcome).unwrap(), group);
+        assert_eq!(carol.join_group_from_welcome(&welcome).unwrap(), group);
+        assert!(bob.join_group_from_welcome(&welcome).is_err());
+        assert!(bob.group_ready(&group).unwrap());
+
+        let ciphertext = alice.encrypt(&group, &device_of(&alice), b"hello group").unwrap();
+        assert_eq!(
+            mls_handshake_kind(&ciphertext).unwrap(),
+            MlsHandshake::Application { conversation_id: group.clone() }
+        );
+        assert_eq!(bob.decrypt(&ciphertext).unwrap().plaintext.as_bytes(), b"hello group");
+        assert_eq!(carol.decrypt(&ciphertext).unwrap().plaintext.as_bytes(), b"hello group");
+
+        let carol_leaf = alice
+            .group_member_leaves(&group)
+            .unwrap()
+            .into_iter()
+            .find(|(_, binding)| binding.user_id == carol.local_binding.user_id)
+            .map(|(leaf, _)| leaf)
+            .unwrap();
+        let removal = alice.remove_members(&group, &[carol_leaf]).unwrap();
+        alice.merge_pending_commit(&group).unwrap();
+        assert_eq!(
+            mls_handshake_kind(&removal.commit).unwrap(),
+            MlsHandshake::Commit { conversation_id: group.clone() }
+        );
+        assert!(bob.process_group_commit(&group, &removal.commit).unwrap());
+        assert!(!carol.process_group_commit(&group, &removal.commit).unwrap());
+        assert_eq!(bob.group_member_leaves(&group).unwrap().len(), 2);
+
+        let after = alice.encrypt(&group, &device_of(&alice), b"carol is gone").unwrap();
+        assert_eq!(bob.decrypt(&after).unwrap().plaintext.as_bytes(), b"carol is gone");
+        assert!(carol.decrypt(&after).is_err());
     }
 
     /// A replayed or stale reset welcome must not delete a working group.

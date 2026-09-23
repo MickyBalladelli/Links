@@ -11,6 +11,19 @@ struct LinksMacOSMessage: Identifiable, Equatable, Codable {
     let isOutgoing: Bool
     let sentAt: Date
     let senderDeviceID: String?
+    /// Shown above incoming group messages; direct chats have one sender.
+    var senderUserID: String? = nil
+}
+
+/// One row of the selected group's member list.
+struct LinksMacOSGroupMember: Identifiable, Equatable {
+    let userID: String
+    let handle: String?
+    let role: IOSUsernameAuthClient.GroupRole?
+    let isSelf: Bool
+
+    var id: String { userID }
+    var displayName: String { handle.map { "@\($0)" } ?? "Member \(userID.prefix(8))" }
 }
 
 struct LinksMacOSConversation: Identifiable, Equatable, Codable {
@@ -24,23 +37,28 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     /// their own direct chat; replying in the peer's one uses a group both
     /// devices are members of.
     var deliveryConversationID: String?
+    var isGroup = false
+    /// False once this device left or was removed; history stays readable.
+    var groupActive = true
 
-    var isIncoming: Bool { recipientUserID.isEmpty }
+    var isIncoming: Bool { !isGroup && recipientUserID.isEmpty }
     var mlsConversationID: String { deliveryConversationID ?? id }
 
     init(id: String, title: String, recipientUserID: String,
-         peerUserID: String? = nil, messages: [LinksMacOSMessage], unreadCount: Int = 0) {
+         peerUserID: String? = nil, messages: [LinksMacOSMessage], unreadCount: Int = 0,
+         isGroup: Bool = false) {
         self.id = id
         self.title = title
         self.recipientUserID = recipientUserID
         self.peerUserID = peerUserID
         self.messages = messages
         self.unreadCount = unreadCount
+        self.isGroup = isGroup
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, recipientUserID, peerUserID, messages, unreadCount,
-             deliveryConversationID
+             deliveryConversationID, isGroup, groupActive
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +71,8 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
         unreadCount = try values.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
         deliveryConversationID = try values.decodeIfPresent(
             String.self, forKey: .deliveryConversationID)
+        isGroup = try values.decodeIfPresent(Bool.self, forKey: .isGroup) ?? false
+        groupActive = try values.decodeIfPresent(Bool.self, forKey: .groupActive) ?? true
     }
 }
 
@@ -190,6 +210,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var contacts: [LinksMacOSContact] = []
     @Published var selectedConversationID: String?
     @Published var composerText = ""
+    @Published private(set) var groupMembers: [LinksMacOSGroupMember] = []
+    @Published private(set) var groupStatus = ""
+    @Published private(set) var isUpdatingGroup = false
+    /// Handles learned for group members who are not saved contacts.
+    private var memberHandles: [String: String] = [:]
     @Published private(set) var lastError: String?
     @Published private(set) var onboardingError: String? {
         didSet {
@@ -498,7 +523,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     var canInitializeSelectedConversation: Bool {
-        guard let conversation = selectedConversation, !conversation.isIncoming else {
+        guard let conversation = selectedConversation, !conversation.isIncoming,
+              !conversation.isGroup else {
             return false
         }
         return messaging?.state == .ready && messaging?.isConnected == true
@@ -506,6 +532,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
     var canComposeSelectedConversation: Bool {
         guard let conversation = selectedConversation else { return false }
+        if conversation.isGroup {
+            return conversation.groupActive
+        }
         if conversation.isIncoming {
             return initializedConversationIDs.contains(conversation.id)
         }
@@ -525,6 +554,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// action remains available for retry and recovery.
     func autoInitializeSelectedConversation() {
         guard let conversation = selectedConversation else { return }
+        if conversation.isGroup {
+            conversationSetupStatus = conversation.groupActive
+                ? "End-to-end encrypted group"
+                : "You are no longer a member of this group"
+            Task { await refreshSelectedGroupMembers() }
+            return
+        }
         if conversation.isIncoming || initializedConversationIDs.contains(conversation.id) {
             conversationSetupStatus = "Secure two-user MLS conversation ready"
             return
@@ -1706,6 +1742,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         let conversation = conversations[index]
+        if conversation.isGroup {
+            sendGroupMessage(text, conversationID: conversation.id)
+            return
+        }
         guard initializedConversationIDs.contains(conversation.id) else {
             sendAfterSetupConversationID = conversation.id
             conversationSetupStatus = "Starting secure chat. Your message will send when it is ready."
@@ -1811,6 +1851,23 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     private func renderReceivedMessage(_ message: IOSReceivedTextMessage) {
+        if let groupIndex = conversations.firstIndex(where: {
+            $0.isGroup && $0.id == message.conversationID
+        }) {
+            conversations[groupIndex].messages.append(LinksMacOSMessage(
+                id: UUID(),
+                text: message.text,
+                isOutgoing: false,
+                sentAt: Date(timeIntervalSince1970: TimeInterval(message.sentAtMs) / 1000),
+                senderDeviceID: message.senderDeviceID,
+                senderUserID: message.senderUserID))
+            if selectedConversationID != message.conversationID || lifecycleStatus != "Active" {
+                conversations[groupIndex].unreadCount += 1
+            }
+            persistLocalState()
+            resolveMemberHandles([message.senderUserID])
+            return
+        }
         let received = LinksMacOSMessage(
             id: UUID(),
             text: message.text,
@@ -2256,5 +2313,318 @@ final class LinksMacOSProfileSession: ObservableObject {
         model = newModel
         attachProfileRegistrationHandler()
         newModel.beginUsernameRegistration(handle: handle)
+    }
+}
+
+// MARK: - Group chats
+
+extension LinksMacOSAppModel {
+    private var groupPrerequisites: (IOSDirectMessaging, any IOSDirectChatDirectory,
+                                     IOSPreKeyHTTPClient, IOSUsernameAuthClient, String)? {
+        guard let messaging, let directChatDirectory, let preKeyAPI, let authClient,
+              let token = try? client?.accessToken() else { return nil }
+        return (messaging, directChatDirectory, preKeyAPI, authClient, token)
+    }
+
+    var selectedGroupRole: IOSUsernameAuthClient.GroupRole? {
+        groupMembers.first(where: \.isSelf)?.role
+    }
+
+    var canManageSelectedGroup: Bool {
+        guard selectedConversation?.isGroup == true,
+              selectedConversation?.groupActive == true else { return false }
+        return selectedGroupRole == .owner || selectedGroupRole == .admin
+    }
+
+    func handle(for userID: String) -> String? {
+        contacts.first(where: { $0.userID == userID })?.handle ?? memberHandles[userID]
+    }
+
+    /// Create the group on the server and in MLS, invite the chosen contacts
+    /// and share the name inside the group.
+    func createGroup(name: String, memberUserIDs: [String]) async -> Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty, cleanName.count <= 64 else {
+            groupStatus = "Use a group name of 1 to 64 characters."
+            return false
+        }
+        guard !memberUserIDs.isEmpty else {
+            groupStatus = "Choose at least one contact."
+            return false
+        }
+        guard let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites,
+              messaging.isConnected else {
+            groupStatus = "Connect before creating a group."
+            return false
+        }
+        isUpdatingGroup = true
+        defer { isUpdatingGroup = false }
+        let groupID = UUID().uuidString.lowercased()
+        do {
+            try await authClient.createGroup(accessToken: token, groupID: groupID)
+            for userID in memberUserIDs {
+                try await authClient.setGroupRole(accessToken: token, groupID: groupID,
+                                                  userID: userID, role: .member)
+            }
+            try messaging.createGroup(conversationID: groupID)
+            try await messaging.inviteToGroup(conversationID: groupID, userIDs: memberUserIDs,
+                                              directory: directory, preKeyAPI: preKeyAPI)
+            try await messaging.setGroupName(conversationID: groupID, name: cleanName,
+                                             directory: directory, preKeyAPI: preKeyAPI)
+        } catch {
+            groupStatus = "Could not create the group. Check that everyone has opened Links."
+            return false
+        }
+        conversations.insert(LinksMacOSConversation(
+            id: groupID, title: cleanName, recipientUserID: "", messages: [],
+            isGroup: true), at: 0)
+        selectedConversationID = groupID
+        groupStatus = ""
+        persistLocalState()
+        await refreshSelectedGroupMembers()
+        return true
+    }
+
+    func addMembersToSelectedGroup(_ userIDs: [String]) async {
+        guard let conversation = selectedConversation, conversation.isGroup,
+              !userIDs.isEmpty else { return }
+        guard let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites else {
+            groupStatus = "Connect before changing the group."
+            return
+        }
+        isUpdatingGroup = true
+        defer { isUpdatingGroup = false }
+        do {
+            for userID in userIDs {
+                try await authClient.setGroupRole(accessToken: token, groupID: conversation.id,
+                                                  userID: userID, role: .member)
+            }
+            try await messaging.inviteToGroup(conversationID: conversation.id, userIDs: userIDs,
+                                              directory: directory, preKeyAPI: preKeyAPI)
+            // New members learn the name from the next group info message.
+            try await messaging.setGroupName(conversationID: conversation.id,
+                                             name: conversation.title,
+                                             directory: directory, preKeyAPI: preKeyAPI)
+            groupStatus = userIDs.count == 1 ? "Added 1 person." : "Added \(userIDs.count) people."
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "add people")
+        }
+        await refreshSelectedGroupMembers()
+    }
+
+    func removeFromSelectedGroup(_ userID: String) async {
+        guard let conversation = selectedConversation, conversation.isGroup else { return }
+        guard let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites else {
+            groupStatus = "Connect before changing the group."
+            return
+        }
+        isUpdatingGroup = true
+        defer { isUpdatingGroup = false }
+        do {
+            try await authClient.removeGroupMember(accessToken: token, groupID: conversation.id,
+                                                   userID: userID)
+            try await messaging.removeFromGroup(conversationID: conversation.id, userID: userID,
+                                                directory: directory, preKeyAPI: preKeyAPI)
+            groupStatus = "Removed \(handle(for: userID).map { "@\($0)" } ?? "member")."
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "remove this person")
+        }
+        await refreshSelectedGroupMembers()
+    }
+
+    func makeAdminInSelectedGroup(_ userID: String) async {
+        guard let conversation = selectedConversation, conversation.isGroup,
+              let (_, _, _, authClient, token) = groupPrerequisites else { return }
+        do {
+            try await authClient.setGroupRole(accessToken: token, groupID: conversation.id,
+                                              userID: userID, role: .admin)
+            groupStatus = "\(handle(for: userID).map { "@\($0)" } ?? "Member") is now an admin."
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "change this role")
+        }
+        await refreshSelectedGroupMembers()
+    }
+
+    func renameSelectedGroup(_ name: String) async {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let conversation = selectedConversation, conversation.isGroup,
+              !cleanName.isEmpty, cleanName.count <= 64,
+              let index = conversations.firstIndex(where: { $0.id == conversation.id }),
+              let (messaging, directory, preKeyAPI, _, _) = groupPrerequisites else { return }
+        do {
+            try await messaging.setGroupName(conversationID: conversation.id, name: cleanName,
+                                             directory: directory, preKeyAPI: preKeyAPI)
+            conversations[index].title = cleanName
+            persistLocalState()
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "rename the group")
+        }
+    }
+
+    /// Leave on the server and forget local MLS state. An owner or admin
+    /// removes this device's leaf the next time they open the group.
+    func leaveSelectedGroup() async {
+        guard let conversation = selectedConversation, conversation.isGroup,
+              let index = conversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        if let (messaging, _, _, authClient, token) = groupPrerequisites,
+           let ownUserID = client?.userID {
+            do {
+                try await authClient.removeGroupMember(accessToken: token, groupID: conversation.id,
+                                                       userID: ownUserID)
+            } catch {
+                groupStatus = selectedGroupRole == .owner
+                    ? "Make another member the owner before leaving."
+                    : Self.groupFailureMessage(error, action: "leave the group")
+                return
+            }
+            try? messaging.leaveGroup(conversationID: conversation.id)
+        }
+        conversations[index].groupActive = false
+        groupMembers = []
+        conversationSetupStatus = "You left this group"
+        persistLocalState()
+    }
+
+    /// Merge MLS membership with server roles. Owners and admins also remove
+    /// MLS leaves of people who already left on the server.
+    func refreshSelectedGroupMembers() async {
+        guard let conversation = selectedConversation, conversation.isGroup,
+              conversation.groupActive,
+              let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites else {
+            groupMembers = []
+            return
+        }
+        let groupID = conversation.id
+        let mlsMembers = messaging.groupMembers(conversationID: groupID)
+        let roles: [String: IOSUsernameAuthClient.GroupRole]
+        do {
+            let serverMembers = try await authClient.groupMembers(accessToken: token, groupID: groupID)
+            roles = Dictionary(serverMembers.map { ($0.userID, $0.role) }, uniquingKeysWith: { first, _ in first })
+        } catch {
+            roles = [:]
+        }
+        guard selectedConversationID == groupID else { return }
+        let ownUserID = client?.userID
+        let myRole = ownUserID.flatMap { roles[$0] }
+        if myRole == .owner || myRole == .admin, !roles.isEmpty {
+            for userID in mlsMembers where roles[userID] == nil && userID != ownUserID {
+                try? await messaging.removeFromGroup(conversationID: groupID, userID: userID,
+                                                     directory: directory, preKeyAPI: preKeyAPI)
+            }
+        }
+        let current = messaging.groupMembers(conversationID: groupID)
+        resolveMemberHandles(current)
+        groupMembers = current.map { userID in
+            LinksMacOSGroupMember(userID: userID,
+                                  handle: userID == ownUserID ? client?.accountHandle : handle(for: userID),
+                                  role: roles[userID],
+                                  isSelf: userID == ownUserID)
+        }
+        .sorted { lhs, rhs in
+            if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
+            return lhs.displayName < rhs.displayName
+        }
+    }
+
+    func resolveMemberHandles(_ userIDs: [String]) {
+        let unknown = userIDs.filter { handle(for: $0) == nil && $0 != client?.userID }
+        guard !unknown.isEmpty, let authClient, let token = try? client?.accessToken() else { return }
+        Task { @MainActor [weak self] in
+            for userID in unknown {
+                guard let directory = try? await authClient.lookup(userID: userID, accessToken: token) else { continue }
+                self?.memberHandles[userID] = directory.handle
+            }
+            guard let self else { return }
+            self.groupMembers = self.groupMembers.map { member in
+                LinksMacOSGroupMember(userID: member.userID,
+                                      handle: member.handle ?? self.handle(for: member.userID),
+                                      role: member.role, isSelf: member.isSelf)
+            }
+            self.objectWillChange.send()
+        }
+    }
+
+    func senderLabel(for message: LinksMacOSMessage) -> String? {
+        guard !message.isOutgoing, let userID = message.senderUserID else { return nil }
+        return handle(for: userID).map { "@\($0)" } ?? "Member"
+    }
+
+    fileprivate func sendGroupMessage(_ text: String, conversationID: String) {
+        guard let (messaging, directory, preKeyAPI, _, _) = groupPrerequisites,
+              messaging.isConnected else {
+            actionError = "Offline. Message stays in the composer until reconnect."
+            return
+        }
+        composerText = ""
+        Task { @MainActor [weak self] in
+            do {
+                try await messaging.sendGroupText(conversationID: conversationID, text: text,
+                                                  directory: directory, preKeyAPI: preKeyAPI)
+                guard let self,
+                      let index = self.conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+                self.conversations[index].messages.append(LinksMacOSMessage(
+                    id: UUID(), text: text, isOutgoing: true, sentAt: Date(), senderDeviceID: nil))
+                self.persistLocalState()
+            } catch {
+                guard let self else { return }
+                if self.composerText.isEmpty { self.composerText = text }
+                self.actionError = Self.groupFailureMessage(error, action: "send to the group")
+            }
+        }
+    }
+
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                     didReceive event: IOSGroupEvent) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            self.applyGroupEvent(event)
+        }
+    }
+
+    private func applyGroupEvent(_ event: IOSGroupEvent) {
+        let index = conversations.firstIndex(where: { $0.id == event.conversationID })
+        switch event.kind {
+        case .joined:
+            if let index {
+                conversations[index].isGroup = true
+                conversations[index].groupActive = true
+            } else {
+                conversations.insert(LinksMacOSConversation(
+                    id: event.conversationID, title: "New group", recipientUserID: "",
+                    messages: [], isGroup: true), at: 0)
+            }
+        case .renamed(let name, _):
+            guard let index else { return }
+            conversations[index].title = name
+        case .membersChanged:
+            break
+        case .removed:
+            guard let index else { return }
+            conversations[index].groupActive = false
+            if selectedConversationID == event.conversationID {
+                groupMembers = []
+                conversationSetupStatus = "You were removed from this group"
+            }
+        }
+        persistLocalState()
+        if selectedConversationID == event.conversationID, event.kind != .removed {
+            Task { await refreshSelectedGroupMembers() }
+        }
+    }
+
+    private static func groupFailureMessage(_ error: Error, action: String) -> String {
+        if let authError = error as? IOSUsernameAuthError,
+           case .serverRejected(let status) = authError {
+            if status == 401 || status == 403 {
+                return "Only the owner or an admin can \(action)."
+            }
+            if status == 404 {
+                return "That account or group no longer exists."
+            }
+        }
+        if let messagingError = error as? IOSMessagingError, case .notConnected = messagingError {
+            return "Connect before you \(action)."
+        }
+        return "Could not \(action). Check that everyone has opened the latest Links."
     }
 }

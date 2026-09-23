@@ -209,7 +209,9 @@ impl SFrameEpochKeyUpdate {
             Some(protocol::v1::mls_control::Body::SframeEpochKey(update)) => {
                 Self::from_proto(update)
             }
-            None => Err(CoreError::Authentication),
+            Some(protocol::v1::mls_control::Body::GroupInfo(_)) | None => {
+                Err(CoreError::Authentication)
+            }
         }
     }
 

@@ -112,6 +112,76 @@ public protocol SharedClientCore: AnyObject {
                        metadata: IOSLargeFileMetadata,
                        receipt: IOSLargeFileUploadReceipt,
                        transport: any IOSCoreTransport) throws
+
+    // Many-to-many groups. Membership handshakes travel through the ordered
+    // mailbox; the core seals only to devices registered as recipients.
+    func setGroupEventHandler(_ handler: @escaping (IOSGroupEvent) -> Void)
+    func registerRecipientDevices(_ devices: [IOSClaimedRecipientDevice]) throws
+    func createGroup(conversationID: String) throws
+    func addGroupMembers(conversationID: String, userIDs: [String],
+                         transport: any IOSCoreTransport) throws
+    func removeGroupMember(conversationID: String, userID: String,
+                           transport: any IOSCoreTransport) throws
+    func leaveGroup(conversationID: String) throws
+    func sendGroupText(conversationID: String, text: String,
+                       transport: any IOSCoreTransport) throws
+    func setGroupName(conversationID: String, name: String,
+                      transport: any IOSCoreTransport) throws
+    func groupMembers(conversationID: String) throws -> [String]
+    func groupUsersMissingRecipients(conversationID: String) throws -> [String]
+}
+
+public extension SharedClientCore {
+    func setGroupEventHandler(_ handler: @escaping (IOSGroupEvent) -> Void) {}
+    func registerRecipientDevices(_ devices: [IOSClaimedRecipientDevice]) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func createGroup(conversationID: String) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func addGroupMembers(conversationID: String, userIDs: [String],
+                         transport: any IOSCoreTransport) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func removeGroupMember(conversationID: String, userID: String,
+                           transport: any IOSCoreTransport) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func leaveGroup(conversationID: String) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func sendGroupText(conversationID: String, text: String,
+                       transport: any IOSCoreTransport) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func setGroupName(conversationID: String, name: String,
+                      transport: any IOSCoreTransport) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func groupMembers(conversationID: String) throws -> [String] {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func groupUsersMissingRecipients(conversationID: String) throws -> [String] {
+        throw IOSMessagingError.groupsUnavailable
+    }
+}
+
+/// Membership and metadata changes reported by the shared core.
+public struct IOSGroupEvent: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        case joined
+        case renamed(name: String, byUserID: String)
+        case membersChanged
+        case removed
+    }
+
+    public let conversationID: String
+    public let kind: Kind
+
+    public init(conversationID: String, kind: Kind) {
+        self.conversationID = conversationID
+        self.kind = kind
+    }
 }
 
 public extension SharedClientCore {

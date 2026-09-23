@@ -25,7 +25,14 @@ message MlsControl {
   uint32 protocol_version = 1;
   oneof body {
     SFrameEpochKeyUpdate sframe_epoch_key = 2;
+    GroupInfo group_info = 3;
   }
+}
+
+// PRIVATE: group display metadata, shared only inside the group's MLS
+// ciphertext. The server never learns a group's name.
+message GroupInfo {
+  string name = 1;
 }
 
 // An MLS-authenticated media key handoff. The key is protected by the outer

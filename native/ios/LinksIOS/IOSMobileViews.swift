@@ -353,6 +353,7 @@ private struct IOSAuthenticatedShell: View {
 private struct IOSChatsView: View {
     @ObservedObject var model: IOSMobileAppModel
     @State private var showingNewConversation = false
+    @State private var showingNewGroup = false
     @State private var path = [String]()
 
     var body: some View {
@@ -403,12 +404,25 @@ private struct IOSChatsView: View {
                     .clipShape(Capsule())
 
                     Button {
+                        model.clearGroupStatus()
+                        showingNewGroup = true
+                    } label: {
+                        Image(systemName: "person.3")
+                    }
+                    .accessibilityLabel("New group")
+
+                    Button {
                         model.clearConversationCreationStatus()
                         showingNewConversation = true
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
                     .accessibilityLabel("New conversation")
+                }
+            }
+            .sheet(isPresented: $showingNewGroup) {
+                IOSNewGroupSheet(model: model) { conversation in
+                    path.append(conversation.id)
                 }
             }
             .navigationDestination(for: String.self) { conversationID in
@@ -480,10 +494,11 @@ private struct IOSConversationRow: View {
         HStack(spacing: 13) {
             IOSAvatar(name: conversation.handle, size: 52, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 5) {
-                Text("@\(conversation.handle)")
+                Text(conversation.displayTitle)
                     .font(.headline)
                     .foregroundStyle(.primary)
-                Label("Private conversation", systemImage: "lock.fill")
+                Label(conversation.isGroup ? "Encrypted group" : "Private conversation",
+                      systemImage: conversation.isGroup ? "person.3.fill" : "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -945,6 +960,7 @@ private struct IOSConversationView: View {
     @ObservedObject var model: IOSMobileAppModel
     let conversationID: String
     @State private var composerText = ""
+    @State private var showingMembers = false
     @FocusState private var composerFocused: Bool
 
     private let conversationBottomID = "conversation-bottom"
@@ -954,6 +970,11 @@ private struct IOSConversationView: View {
     }
 
     private var setupStatusText: String {
+        if let conversation, conversation.isGroup {
+            return conversation.groupActive
+                ? "End-to-end encrypted group"
+                : "You are no longer a member of this group"
+        }
         if conversation?.isSecureReady == true { return model.messagingStatus }
         if model.messagingState != .ready { return model.messagingStatus }
         if !model.preKeyStatus.hasPrefix("Ready") { return model.preKeyStatus }
@@ -987,7 +1008,7 @@ private struct IOSConversationView: View {
                 Spacer()
                 VStack(spacing: 14) {
                     IOSAvatar(name: conversation.handle, size: 72)
-                    Text("@\(conversation.handle)")
+                    Text(conversation.displayTitle)
                         .font(.title2.weight(.bold))
                     Text(conversation.isSecureReady
                          ? "Messages are protected with end-to-end encryption."
@@ -1003,7 +1024,8 @@ private struct IOSConversationView: View {
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(conversation.messages) { message in
-                                IOSMessageBubble(message: message)
+                                IOSMessageBubble(message: message,
+                                                 senderLabel: model.senderLabel(for: message))
                                     .id(message.id)
                             }
                             Color.clear
@@ -1059,9 +1081,11 @@ private struct IOSConversationView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || conversation?.isSecureReady != true)
+                          || conversation?.isSecureReady != true
+                          || conversation?.groupActive == false)
                 .opacity(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                         || conversation?.isSecureReady != true ? 0.45 : 1)
+                         || conversation?.isSecureReady != true
+                         || conversation?.groupActive == false ? 0.45 : 1)
                 .accessibilityLabel("Send message")
             }
             .padding(.horizontal, 14)
@@ -1069,8 +1093,24 @@ private struct IOSConversationView: View {
             .background(.regularMaterial)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle(conversation.map { "@\($0.handle)" } ?? "Conversation")
+        .navigationTitle(conversation?.displayTitle ?? "Conversation")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if conversation?.isGroup == true {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        model.clearGroupStatus()
+                        showingMembers = true
+                    } label: {
+                        Image(systemName: "person.3")
+                    }
+                    .accessibilityLabel("Group members")
+                }
+            }
+        }
+        .sheet(isPresented: $showingMembers) {
+            IOSGroupMembersSheet(model: model, conversationID: conversationID)
+        }
         .onAppear {
             model.markConversationRead(conversationID)
         }
@@ -1085,11 +1125,17 @@ private struct IOSConversationView: View {
 
 private struct IOSMessageBubble: View {
     let message: IOSMobileMessage
+    var senderLabel: String? = nil
 
     var body: some View {
         HStack {
             if message.isOutgoing { Spacer(minLength: 52) }
             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
+                if let senderLabel {
+                    Text(senderLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(IOSLinksPalette.cobalt)
+                }
                 Text(message.text)
                     .font(.body)
                     .foregroundStyle(message.isOutgoing ? .white : .primary)
@@ -1165,6 +1211,194 @@ private struct IOSNoticeBanner: View {
         .background(.ultraThinMaterial)
         .overlay(alignment: .top) {
             Divider().overlay(tint.opacity(0.35))
+        }
+    }
+}
+
+private struct IOSContactPickerSection: View {
+    let contacts: [IOSMobileContact]
+    @Binding var selection: Set<String>
+
+    var body: some View {
+        if contacts.isEmpty {
+            Text("Add people in the People tab first.")
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(contacts) { contact in
+                Button {
+                    if selection.contains(contact.userID) {
+                        selection.remove(contact.userID)
+                    } else {
+                        selection.insert(contact.userID)
+                    }
+                } label: {
+                    HStack {
+                        Text("@\(contact.handle)")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if selection.contains(contact.userID) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(IOSLinksPalette.cobalt)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct IOSNewGroupSheet: View {
+    @ObservedObject var model: IOSMobileAppModel
+    let onCreated: (IOSMobileConversation) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var selection = Set<String>()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Group name", text: $name)
+                } footer: {
+                    Text("The server stores who is in the group, never its name or messages.")
+                }
+                Section("Invite") {
+                    IOSContactPickerSection(contacts: model.contacts, selection: $selection)
+                }
+                if !model.groupStatus.isEmpty {
+                    Section {
+                        Text(model.groupStatus)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("New group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if model.isUpdatingGroup {
+                        ProgressView()
+                    } else {
+                        Button("Create") {
+                            Task {
+                                if let conversation = await model.createGroup(
+                                    name: name, memberUserIDs: Array(selection)) {
+                                    dismiss()
+                                    onCreated(conversation)
+                                }
+                            }
+                        }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || selection.isEmpty)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct IOSGroupMembersSheet: View {
+    @ObservedObject var model: IOSMobileAppModel
+    let conversationID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection = Set<String>()
+    @State private var leaveConfirmationPresented = false
+
+    private var members: [IOSMobileGroupMember] { model.groupMembers[conversationID] ?? [] }
+    private var myRole: IOSUsernameAuthClient.GroupRole? { model.role(in: conversationID) }
+
+    private var invitableContacts: [IOSMobileContact] {
+        let memberIDs = Set(members.map(\.userID))
+        return model.contacts.filter { !memberIDs.contains($0.userID) }
+    }
+
+    private func canRemove(_ member: IOSMobileGroupMember) -> Bool {
+        guard model.canManageGroup(conversationID), !member.isSelf, member.role != .owner else {
+            return false
+        }
+        return myRole == .owner || member.role != .admin
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Members") {
+                    ForEach(members) { member in
+                        HStack {
+                            Text(member.isSelf ? "\(member.displayName) (you)" : member.displayName)
+                            if let role = member.role, role != .member {
+                                Text(role == .owner ? "Owner" : "Admin")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(IOSLinksPalette.cobalt.opacity(0.14))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .swipeActions {
+                            if canRemove(member) {
+                                Button("Remove", role: .destructive) {
+                                    Task { await model.removeMember(member.userID, from: conversationID) }
+                                }
+                            }
+                            if myRole == .owner, !member.isSelf, member.role == .member {
+                                Button("Make admin") {
+                                    Task { await model.makeAdmin(member.userID, in: conversationID) }
+                                }
+                                .tint(IOSLinksPalette.cobalt)
+                            }
+                        }
+                    }
+                }
+                if model.canManageGroup(conversationID) {
+                    Section("Add people") {
+                        IOSContactPickerSection(contacts: invitableContacts, selection: $selection)
+                        if !selection.isEmpty {
+                            Button("Add \(selection.count == 1 ? "1 person" : "\(selection.count) people")") {
+                                let chosen = Array(selection)
+                                selection.removeAll()
+                                Task { await model.addMembers(chosen, to: conversationID) }
+                            }
+                            .disabled(model.isUpdatingGroup)
+                        }
+                    }
+                }
+                if !model.groupStatus.isEmpty {
+                    Section {
+                        Text(model.groupStatus)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if model.conversation(withID: conversationID)?.groupActive == true {
+                    Section {
+                        Button("Leave group", role: .destructive) {
+                            leaveConfirmationPresented = true
+                        }
+                    }
+                }
+            }
+            .navigationTitle(model.conversation(withID: conversationID)?.handle ?? "Group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await model.refreshGroupMembers(conversationID) }
+            .confirmationDialog("Leave this group?", isPresented: $leaveConfirmationPresented,
+                                titleVisibility: .visible) {
+                Button("Leave", role: .destructive) {
+                    Task {
+                        await model.leaveGroup(conversationID)
+                        dismiss()
+                    }
+                }
+            } message: {
+                Text("You stop receiving messages. The history stays on this iPhone.")
+            }
         }
     }
 }

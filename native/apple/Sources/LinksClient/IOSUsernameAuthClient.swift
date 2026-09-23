@@ -276,6 +276,93 @@ public final class IOSUsernameAuthClient: Sendable {
         }
     }
 
+    // MARK: Group roles. The server only stores who belongs to a group and
+    // with which role; names and messages stay inside MLS.
+
+    public enum GroupRole: String, Codable, Sendable {
+        case owner, admin, member
+    }
+
+    public struct GroupMember: Codable, Equatable, Sendable {
+        public let userID: String
+        public let role: GroupRole
+
+        private enum CodingKeys: String, CodingKey {
+            case userID = "user_id"
+            case role
+        }
+    }
+
+    private func groupRequest(_ path: String, method: String, accessToken: String,
+                              json: [String: String]? = nil) throws -> URLRequest {
+        guard !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = method
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        if let json {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: json)
+        }
+        return request
+    }
+
+    private func requireGroupStatus(_ response: URLResponse, _ accepted: Set<Int>) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+        guard accepted.contains(http.statusCode) else {
+            throw IOSUsernameAuthError.serverRejected(statusCode: http.statusCode)
+        }
+    }
+
+    /// Register a group with the caller as owner.
+    public func createGroup(accessToken: String, groupID: String) async throws {
+        guard IOSClient.isCanonicalUUID(groupID) else { throw IOSUsernameAuthError.invalidRequest }
+        let request = try groupRequest("v1/groups", method: "POST", accessToken: accessToken,
+                                       json: ["group_id": groupID, "kind": "group"])
+        let (_, response) = try await data(for: request)
+        try requireGroupStatus(response, [200, 201])
+    }
+
+    /// Add a member or change a role. Owners grant any role; admins may only
+    /// add plain members.
+    public func setGroupRole(accessToken: String, groupID: String, userID: String,
+                             role: GroupRole) async throws {
+        guard IOSClient.isCanonicalUUID(groupID), IOSClient.isCanonicalUUID(userID) else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        let request = try groupRequest("v1/groups/\(groupID)/members/\(userID)/role",
+                                       method: "PUT", accessToken: accessToken,
+                                       json: ["role": role.rawValue])
+        let (_, response) = try await data(for: request)
+        try requireGroupStatus(response, [200, 204])
+    }
+
+    /// Remove a member, or leave when `userID` is the caller.
+    public func removeGroupMember(accessToken: String, groupID: String,
+                                  userID: String) async throws {
+        guard IOSClient.isCanonicalUUID(groupID), IOSClient.isCanonicalUUID(userID) else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        let request = try groupRequest("v1/groups/\(groupID)/members/\(userID)",
+                                       method: "DELETE", accessToken: accessToken)
+        let (_, response) = try await data(for: request)
+        try requireGroupStatus(response, [200, 204, 404])
+    }
+
+    public func groupMembers(accessToken: String, groupID: String) async throws -> [GroupMember] {
+        guard IOSClient.isCanonicalUUID(groupID) else { throw IOSUsernameAuthError.invalidRequest }
+        let request = try groupRequest("v1/groups/\(groupID)/members", method: "GET",
+                                       accessToken: accessToken)
+        let (body, response) = try await data(for: request)
+        try requireGroupStatus(response, [200])
+        struct Envelope: Decodable { let members: [GroupMember] }
+        return try JSONDecoder().decode(Envelope.self, from: body).members
+    }
+
     /// Returns the published JPEG, or nil when this username has no picture.
     public func downloadProfilePicture(handle: String) async throws -> Data? {
         let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)

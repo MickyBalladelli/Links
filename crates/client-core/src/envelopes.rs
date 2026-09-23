@@ -218,6 +218,63 @@ impl<C: EnvelopeCrypto, M: MlsEngine> ClientCore<C, M> {
         Ok(envelope)
     }
 
+    /// Wrap an MLS Welcome or Commit for each recipient device. Group
+    /// handshakes travel through the same ordered mailbox as messages, so a
+    /// member always applies them before later application messages.
+    pub fn seal_handshake_for_devices(
+        &mut self,
+        handshake: &[u8],
+        recipients: &[FanoutRecipient],
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<Vec<v1::Envelope>, CoreError> {
+        if handshake.is_empty() || handshake.len() > protocol::MAX_FRAME_BYTES {
+            return Err(CoreError::Authentication);
+        }
+        validate_fanout_recipients(recipients)?;
+        recipients
+            .iter()
+            .map(|recipient| {
+                self.seal_ciphertext_for_device(recipient, expires_at_ms, now_ms, handshake)
+            })
+            .collect()
+    }
+
+    /// Remove the sealed-sender layer only. The result is raw MLS bytes that
+    /// the caller classifies before decrypting or applying.
+    pub fn open_envelope_raw(
+        &mut self,
+        envelope: &v1::Envelope,
+        now_ms: u64,
+    ) -> Result<SecretBytes, CoreError> {
+        protocol::validate_enqueue(envelope, now_ms)?;
+        if envelope.recipient_device_id != self.identity.device_id() {
+            return Err(CoreError::Authentication);
+        }
+        self.crypto.open(
+            &envelope.recipient_device_id,
+            &routing_context(envelope),
+            &envelope.sealed_payload,
+        )
+    }
+
+    /// Decrypt an MLS application message already opened with
+    /// `open_envelope_raw`.
+    pub fn decrypt_opened(&mut self, ciphertext: &[u8]) -> Result<AuthenticatedEnvelope, CoreError> {
+        let application = self.mls.decrypt(ciphertext)?;
+        let message = protocol::decode_message(application.plaintext.as_bytes())?;
+        if application.conversation_id != message.conversation_id
+            || application.sender_device_id != message.sender_device_id
+        {
+            return Err(CoreError::Authentication);
+        }
+        protocol::validate_id(&application.sender_user_id)?;
+        Ok(AuthenticatedEnvelope {
+            message,
+            sender_user_id: application.sender_user_id,
+        })
+    }
+
     pub fn open_envelope_authenticated(
         &mut self,
         envelope: &v1::Envelope,

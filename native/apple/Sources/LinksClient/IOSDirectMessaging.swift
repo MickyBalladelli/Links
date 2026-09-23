@@ -45,9 +45,14 @@ public protocol IOSDirectMessagingDelegate: AnyObject {
     func directMessagingDidFail(_ messaging: IOSDirectMessaging)
     func directMessagingDidFail(_ messaging: IOSDirectMessaging,
                                 reason: IOSMessagingIssue)
+    func directMessaging(_ messaging: IOSDirectMessaging,
+                         didReceive event: IOSGroupEvent)
 }
 
 public extension IOSDirectMessagingDelegate {
+    func directMessaging(_ messaging: IOSDirectMessaging,
+                         didReceive event: IOSGroupEvent) {}
+
     func directMessagingDidFail(_ messaging: IOSDirectMessaging,
                                 reason: IOSMessagingIssue) {
         directMessagingDidFail(messaging)
@@ -129,6 +134,15 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         if alreadyStarted { return }
 
         let sharedCore = try client.makeCore(using: factory)
+        // Events fire inside frame handling, before the texts that follow them
+        // are rendered, so a newly joined group exists when its messages land.
+        sharedCore.setGroupEventHandler { [weak self] event in
+            guard let self else { return }
+            self.callbackQueue.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.directMessaging(self, didReceive: event)
+            }
+        }
         let manager = try IOSConnectionManager(
             endpoint: endpoint,
             helloProvider: { [client, sharedCore] in
@@ -296,6 +310,146 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                 transport: manager)
         }
         scheduleRetry(for: manager)
+    }
+
+    // MARK: Groups
+
+    private func readyCore() throws -> (any SharedClientCore, IOSConnectionManager) {
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        return (sharedCore, manager)
+    }
+
+    /// Fetch each user's devices from the directory, claim one pre-key bundle
+    /// per device and register them so the core can seal to them.
+    private func registerDevices(of userIDs: [String], core sharedCore: any SharedClientCore,
+                                 directory: any IOSDirectChatDirectory,
+                                 preKeyAPI: any IOSPreKeyAPI) async throws {
+        let token = try client.accessToken()
+        var claimed = [IOSClaimedRecipientDevice]()
+        for userID in userIDs {
+            guard Self.isValidTextID(userID) else { throw IOSMessagingError.invalidMessage }
+            let descriptors = try await directory.queryRecipientDevices(
+                accessToken: token, recipientUserID: userID)
+            guard !descriptors.isEmpty, descriptors.count <= 100,
+                  descriptors.allSatisfy({ $0.userID == userID }) else {
+                throw IOSPreKeyError.invalidRecipient
+            }
+            for descriptor in descriptors {
+                let bundle = try await preKeyAPI.claim(
+                    accessToken: token, deviceID: descriptor.deviceID)
+                claimed.append(try IOSClaimedRecipientDevice(descriptor: descriptor, bundle: bundle))
+            }
+        }
+        guard !claimed.isEmpty else { return }
+        try coreQueue.sync { try sharedCore.registerRecipientDevices(claimed) }
+    }
+
+    /// Register any member device the core cannot seal to yet.
+    private func prepareGroupRecipients(conversationID: String, core sharedCore: any SharedClientCore,
+                                        directory: any IOSDirectChatDirectory,
+                                        preKeyAPI: any IOSPreKeyAPI) async throws {
+        let missing = try coreQueue.sync {
+            try sharedCore.groupUsersMissingRecipients(conversationID: conversationID)
+        }
+        try await registerDevices(of: missing, core: sharedCore,
+                                  directory: directory, preKeyAPI: preKeyAPI)
+    }
+
+    public func createGroup(conversationID: String) throws {
+        guard Self.isValidTextID(conversationID) else { throw IOSMessagingError.invalidMessage }
+        let (sharedCore, _) = try readyCore()
+        try coreQueue.sync { try sharedCore.createGroup(conversationID: conversationID) }
+    }
+
+    public func inviteToGroup(conversationID: String, userIDs: [String],
+                              directory: any IOSDirectChatDirectory,
+                              preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID), !userIDs.isEmpty else {
+            throw IOSMessagingError.invalidMessage
+        }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try await registerDevices(of: userIDs, core: sharedCore,
+                                  directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.addGroupMembers(conversationID: conversationID, userIDs: userIDs,
+                                           transport: manager)
+        }
+        scheduleRetry(for: manager)
+    }
+
+    public func removeFromGroup(conversationID: String, userID: String,
+                                directory: any IOSDirectChatDirectory,
+                                preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID), Self.isValidTextID(userID) else {
+            throw IOSMessagingError.invalidMessage
+        }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.removeGroupMember(conversationID: conversationID, userID: userID,
+                                             transport: manager)
+        }
+        scheduleRetry(for: manager)
+    }
+
+    public func sendGroupText(conversationID: String, text: String,
+                              directory: any IOSDirectChatDirectory,
+                              preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID), !text.isEmpty,
+              text.utf8.count <= Self.maximumTextBytes else {
+            throw IOSMessagingError.invalidMessage
+        }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.sendGroupText(conversationID: conversationID, text: text,
+                                         transport: manager)
+        }
+        scheduleRetry(for: manager)
+    }
+
+    public func setGroupName(conversationID: String, name: String,
+                             directory: any IOSDirectChatDirectory,
+                             preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID) else { throw IOSMessagingError.invalidMessage }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.setGroupName(conversationID: conversationID, name: name,
+                                        transport: manager)
+        }
+        scheduleRetry(for: manager)
+    }
+
+    public func leaveGroup(conversationID: String) throws {
+        guard Self.isValidTextID(conversationID) else { throw IOSMessagingError.invalidMessage }
+        lock.lock()
+        let sharedCore = core
+        lock.unlock()
+        guard let sharedCore else { throw IOSMessagingError.notConnected }
+        try coreQueue.sync { try sharedCore.leaveGroup(conversationID: conversationID) }
+    }
+
+    public func groupMembers(conversationID: String) -> [String] {
+        lock.lock()
+        let sharedCore = core
+        lock.unlock()
+        guard let sharedCore else { return [] }
+        return (try? coreQueue.sync {
+            try sharedCore.groupMembers(conversationID: conversationID)
+        }) ?? []
     }
 
     public func shutdown() {
@@ -696,4 +850,5 @@ public enum IOSMessagingError: Error {
     case notConnected
     case preKeyBootstrapUnavailable
     case staleCursorRecoveryUnavailable
+    case groupsUnavailable
 }

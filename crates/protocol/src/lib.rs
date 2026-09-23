@@ -43,6 +43,7 @@ pub const FEDERATION_SIGNATURE_BYTES: usize = 64;
 pub const FEDERATION_BODY_DIGEST_BYTES: usize = 32;
 pub const MAX_PREKEY_UPLOAD_BYTES: usize = 256 * 1024;
 pub const MAX_ONE_TIME_PREKEYS: usize = 100;
+pub const MAX_GROUP_NAME_CHARS: usize = 64;
 pub const OPUS_MIN_BITRATE_KBPS: u32 = 16;
 pub const OPUS_MAX_BITRATE_KBPS: u32 = 24;
 pub const OPUS_SAMPLE_RATE_HZ: [u32; 5] = [8_000, 12_000, 16_000, 24_000, 48_000];
@@ -298,6 +299,13 @@ pub fn validate_mls_control(control: &v1::MlsControl) -> Result<(), ProtocolErro
     match control.body.as_ref() {
         Some(v1::mls_control::Body::SframeEpochKey(update)) => {
             validate_sframe_epoch_key_update(update)
+        }
+        Some(v1::mls_control::Body::GroupInfo(info)) => {
+            let name = info.name.trim();
+            if name.is_empty() || name.chars().count() > MAX_GROUP_NAME_CHARS {
+                return Err(ProtocolError::Invalid("group name"));
+            }
+            Ok(())
         }
         None => Err(ProtocolError::Invalid("MLS control")),
     }

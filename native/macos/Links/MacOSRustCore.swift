@@ -9,6 +9,7 @@ private final class MacOSRustCoreCallbackBox: @unchecked Sendable {
     let stateStore: MacOSEncryptedStateStore
     var transport: (any IOSCoreTransport)?
     var onText: ((IOSReceivedTextMessage) -> Void)?
+    var onGroup: ((IOSGroupEvent) -> Void)?
 
     init(signer: any SharedCoreIdentitySigner,
          secrets: MacOSKeychainSecretProvider,
@@ -213,6 +214,36 @@ private func macOSRustText(
     }
 }
 
+private func macOSRustGroup(
+    _ context: UnsafeMutableRawPointer?,
+    _ conversation: UnsafePointer<UInt8>?,
+    _ conversationLength: Int,
+    _ kind: UInt32,
+    _ senderUser: UnsafePointer<UInt8>?,
+    _ senderUserLength: Int,
+    _ payload: UnsafePointer<UInt8>?,
+    _ payloadLength: Int) -> Int32 {
+    guard let box = callbackBox(context),
+          let conversation = callbackData(conversation, conversationLength),
+          let conversationID = String(data: conversation, encoding: .utf8),
+          let senderUser = callbackData(senderUser, senderUserLength),
+          let senderUserID = String(data: senderUser, encoding: .utf8),
+          let payload = callbackData(payload, payloadLength),
+          let text = String(data: payload, encoding: .utf8) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    let eventKind: IOSGroupEvent.Kind
+    switch Int(kind) {
+    case Int(LINKS_DESKTOP_GROUP_JOINED): eventKind = .joined
+    case Int(LINKS_DESKTOP_GROUP_RENAMED): eventKind = .renamed(name: text, byUserID: senderUserID)
+    case Int(LINKS_DESKTOP_GROUP_MEMBERS_CHANGED): eventKind = .membersChanged
+    case Int(LINKS_DESKTOP_GROUP_REMOVED): eventKind = .removed
+    default: return Int32(LINKS_DESKTOP_INVALID)
+    }
+    box.onGroup?(IOSGroupEvent(conversationID: conversationID, kind: eventKind))
+    return Int32(LINKS_DESKTOP_OK)
+}
+
 enum MacOSRustCoreError: Error {
     case status(Int32)
 }
@@ -253,7 +284,7 @@ private final class MacOSRustSharedCore: SharedClientCore {
         let callbacks = MacOSRustCoreCallbackBox(
             signer: signer, secrets: secrets, stateStore: stateStore)
         var callbackTable = LinksDesktopCoreCallbacks(
-            abi_version: 1,
+            abi_version: 2,
             context: Unmanaged.passUnretained(callbacks).toOpaque(),
             sign: macOSRustSign,
             store_secret: macOSRustStoreSecret,
@@ -263,7 +294,8 @@ private final class MacOSRustSharedCore: SharedClientCore {
             save_state: macOSRustSaveState,
             send_frame: macOSRustSendFrame,
             on_text: macOSRustText,
-            identity_public_key: publicKeyTuple)
+            identity_public_key: publicKeyTuple,
+            on_group: macOSRustGroup)
         var created: OpaquePointer?
         let status = credential.withUnsafeBytes { credentialBytes in
             identity.userID.withCString { userBytes in
@@ -477,6 +509,145 @@ private final class MacOSRustSharedCore: SharedClientCore {
         }
     }
 
+    // MARK: Groups
+
+    func setGroupEventHandler(_ handler: @escaping (IOSGroupEvent) -> Void) {
+        lock.lock()
+        callbacks.onGroup = handler
+        lock.unlock()
+    }
+
+    func registerRecipientDevices(_ devices: [IOSClaimedRecipientDevice]) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        for recipient in devices {
+            let status = recipient.userID.withCString { user in
+                recipient.deviceID.withCString { device in
+                    recipient.identityPublicKey.withUnsafeBytes { identityKey in
+                        recipient.preKeyBundle.withUnsafeBytes { bundle in
+                            recipient.mlsCredential.withUnsafeBytes { credential in
+                                recipient.mlsKeyPackage.withUnsafeBytes { package in
+                                    links_desktop_core_set_recipient(
+                                        pointer,
+                                        UnsafeRawPointer(user).assumingMemoryBound(to: UInt8.self), recipient.userID.utf8.count,
+                                        UnsafeRawPointer(device).assumingMemoryBound(to: UInt8.self), recipient.deviceID.utf8.count,
+                                        identityKey.bindMemory(to: UInt8.self).baseAddress!, recipient.identityPublicKey.count,
+                                        bundle.bindMemory(to: UInt8.self).baseAddress!, recipient.preKeyBundle.count,
+                                        credential.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsCredential.count,
+                                        package.bindMemory(to: UInt8.self).baseAddress!, recipient.mlsKeyPackage.count)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        }
+    }
+
+    /// Run a group call with one or two UTF-8 arguments while a transport is
+    /// attached for any frames the core sends.
+    private func groupCall(_ conversationID: String, _ argument: String? = nil,
+                           transport: (any IOSCoreTransport)? = nil,
+                           _ body: (OpaquePointer, UnsafePointer<UInt8>, Int,
+                                    UnsafePointer<UInt8>?, Int) -> Int32) throws {
+        lock.lock()
+        callbacks.transport = transport
+        defer {
+            callbacks.transport = nil
+            lock.unlock()
+        }
+        let conversation = Array(conversationID.utf8)
+        let extra = Array((argument ?? "").utf8)
+        let status = conversation.withUnsafeBufferPointer { conversationBytes in
+            extra.withUnsafeBufferPointer { extraBytes in
+                body(pointer, conversationBytes.baseAddress!, conversation.count,
+                     argument == nil ? nil : extraBytes.baseAddress, extra.count)
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else {
+            if transport != nil { currentIssue = .sendFailed }
+            throw coreError(for: status)
+        }
+    }
+
+    private func groupList(_ conversationID: String,
+                           _ body: (OpaquePointer, UnsafePointer<UInt8>, Int,
+                                    UnsafeMutablePointer<UInt8>, Int, UnsafeMutablePointer<Int>) -> Int32)
+        throws -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        let conversation = Array(conversationID.utf8)
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        var length = 0
+        let capacity = buffer.count
+        let status = conversation.withUnsafeBufferPointer { conversationBytes in
+            buffer.withUnsafeMutableBufferPointer { output in
+                body(pointer, conversationBytes.baseAddress!, conversation.count,
+                     output.baseAddress!, capacity, &length)
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        guard let text = String(bytes: buffer.prefix(length), encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").map(String.init)
+    }
+
+    func createGroup(conversationID: String) throws {
+        try groupCall(conversationID) { core, id, idLength, _, _ in
+            links_desktop_core_create_group(core, id, idLength)
+        }
+    }
+
+    func addGroupMembers(conversationID: String, userIDs: [String],
+                         transport: any IOSCoreTransport) throws {
+        try groupCall(conversationID, userIDs.joined(separator: "\n"), transport: transport) {
+            core, id, idLength, users, usersLength in
+            links_desktop_core_add_group_members(core, id, idLength, users, usersLength)
+        }
+    }
+
+    func removeGroupMember(conversationID: String, userID: String,
+                           transport: any IOSCoreTransport) throws {
+        try groupCall(conversationID, userID, transport: transport) {
+            core, id, idLength, user, userLength in
+            links_desktop_core_remove_group_member(core, id, idLength, user, userLength)
+        }
+    }
+
+    func leaveGroup(conversationID: String) throws {
+        try groupCall(conversationID) { core, id, idLength, _, _ in
+            links_desktop_core_leave_group(core, id, idLength)
+        }
+    }
+
+    func sendGroupText(conversationID: String, text: String,
+                       transport: any IOSCoreTransport) throws {
+        try groupCall(conversationID, text, transport: transport) {
+            core, id, idLength, text, textLength in
+            links_desktop_core_send_group_text(core, id, idLength, text, textLength)
+        }
+    }
+
+    func setGroupName(conversationID: String, name: String,
+                      transport: any IOSCoreTransport) throws {
+        try groupCall(conversationID, name, transport: transport) {
+            core, id, idLength, name, nameLength in
+            links_desktop_core_set_group_name(core, id, idLength, name, nameLength)
+        }
+    }
+
+    func groupMembers(conversationID: String) throws -> [String] {
+        try groupList(conversationID) { core, id, idLength, output, capacity, length in
+            links_desktop_core_group_members(core, id, idLength, output, capacity, length)
+        }
+    }
+
+    func groupUsersMissingRecipients(conversationID: String) throws -> [String] {
+        try groupList(conversationID) { core, id, idLength, output, capacity, length in
+            links_desktop_core_group_missing_recipients(core, id, idLength, output, capacity, length)
+        }
+    }
+
     func resetDirectConversation(
         conversationID: String,
         recipientUserID: String,
@@ -635,12 +806,15 @@ final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
 
     func queryRecipientDevices(accessToken: String, recipientUserID: String)
         async throws -> [IOSRecipientDeviceDescriptor] {
-        guard let handle = handles()[recipientUserID] else {
-            throw IOSPreKeyError.invalidRecipient
-        }
         let directory: IOSUsernameDirectory
         do {
-            directory = try await directoryClient.lookup(handle: handle)
+            // Group members are often not saved contacts; look them up by ID.
+            if let handle = handles()[recipientUserID] {
+                directory = try await directoryClient.lookup(handle: handle)
+            } else {
+                directory = try await directoryClient.lookup(
+                    userID: recipientUserID, accessToken: accessToken)
+            }
         } catch let error as IOSUsernameAuthError {
             if case .serverRejected(let statusCode) = error, statusCode == 404 {
                 throw MacOSDirectoryError.accountNotFound

@@ -10,7 +10,8 @@ use links_client_core::{
     crypto::{RecipientKeyDirectory, SealedSenderCrypto, SealedSenderKeyResolver},
     envelopes::{ClientCore, FanoutRecipient},
     identity::LocalIdentity,
-    mls::{MlsCredentialVerifier, MlsEngine, OpenMlsEngine, RustCryptoProvider},
+    mls::{mls_handshake_kind, MlsCredentialVerifier, MlsEngine, MlsHandshake, OpenMlsEngine,
+          RustCryptoProvider},
     prekeys::{generate_profile, generate_upload, LocalPreKeyProfile, PreKeySecretStore,
               PreKeySigner, SecretKind},
     protocol::{self, v1},
@@ -21,7 +22,7 @@ use links_client_core::{
 use openmls::prelude::GroupId;
 use openmls_rust_crypto::MemoryStorage;
 use prost::Message;
-use std::{collections::{HashMap, HashSet}, ffi::c_void, panic::AssertUnwindSafe, slice, sync::{Arc, RwLock}};
+use std::{collections::{HashMap, HashSet}, ffi::c_void, panic::AssertUnwindSafe, slice, sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock}};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -31,11 +32,13 @@ pub const LINKS_DESKTOP_UNAVAILABLE: i32 = 2;
 pub const LINKS_DESKTOP_AUTHENTICATION: i32 = 3;
 pub const LINKS_DESKTOP_PROVIDER: i32 = 4;
 pub const LINKS_DESKTOP_STALE_CURSOR: i32 = 5;
-const ABI_VERSION: u32 = 1;
+const ABI_VERSION: u32 = 2;
 const MAX_OUTPUT_BYTES: usize = protocol::MAX_FRAME_BYTES;
 /// Persisted core state holds MLS storage, recipients and both outboxes, so it
 /// is not bounded by one frame. Matches the host encrypted state store limit.
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
+/// Users added by one invite; the MLS group itself is capped separately.
+const MAX_GROUP_USER_BATCH: usize = 50;
 
 pub type SignCallback = unsafe extern "C" fn(
     *mut c_void,
@@ -80,6 +83,23 @@ pub type TextCallback = unsafe extern "C" fn(
     u64,
     u64,
 ) -> i32;
+/// (context, conversation, kind, sender user, payload). Kinds are the
+/// `GROUP_EVENT_*` constants; payload is the UTF-8 group name for renames.
+pub type GroupCallback = unsafe extern "C" fn(
+    *mut c_void,
+    *const u8,
+    usize,
+    u32,
+    *const u8,
+    usize,
+    *const u8,
+    usize,
+) -> i32;
+
+pub const GROUP_EVENT_JOINED: u32 = 1;
+pub const GROUP_EVENT_RENAMED: u32 = 2;
+pub const GROUP_EVENT_MEMBERS_CHANGED: u32 = 3;
+pub const GROUP_EVENT_REMOVED: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -95,6 +115,7 @@ pub struct LinksDesktopCoreCallbacks {
     pub send_frame: Option<SendFrameCallback>,
     pub on_text: Option<TextCallback>,
     pub identity_public_key: [u8; 32],
+    pub on_group: Option<GroupCallback>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -121,6 +142,8 @@ struct PersistedState {
     published_key_package: Option<Vec<u8>>,
     #[prost(message, repeated, tag = "9")]
     recipients: Vec<PersistedRecipient>,
+    #[prost(string, repeated, tag = "12")]
+    groups: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -326,18 +349,44 @@ impl RecipientKeyDirectory for CallbackResolver {
 #[derive(Clone)]
 struct CallbackVerifier {
     bindings: Arc<RwLock<HashMap<Uuid, links_identity::DeviceBinding>>>,
+    /// Set only while applying a group Welcome or Commit. A joining device
+    /// cannot know every member in advance, so it accepts first-seen
+    /// credentials from that authenticated handshake. A credential that
+    /// contradicts a known binding is still rejected, and the host checks
+    /// each member against the directory before sending to them.
+    trust_new: Arc<AtomicBool>,
 }
 
 impl MlsCredentialVerifier for CallbackVerifier {
     fn verify(&self, binding: &links_identity::DeviceBinding) -> Result<(), CoreError> {
-        let bindings = self.bindings.read().map_err(|_| CoreError::Provider)?;
+        let mut bindings = self.bindings.write().map_err(|_| CoreError::Provider)?;
         let Some(expected) = bindings.get(&binding.device_id) else {
+            if self.trust_new.load(Ordering::SeqCst) {
+                bindings.insert(binding.device_id, binding.clone());
+                return Ok(());
+            }
             return Err(CoreError::Authentication);
         };
         if expected != binding {
             return Err(CoreError::Authentication);
         }
         Ok(())
+    }
+}
+
+/// Clears the verifier's first-seen trust even when the handshake fails.
+struct TrustNewGuard(Arc<AtomicBool>);
+
+impl TrustNewGuard {
+    fn new(flag: &Arc<AtomicBool>) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        Self(Arc::clone(flag))
+    }
+}
+
+impl Drop for TrustNewGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -368,6 +417,23 @@ pub struct LinksDesktopCore {
     pending_batch: Option<v1::SyncBatch>,
     discard_next_batch: bool,
     published_key_package: Option<Vec<u8>>,
+    /// Many-to-many conversations. Only these accept mailbox commits, so a
+    /// peer cannot grow a direct chat into a group.
+    groups: HashSet<String>,
+    trust_new: Arc<AtomicBool>,
+}
+
+enum MailboxItem {
+    Message { message: v1::Message, sender_user_id: String },
+    Event(GroupEvent),
+    Ignored,
+}
+
+enum GroupEvent {
+    Joined(String),
+    Renamed { conversation_id: String, sender_user_id: String, name: String },
+    MembersChanged(String),
+    Removed(String),
 }
 
 unsafe fn input<'a>(pointer: *const u8, length: usize, maximum: usize) -> Result<&'a [u8], i32> {
@@ -481,6 +547,7 @@ impl LinksDesktopCore {
             bootstrap_outbox: self.bootstrap_outbox.clone(),
             discard_next_batch: self.discard_next_batch,
             published_key_package: self.published_key_package.clone(),
+            groups: self.groups.iter().cloned().collect(),
             bindings: bindings.values().map(|binding| PersistedBinding {
                 user_id: binding.user_id.as_bytes().to_vec(),
                 device_id: binding.device_id.as_bytes().to_vec(),
@@ -603,6 +670,11 @@ impl LinksDesktopCore {
         self.published_key_package = state
             .published_key_package
             .filter(|package| !package.is_empty() && package.len() <= MAX_OUTPUT_BYTES);
+        self.groups = state
+            .groups
+            .into_iter()
+            .filter(|group| protocol::validate_id(group).is_ok())
+            .collect();
         self.recover_group_bindings()?;
         Ok(())
     }
@@ -844,6 +916,293 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         Ok(())
     }
 
+    fn require_group(&self, conversation_id: &str) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        if self.groups.contains(conversation_id) {
+            Ok(())
+        } else {
+            Err(CoreError::Authentication)
+        }
+    }
+
+    /// Install sealed-sender keys and build one envelope identity per device.
+    /// Every device needs a directory-verified recipient record first.
+    fn fanout_for_devices(&mut self, device_ids: &[String]) -> Result<Vec<FanoutRecipient>, CoreError> {
+        let mut fanout = Vec::with_capacity(device_ids.len());
+        for device_id in device_ids {
+            let record = self
+                .recipients
+                .values()
+                .flatten()
+                .find(|record| &record.device_id == device_id)
+                .ok_or(CoreError::Authentication)?;
+            let recipient = RecipientDevice::new(
+                record.user_id.clone(),
+                record.device_id.clone(),
+                record.identity_public_key,
+                record.prekey_bundle.clone(),
+                record.mls_key_package.clone(),
+            )?;
+            let sealed_key = recipient.verify()?;
+            self.client
+                .crypto_mut()
+                .install_recipient_public_key(device_id, sealed_key)?;
+            fanout.push(FanoutRecipient::new(device_id.clone())?);
+        }
+        Ok(fanout)
+    }
+
+    /// Queue, persist and send already-sealed envelopes.
+    fn send_envelopes(&mut self, envelopes: Vec<v1::Envelope>) -> Result<(), CoreError> {
+        let mut frames = Vec::with_capacity(envelopes.len());
+        for envelope in envelopes {
+            protocol::validate_envelope(&envelope)?;
+            frames.push(self.encode_client_frame(v1::client_frame::Body::Send(envelope))?);
+        }
+        self.outbox.extend(frames.iter().cloned());
+        self.save()?;
+        for frame in frames {
+            self.send_frame(&frame)?;
+        }
+        Ok(())
+    }
+
+    fn other_member_devices(&self, conversation_id: &str) -> Result<Vec<String>, CoreError> {
+        let own = self.client.device_id().to_owned();
+        Ok(self
+            .client
+            .mls()
+            .group_member_leaves(conversation_id)?
+            .into_iter()
+            .map(|(_, binding)| binding.device_id.to_string())
+            .filter(|device| device != &own)
+            .collect())
+    }
+
+    fn create_group(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        self.client.mls_mut().create_group_for(conversation_id)?;
+        self.groups.insert(conversation_id.to_owned());
+        self.save()
+    }
+
+    /// Add every recorded device of these users. Existing members receive the
+    /// commit and new devices the Welcome, both through the ordered mailbox.
+    fn add_group_members(&mut self, conversation_id: &str, user_ids: &[String]) -> Result<(), CoreError> {
+        self.require_group(conversation_id)?;
+        if user_ids.is_empty() || user_ids.len() > MAX_GROUP_USER_BATCH {
+            return Err(CoreError::Authentication);
+        }
+        let existing = self.other_member_devices(conversation_id)?;
+        let mut new_devices = Vec::new();
+        let mut packages = Vec::new();
+        for user_id in user_ids {
+            protocol::validate_id(user_id)?;
+            if user_id == self.client.user_id() {
+                return Err(CoreError::Authentication);
+            }
+            let records = self.recipients.get(user_id).ok_or(CoreError::Authentication)?;
+            for record in records {
+                if !existing.contains(&record.device_id) && !new_devices.contains(&record.device_id) {
+                    new_devices.push(record.device_id.clone());
+                    packages.push(record.mls_key_package.clone());
+                }
+            }
+        }
+        if packages.is_empty() {
+            return Ok(());
+        }
+        let package_refs = packages.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let pending = self
+            .client
+            .mls_mut()
+            .add_group_members(conversation_id, &package_refs)?;
+        let welcome = pending.welcome.clone().ok_or(CoreError::Provider)?;
+        let now = now_ms();
+        let expires = now.checked_add(protocol::MAX_RETENTION_MS).ok_or(CoreError::Provider)?;
+        let mut envelopes = Vec::new();
+        if !existing.is_empty() {
+            let fanout = self.fanout_for_devices(&existing)?;
+            envelopes.extend(self.client.seal_handshake_for_devices(&pending.commit, &fanout, expires, now)?);
+        }
+        let fanout = self.fanout_for_devices(&new_devices)?;
+        envelopes.extend(self.client.seal_handshake_for_devices(&welcome, &fanout, expires, now)?);
+        self.client.mls_mut().merge_pending_commit(conversation_id)?;
+        self.send_envelopes(envelopes)
+    }
+
+    /// Remove every device of one user. The removed devices also receive the
+    /// commit so they learn they left the group.
+    fn remove_group_member(&mut self, conversation_id: &str, user_id: &str) -> Result<(), CoreError> {
+        self.require_group(conversation_id)?;
+        protocol::validate_id(user_id)?;
+        if user_id == self.client.user_id() {
+            return Err(CoreError::Authentication);
+        }
+        let own = self.client.device_id().to_owned();
+        let leaves = self.client.mls().group_member_leaves(conversation_id)?;
+        let removed = leaves
+            .iter()
+            .filter(|(_, binding)| binding.user_id.to_string() == user_id)
+            .map(|(leaf, _)| *leaf)
+            .collect::<Vec<_>>();
+        if removed.is_empty() {
+            return Ok(());
+        }
+        let recipients = leaves
+            .iter()
+            .map(|(_, binding)| binding.device_id.to_string())
+            .filter(|device| device != &own)
+            .collect::<Vec<_>>();
+        let pending = self.client.mls_mut().remove_members(conversation_id, &removed)?;
+        let now = now_ms();
+        let expires = now.checked_add(protocol::MAX_RETENTION_MS).ok_or(CoreError::Provider)?;
+        let fanout = self.fanout_for_devices(&recipients)?;
+        let envelopes = self.client.seal_handshake_for_devices(&pending.commit, &fanout, expires, now)?;
+        self.client.mls_mut().merge_pending_commit(conversation_id)?;
+        self.send_envelopes(envelopes)
+    }
+
+    fn leave_group(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        self.client.mls_mut().delete_group(conversation_id)?;
+        self.groups.remove(conversation_id);
+        self.save()
+    }
+
+    fn group_member_users(&self, conversation_id: &str) -> Result<Vec<String>, CoreError> {
+        self.require_group(conversation_id)?;
+        let mut users = Vec::new();
+        for (_, binding) in self.client.mls().group_member_leaves(conversation_id)? {
+            let user = binding.user_id.to_string();
+            if !users.contains(&user) {
+                users.push(user);
+            }
+        }
+        Ok(users)
+    }
+
+    /// Members with at least one device this core cannot seal to yet. The
+    /// host fetches those users from the directory before sending.
+    fn group_users_missing_recipients(&self, conversation_id: &str) -> Result<Vec<String>, CoreError> {
+        self.require_group(conversation_id)?;
+        let own = self.client.device_id().to_owned();
+        let mut missing = Vec::new();
+        for (_, binding) in self.client.mls().group_member_leaves(conversation_id)? {
+            let device = binding.device_id.to_string();
+            let user = binding.user_id.to_string();
+            let known = self
+                .recipients
+                .get(&user)
+                .is_some_and(|records| records.iter().any(|record| record.device_id == device));
+            if device != own && !known && !missing.contains(&user) {
+                missing.push(user);
+            }
+        }
+        Ok(missing)
+    }
+
+    fn send_group_content(&mut self, conversation_id: &str, content: v1::message::Content) -> Result<(), CoreError> {
+        self.require_group(conversation_id)?;
+        let devices = self.other_member_devices(conversation_id)?;
+        if devices.is_empty() {
+            return Err(CoreError::Authentication);
+        }
+        let fanout = self.fanout_for_devices(&devices)?;
+        let now = now_ms();
+        let mut sequence = ConversationSequence::restore(
+            conversation_id.to_owned(),
+            self.client.device_id().to_owned(),
+            self.sequences.get(conversation_id).copied().unwrap_or(0),
+        )?;
+        let message = v1::Message {
+            message_id: Uuid::new_v4().to_string(),
+            conversation_id: conversation_id.to_owned(),
+            sender_device_id: self.client.device_id().to_owned(),
+            sent_at_ms: now,
+            sequence_id: 0,
+            content: Some(content),
+        };
+        let expires = now.checked_add(protocol::MAX_RETENTION_MS).ok_or(CoreError::Provider)?;
+        let (_, envelopes) = self
+            .client
+            .seal_next_message_for_devices(message, &mut sequence, &fanout, expires, now)?;
+        self.sequences.insert(conversation_id.to_owned(), sequence.last_sequence_id());
+        self.send_envelopes(envelopes)
+    }
+
+    fn send_group_text(&mut self, conversation_id: &str, text: &str) -> Result<(), CoreError> {
+        if text.is_empty() || text.len() > protocol::MAX_MESSAGE_BYTES {
+            return Err(CoreError::Authentication);
+        }
+        self.send_group_content(conversation_id, v1::message::Content::Text(text.to_owned()))
+    }
+
+    fn send_group_name(&mut self, conversation_id: &str, name: &str) -> Result<(), CoreError> {
+        let control = v1::MlsControl {
+            protocol_version: protocol::VERSION,
+            body: Some(v1::mls_control::Body::GroupInfo(v1::GroupInfo {
+                name: name.trim().to_owned(),
+            })),
+        };
+        protocol::validate_mls_control(&control)?;
+        self.send_group_content(conversation_id, v1::message::Content::MlsControl(control))
+    }
+
+    /// Apply a mailbox Welcome or Commit. Returns the event to report, or
+    /// None when the handshake does not apply to this device.
+    fn apply_group_handshake(&mut self, raw: &[u8]) -> Result<Option<GroupEvent>, CoreError> {
+        match mls_handshake_kind(raw)? {
+            MlsHandshake::Welcome => {
+                let _trust = TrustNewGuard::new(&self.trust_new);
+                let conversation_id = self.client.mls_mut().join_group_from_welcome(raw)?;
+                self.groups.insert(conversation_id.clone());
+                Ok(Some(GroupEvent::Joined(conversation_id)))
+            }
+            MlsHandshake::Commit { conversation_id } if self.groups.contains(&conversation_id) => {
+                let still_member = {
+                    let _trust = TrustNewGuard::new(&self.trust_new);
+                    self.client.mls_mut().process_group_commit(&conversation_id, raw)?
+                };
+                if still_member {
+                    Ok(Some(GroupEvent::MembersChanged(conversation_id)))
+                } else {
+                    self.client.mls_mut().delete_group(&conversation_id)?;
+                    self.groups.remove(&conversation_id);
+                    Ok(Some(GroupEvent::Removed(conversation_id)))
+                }
+            }
+            _ => Err(CoreError::Authentication),
+        }
+    }
+
+    fn emit_group_events(&self, events: Vec<GroupEvent>) -> Result<(), CoreError> {
+        let Some(callback) = self.callbacks.on_group else { return Ok(()) };
+        for event in events {
+            let (conversation, kind, sender, payload) = match &event {
+                GroupEvent::Joined(id) => (id.as_str(), GROUP_EVENT_JOINED, "", ""),
+                GroupEvent::Renamed { conversation_id, sender_user_id, name } => (
+                    conversation_id.as_str(),
+                    GROUP_EVENT_RENAMED,
+                    sender_user_id.as_str(),
+                    name.as_str(),
+                ),
+                GroupEvent::MembersChanged(id) => (id.as_str(), GROUP_EVENT_MEMBERS_CHANGED, "", ""),
+                GroupEvent::Removed(id) => (id.as_str(), GROUP_EVENT_REMOVED, "", ""),
+            };
+            callback_status(unsafe {
+                callback(
+                    self.callbacks.context,
+                    conversation.as_ptr(), conversation.len(),
+                    kind,
+                    sender.as_ptr(), sender.len(),
+                    payload.as_ptr(), payload.len(),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
     fn handle_frame(&mut self, bytes: &[u8]) -> Result<(), CoreError> {
         let frame = v1::ServerFrame::decode(bytes).map_err(|_| CoreError::Protocol(protocol::ProtocolError::Malformed))?;
         protocol::validate_id(&frame.request_id)?;
@@ -926,12 +1285,33 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         self.retry_pending_batch()
     }
 
+    /// Open one mailbox envelope. Group handshakes are applied here; failures
+    /// surface as Authentication so the caller skips the item.
+    fn open_mailbox_envelope(&mut self, envelope: &v1::Envelope) -> Result<MailboxItem, CoreError> {
+        let raw = self.client.open_envelope_raw(envelope, now_ms())?;
+        match mls_handshake_kind(raw.as_bytes()).map_err(|_| CoreError::Authentication)? {
+            MlsHandshake::Application { .. } => {
+                let opened = self.client.decrypt_opened(raw.as_bytes())?;
+                Ok(MailboxItem::Message {
+                    message: opened.message,
+                    sender_user_id: opened.sender_user_id,
+                })
+            }
+            MlsHandshake::Proposal { .. } => Ok(MailboxItem::Ignored),
+            MlsHandshake::Welcome | MlsHandshake::Commit { .. } => self
+                .apply_group_handshake(raw.as_bytes())
+                .map(|event| event.map_or(MailboxItem::Ignored, MailboxItem::Event))
+                .map_err(|_| CoreError::Authentication),
+        }
+    }
+
     fn handle_batch(&mut self, batch: v1::SyncBatch) -> Result<(), CoreError> {
         protocol::validate_sync_batch(&batch)?;
         if batch.recipient_device_id != self.client.device_id() || batch.after_cursor != self.cursor {
             return Err(CoreError::InvalidSync);
         }
         let mut rendered = Vec::new();
+        let mut events = Vec::new();
         for item in &batch.items {
             let Some(entry) = item.entry.as_ref() else { return Err(CoreError::InvalidSync) };
             if let v1::queue_item::Entry::Envelope(envelope) = entry {
@@ -944,19 +1324,30 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                     .read()
                     .map_err(|_| CoreError::Provider)?
                     .clone();
-                match self.client.open_envelope_authenticated(envelope, now_ms()) {
-                    Ok(message) => {
-                        let sender_user_id = message.sender_user_id;
-                        let message = message.message;
-                        if let Some(v1::message::Content::Text(text)) = message.content {
-                            rendered.push((
+                match self.open_mailbox_envelope(envelope) {
+                    Ok(MailboxItem::Event(event)) => events.push(event),
+                    Ok(MailboxItem::Ignored) => {}
+                    Ok(MailboxItem::Message { message, sender_user_id }) => {
+                        match message.content {
+                            Some(v1::message::Content::Text(text)) => rendered.push((
                                 message.conversation_id,
                                 sender_user_id,
                                 message.sender_device_id,
                                 text,
                                 message.sequence_id,
                                 message.sent_at_ms,
-                            ));
+                            )),
+                            Some(v1::message::Content::MlsControl(v1::MlsControl {
+                                body: Some(v1::mls_control::Body::GroupInfo(info)),
+                                ..
+                            })) if self.groups.contains(&message.conversation_id) => {
+                                events.push(GroupEvent::Renamed {
+                                    conversation_id: message.conversation_id,
+                                    sender_user_id,
+                                    name: info.name,
+                                });
+                            }
+                            _ => {}
                         }
                     }
                     // The gateway delivers every stored welcome before the
@@ -982,6 +1373,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
             }))?;
             self.send_frame(&replay)?;
         }
+        self.emit_group_events(events)?;
         if let Some(callback) = self.callbacks.on_text {
             for (conversation, sender_user, sender, text, sequence, sent_at) in rendered {
                 let conversation_bytes = conversation.as_bytes();
@@ -1104,7 +1496,11 @@ pub unsafe extern "C" fn links_desktop_core_create(
             }
             let bindings = Arc::new(RwLock::new(HashMap::from([(local_binding.device_id, local_binding.clone())])));
             let signer = CallbackSigner { callbacks };
-            let verifier = CallbackVerifier { bindings: Arc::clone(&bindings) };
+            let trust_new = Arc::new(AtomicBool::new(false));
+            let verifier = CallbackVerifier {
+                bindings: Arc::clone(&bindings),
+                trust_new: Arc::clone(&trust_new),
+            };
             let provider = RustCryptoProvider::new(MemoryStorage::default());
             let mls = OpenMlsEngine::new(provider, signer.clone(), credential, verifier)
                 .map_err(status)?;
@@ -1131,6 +1527,8 @@ pub unsafe extern "C" fn links_desktop_core_create(
                 pending_batch: None,
                 discard_next_batch: false,
                 published_key_package: None,
+                groups: HashSet::new(),
+                trust_new,
             };
             if let Some(state) = load_state(callbacks).map_err(status)? {
                 core.restore_state(state).map_err(status)?;
@@ -1433,4 +1831,519 @@ pub unsafe extern "C" fn links_desktop_core_send_text(
         })();
         result.map_or_else(status, |_| LINKS_DESKTOP_OK)
     })
+}
+
+unsafe fn input_string(pointer: *const u8, length: usize, maximum: usize) -> Result<String, CoreError> {
+    let bytes = unsafe { input(pointer, length, maximum) }.map_err(|_| CoreError::Authentication)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| CoreError::Authentication)
+}
+
+unsafe fn group_call(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    work: impl FnOnce(&mut LinksDesktopCore, String) -> Result<(), CoreError>,
+) -> i32 {
+    boundary(|| {
+        if core.is_null() { return LINKS_DESKTOP_INVALID; }
+        let result = (|| -> Result<(), CoreError> {
+            let conversation = unsafe { input_string(conversation_id, conversation_id_length, 64) }?;
+            work(unsafe { &mut *core }, conversation)
+        })();
+        result.map_or_else(status, |_| LINKS_DESKTOP_OK)
+    })
+}
+
+unsafe fn group_list_call(
+    core: *const LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    output: *mut u8,
+    capacity: usize,
+    length: *mut usize,
+    work: impl FnOnce(&LinksDesktopCore, &str) -> Result<Vec<String>, CoreError>,
+) -> i32 {
+    boundary(|| {
+        if core.is_null() { return LINKS_DESKTOP_INVALID; }
+        let result = (|| -> Result<Vec<u8>, CoreError> {
+            let conversation = unsafe { input_string(conversation_id, conversation_id_length, 64) }?;
+            Ok(work(unsafe { &*core }, &conversation)?.join("\n").into_bytes())
+        })();
+        match result {
+            Ok(bytes) => unsafe { write_output(&bytes, output, capacity, length) },
+            Err(error) => status(error),
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_create_group(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+) -> i32 {
+    unsafe { group_call(core, conversation_id, conversation_id_length, |core, conversation| core.create_group(&conversation)) }
+}
+
+/// `user_ids` is a newline-separated list of account IDs whose devices were
+/// already registered with `links_desktop_core_set_recipient`.
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_add_group_members(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    user_ids: *const u8,
+    user_ids_length: usize,
+) -> i32 {
+    unsafe {
+        group_call(core, conversation_id, conversation_id_length, |core, conversation| {
+            let list = input_string(user_ids, user_ids_length, 64 * MAX_GROUP_USER_BATCH)?;
+            let users = list.split('\n').filter(|user| !user.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+            core.add_group_members(&conversation, &users)
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_remove_group_member(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    user_id: *const u8,
+    user_id_length: usize,
+) -> i32 {
+    unsafe {
+        group_call(core, conversation_id, conversation_id_length, |core, conversation| {
+            let user = input_string(user_id, user_id_length, 64)?;
+            core.remove_group_member(&conversation, &user)
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_leave_group(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+) -> i32 {
+    unsafe { group_call(core, conversation_id, conversation_id_length, |core, conversation| core.leave_group(&conversation)) }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_send_group_text(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    text: *const u8,
+    text_length: usize,
+) -> i32 {
+    unsafe {
+        group_call(core, conversation_id, conversation_id_length, |core, conversation| {
+            let text = input_string(text, text_length, protocol::MAX_MESSAGE_BYTES)?;
+            core.send_group_text(&conversation, &text)
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_set_group_name(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    name: *const u8,
+    name_length: usize,
+) -> i32 {
+    unsafe {
+        group_call(core, conversation_id, conversation_id_length, |core, conversation| {
+            let name = input_string(name, name_length, 4 * protocol::MAX_GROUP_NAME_CHARS)?;
+            core.send_group_name(&conversation, &name)
+        })
+    }
+}
+
+/// Newline-separated account IDs of every current member, including self.
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_group_members(
+    core: *const LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    output: *mut u8,
+    capacity: usize,
+    length: *mut usize,
+) -> i32 {
+    unsafe {
+        group_list_call(core, conversation_id, conversation_id_length, output, capacity, length, |core, conversation| {
+            core.group_member_users(conversation)
+        })
+    }
+}
+
+/// Newline-separated account IDs with a device this core cannot seal to yet.
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_group_missing_recipients(
+    core: *const LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    output: *mut u8,
+    capacity: usize,
+    length: *mut usize,
+) -> i32 {
+    unsafe {
+        group_list_call(core, conversation_id, conversation_id_length, output, capacity, length, |core, conversation| {
+            core.group_users_missing_recipients(conversation)
+        })
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+    use links_identity::IdentitySeed;
+    use std::collections::VecDeque;
+
+    #[derive(Default)]
+    struct Host {
+        seed: Option<IdentitySeed>,
+        secrets: HashMap<Vec<u8>, Vec<u8>>,
+        state: Vec<u8>,
+        sent: Vec<Vec<u8>>,
+        texts: Vec<(String, String, String)>,
+        events: Vec<(String, u32, String)>,
+    }
+
+    unsafe fn host<'a>(context: *mut c_void) -> &'a mut Host {
+        unsafe { &mut *(context as *mut Host) }
+    }
+
+    unsafe fn bytes<'a>(pointer: *const u8, length: usize) -> &'a [u8] {
+        if length == 0 { &[] } else { unsafe { slice::from_raw_parts(pointer, length) } }
+    }
+
+    unsafe extern "C" fn sign(context: *mut c_void, data: *const u8, length: usize, output: *mut u8) -> i32 {
+        let host = unsafe { host(context) };
+        let signature = host.seed.as_ref().unwrap().sign(unsafe { bytes(data, length) });
+        unsafe { output.copy_from_nonoverlapping(signature.as_ptr(), 64) };
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn store_secret(context: *mut c_void, key: *const u8, key_length: usize, secret: *const u8, secret_length: usize) -> i32 {
+        let host = unsafe { host(context) };
+        host.secrets.insert(unsafe { bytes(key, key_length) }.to_vec(), unsafe { bytes(secret, secret_length) }.to_vec());
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn load_secret(context: *mut c_void, key: *const u8, key_length: usize, output: *mut u8, capacity: usize, length: *mut usize) -> i32 {
+        let host = unsafe { host(context) };
+        let Some(secret) = host.secrets.get(unsafe { bytes(key, key_length) }) else { return LINKS_DESKTOP_PROVIDER };
+        unsafe { length.write(secret.len()) };
+        if output.is_null() || capacity < secret.len() { return LINKS_DESKTOP_INVALID; }
+        unsafe { output.copy_from_nonoverlapping(secret.as_ptr(), secret.len()) };
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn delete_secret(context: *mut c_void, key: *const u8, key_length: usize) -> i32 {
+        unsafe { host(context) }.secrets.remove(unsafe { bytes(key, key_length) });
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn load_state(context: *mut c_void, output: *mut u8, capacity: usize, length: *mut usize) -> i32 {
+        let host = unsafe { host(context) };
+        unsafe { length.write(host.state.len()) };
+        if output.is_null() { return LINKS_DESKTOP_OK; }
+        if capacity < host.state.len() { return LINKS_DESKTOP_INVALID; }
+        unsafe { output.copy_from_nonoverlapping(host.state.as_ptr(), host.state.len()) };
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn save_state(context: *mut c_void, data: *const u8, length: usize) -> i32 {
+        unsafe { host(context) }.state = unsafe { bytes(data, length) }.to_vec();
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn send_frame(context: *mut c_void, data: *const u8, length: usize) -> i32 {
+        unsafe { host(context) }.sent.push(unsafe { bytes(data, length) }.to_vec());
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn on_text(
+        context: *mut c_void,
+        conversation: *const u8, conversation_length: usize,
+        sender_user: *const u8, sender_user_length: usize,
+        _sender: *const u8, _sender_length: usize,
+        text: *const u8, text_length: usize,
+        _sequence: u64, _sent_at: u64,
+    ) -> i32 {
+        let host = unsafe { host(context) };
+        let text_of = |pointer, length| String::from_utf8(unsafe { bytes(pointer, length) }.to_vec()).unwrap();
+        host.texts.push((
+            text_of(conversation, conversation_length),
+            text_of(sender_user, sender_user_length),
+            text_of(text, text_length),
+        ));
+        LINKS_DESKTOP_OK
+    }
+
+    unsafe extern "C" fn on_group(
+        context: *mut c_void,
+        conversation: *const u8, conversation_length: usize,
+        kind: u32,
+        _sender: *const u8, _sender_length: usize,
+        payload: *const u8, payload_length: usize,
+    ) -> i32 {
+        let host = unsafe { host(context) };
+        let text_of = |pointer, length| String::from_utf8(unsafe { bytes(pointer, length) }.to_vec()).unwrap();
+        host.events.push((text_of(conversation, conversation_length), kind, text_of(payload, payload_length)));
+        LINKS_DESKTOP_OK
+    }
+
+    struct Device {
+        core: *mut LinksDesktopCore,
+        host: Box<Host>,
+        user_id: String,
+        device_id: String,
+        public_key: [u8; 32],
+        credential: Vec<u8>,
+        bundle: Vec<u8>,
+        key_package: Vec<u8>,
+        cursor: u64,
+    }
+
+    fn random_uuid() -> Uuid {
+        let mut raw = [0u8; 16];
+        getrandom_fill(&mut raw);
+        raw[6] = (raw[6] & 0x0f) | 0x40;
+        raw[8] = (raw[8] & 0x3f) | 0x80;
+        Uuid::from_bytes(raw)
+    }
+
+    fn getrandom_fill(bytes: &mut [u8]) {
+        let seed = IdentitySeed::generate().unwrap();
+        bytes.copy_from_slice(&seed.expose_for_wrapping()[..bytes.len()]);
+    }
+
+    fn output_of(call: impl Fn(*mut u8, usize, *mut usize) -> i32) -> Vec<u8> {
+        let mut buffer = vec![0u8; 2 * 1024 * 1024];
+        let mut length = 0usize;
+        assert_eq!(call(buffer.as_mut_ptr(), buffer.len(), &mut length), LINKS_DESKTOP_OK);
+        buffer.truncate(length);
+        buffer
+    }
+
+    impl Device {
+        fn new() -> Self {
+            let seed = IdentitySeed::generate().unwrap();
+            let public_key = seed.public_key();
+            let user = random_uuid();
+            let device = random_uuid();
+            let credential = links_identity::DeviceBinding {
+                user_id: user,
+                device_id: device,
+                mls_node_id: random_uuid(),
+                public_key,
+            }
+            .mls_credential()
+            .unwrap();
+            let mut host = Box::new(Host { seed: Some(seed), ..Host::default() });
+            let callbacks = LinksDesktopCoreCallbacks {
+                abi_version: ABI_VERSION,
+                context: (&mut *host) as *mut Host as *mut c_void,
+                sign: Some(sign),
+                store_secret: Some(store_secret),
+                load_secret: Some(load_secret),
+                delete_secret: Some(delete_secret),
+                load_state: Some(load_state),
+                save_state: Some(save_state),
+                send_frame: Some(send_frame),
+                on_text: Some(on_text),
+                identity_public_key: public_key,
+                on_group: Some(on_group),
+            };
+            let user_id = user.to_string();
+            let device_id = device.to_string();
+            let mut core = std::ptr::null_mut();
+            let status = unsafe {
+                links_desktop_core_create(
+                    user_id.as_ptr(), user_id.len(),
+                    device_id.as_ptr(), device_id.len(),
+                    credential.as_ptr(), credential.len(),
+                    &callbacks, &mut core,
+                )
+            };
+            assert_eq!(status, LINKS_DESKTOP_OK);
+            let upload = output_of(|out, cap, len| unsafe {
+                links_desktop_core_generate_prekey_upload(core, 2, 2, out, cap, len)
+            });
+            let upload = v1::PreKeyUpload::decode(upload.as_slice()).unwrap();
+            let bundle = v1::PreKeyBundle {
+                protocol_version: protocol::VERSION,
+                device_id: device_id.clone(),
+                profile_revision: upload.profile_revision,
+                profile: upload.profile.clone(),
+                one_time_curve_prekey: upload.one_time_curve_prekeys.first().cloned(),
+                kem_prekey: upload.one_time_kem_prekeys.first().cloned(),
+            }
+            .encode_to_vec();
+            let key_package = output_of(|out, cap, len| unsafe {
+                links_desktop_core_generate_mls_key_package(core, out, cap, len)
+            });
+            Self { core, host, user_id, device_id, public_key, credential, bundle, key_package, cursor: 0 }
+        }
+
+        fn know(&self, peer: &Device) {
+            let status = unsafe {
+                links_desktop_core_set_recipient(
+                    self.core,
+                    peer.user_id.as_ptr(), peer.user_id.len(),
+                    peer.device_id.as_ptr(), peer.device_id.len(),
+                    peer.public_key.as_ptr(), peer.public_key.len(),
+                    peer.bundle.as_ptr(), peer.bundle.len(),
+                    peer.credential.as_ptr(), peer.credential.len(),
+                    peer.key_package.as_ptr(), peer.key_package.len(),
+                )
+            };
+            assert_eq!(status, LINKS_DESKTOP_OK);
+        }
+
+        fn members(&self, group: &str) -> Vec<String> {
+            let raw = output_of(|out, cap, len| unsafe {
+                links_desktop_core_group_members(self.core, group.as_ptr(), group.len(), out, cap, len)
+            });
+            let mut users = String::from_utf8(raw).unwrap().split('\n').map(str::to_owned).collect::<Vec<_>>();
+            users.sort();
+            users
+        }
+
+        fn missing(&self, group: &str) -> Vec<String> {
+            let raw = output_of(|out, cap, len| unsafe {
+                links_desktop_core_group_missing_recipients(self.core, group.as_ptr(), group.len(), out, cap, len)
+            });
+            String::from_utf8(raw).unwrap().split('\n').filter(|s| !s.is_empty()).map(str::to_owned).collect()
+        }
+
+        fn send_text(&self, group: &str, text: &str) -> i32 {
+            unsafe { links_desktop_core_send_group_text(self.core, group.as_ptr(), group.len(), text.as_ptr(), text.len()) }
+        }
+    }
+
+    /// Minimal gateway: routes Send envelopes into per-device mailboxes and
+    /// delivers them as ordered sync batches.
+    #[derive(Default)]
+    struct Mailboxes {
+        queues: HashMap<String, VecDeque<v1::Envelope>>,
+        next_cursor: HashMap<String, u64>,
+    }
+
+    impl Mailboxes {
+        fn collect(&mut self, device: &mut Device) {
+            for frame in device.host.sent.drain(..) {
+                let frame = v1::ClientFrame::decode(frame.as_slice()).unwrap();
+                if let Some(v1::client_frame::Body::Send(envelope)) = frame.body {
+                    self.queues.entry(envelope.recipient_device_id.clone()).or_default().push_back(envelope);
+                }
+            }
+        }
+
+        fn deliver(&mut self, device: &mut Device) {
+            let queue = self.queues.entry(device.device_id.clone()).or_default();
+            if queue.is_empty() {
+                return;
+            }
+            let start = *self.next_cursor.get(&device.device_id).unwrap_or(&0);
+            let mut items = Vec::new();
+            let mut cursor = start;
+            while let Some(envelope) = queue.pop_front() {
+                cursor += 1;
+                items.push(v1::QueueItem { cursor, entry: Some(v1::queue_item::Entry::Envelope(envelope)) });
+            }
+            self.next_cursor.insert(device.device_id.clone(), cursor);
+            let frame = v1::ServerFrame {
+                request_id: Uuid::new_v4().to_string(),
+                body: Some(v1::server_frame::Body::Batch(v1::SyncBatch {
+                    recipient_device_id: device.device_id.clone(),
+                    after_cursor: device.cursor,
+                    next_cursor: cursor,
+                    high_watermark: cursor,
+                    items,
+                })),
+            }
+            .encode_to_vec();
+            let status = unsafe { links_desktop_core_handle_server_frame(device.core, frame.as_ptr(), frame.len()) };
+            assert_eq!(status, LINKS_DESKTOP_OK);
+            device.cursor = cursor;
+            device.host.sent.clear();
+        }
+    }
+
+    #[test]
+    fn group_invite_message_rename_and_remove_across_devices() {
+        let mut alice = Device::new();
+        let mut bob = Device::new();
+        let mut carol = Device::new();
+        let mut mail = Mailboxes::default();
+        let group = Uuid::new_v4().to_string();
+
+        assert_eq!(unsafe { links_desktop_core_create_group(alice.core, group.as_ptr(), group.len()) }, LINKS_DESKTOP_OK);
+        alice.know(&bob);
+        alice.know(&carol);
+        let invitees = format!("{}\n{}", bob.user_id, carol.user_id);
+        let status = unsafe {
+            links_desktop_core_add_group_members(alice.core, group.as_ptr(), group.len(), invitees.as_ptr(), invitees.len())
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK);
+        let name = "Weekend plans";
+        assert_eq!(
+            unsafe { links_desktop_core_set_group_name(alice.core, group.as_ptr(), group.len(), name.as_ptr(), name.len()) },
+            LINKS_DESKTOP_OK
+        );
+        assert_eq!(alice.send_text(&group, "hello both"), LINKS_DESKTOP_OK);
+        mail.collect(&mut alice);
+        mail.deliver(&mut bob);
+        mail.deliver(&mut carol);
+
+        for member in [&bob, &carol] {
+            assert!(member.host.events.contains(&(group.clone(), GROUP_EVENT_JOINED, String::new())));
+            assert!(member.host.events.contains(&(group.clone(), GROUP_EVENT_RENAMED, name.to_owned())));
+            assert_eq!(member.host.texts, vec![(group.clone(), alice.user_id.clone(), "hello both".to_owned())]);
+        }
+        let mut everyone = vec![alice.user_id.clone(), bob.user_id.clone(), carol.user_id.clone()];
+        everyone.sort();
+        assert_eq!(bob.members(&group), everyone);
+
+        // A joiner must register the other members before it can send.
+        assert_eq!(bob.send_text(&group, "hi"), LINKS_DESKTOP_AUTHENTICATION);
+        let mut missing = bob.missing(&group);
+        missing.sort();
+        let mut expected = vec![alice.user_id.clone(), carol.user_id.clone()];
+        expected.sort();
+        assert_eq!(missing, expected);
+        bob.know(&alice);
+        bob.know(&carol);
+        assert!(bob.missing(&group).is_empty());
+        assert_eq!(bob.send_text(&group, "hi from bob"), LINKS_DESKTOP_OK);
+        mail.collect(&mut bob);
+        mail.deliver(&mut alice);
+        mail.deliver(&mut carol);
+        assert_eq!(alice.host.texts, vec![(group.clone(), bob.user_id.clone(), "hi from bob".to_owned())]);
+        assert!(carol.host.texts.contains(&(group.clone(), bob.user_id.clone(), "hi from bob".to_owned())));
+
+        let status = unsafe {
+            links_desktop_core_remove_group_member(alice.core, group.as_ptr(), group.len(), carol.user_id.as_ptr(), carol.user_id.len())
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK);
+        assert_eq!(alice.send_text(&group, "carol left"), LINKS_DESKTOP_OK);
+        mail.collect(&mut alice);
+        mail.deliver(&mut bob);
+        mail.deliver(&mut carol);
+        assert!(bob.host.events.contains(&(group.clone(), GROUP_EVENT_MEMBERS_CHANGED, String::new())));
+        assert!(bob.host.texts.contains(&(group.clone(), alice.user_id.clone(), "carol left".to_owned())));
+        assert!(carol.host.events.contains(&(group.clone(), GROUP_EVENT_REMOVED, String::new())));
+        assert!(!carol.host.texts.iter().any(|(_, _, text)| text == "carol left"));
+        let mut remaining = vec![alice.user_id.clone(), bob.user_id.clone()];
+        remaining.sort();
+        assert_eq!(bob.members(&group), remaining);
+
+        for device in [&alice, &bob, &carol] {
+            unsafe { links_desktop_core_destroy(device.core) };
+        }
+    }
 }
