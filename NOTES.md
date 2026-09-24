@@ -10,6 +10,10 @@ unset LINKS_AUTH_URL
 bash scripts/launch-iphone.sh
 
 
+# ipad
+unset LINKS_AUTH_URL  
+bash scripts/launch-ipad.sh  
+
 
 # web client
 
