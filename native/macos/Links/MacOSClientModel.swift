@@ -2464,8 +2464,7 @@ extension LinksMacOSAppModel {
     /// Leave on the server and forget local MLS state. An owner or admin
     /// removes this device's leaf the next time they open the group.
     func leaveSelectedGroup() async {
-        guard let conversation = selectedConversation, conversation.isGroup,
-              let index = conversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        guard let conversation = selectedConversation, conversation.isGroup else { return }
         if let (messaging, _, _, authClient, token) = groupPrerequisites,
            let ownUserID = client?.userID {
             do {
@@ -2479,17 +2478,19 @@ extension LinksMacOSAppModel {
             }
             try? messaging.leaveGroup(conversationID: conversation.id)
         }
-        conversations[index].groupActive = false
+        conversations.removeAll { $0.id == conversation.id }
+        if selectedConversationID == conversation.id {
+            selectedConversationID = nil
+        }
         groupMembers = []
-        conversationSetupStatus = "You left this group"
+        conversationSetupStatus = ""
         persistLocalState()
     }
 
     /// Owner-only. Everyone else is removed, then the group record is deleted.
     func disbandSelectedGroup() async {
         guard let conversation = selectedConversation, conversation.isGroup,
-              selectedGroupRole == .owner,
-              let index = conversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+              selectedGroupRole == .owner else { return }
         guard let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites else {
             groupStatus = "Connect before changing the group."
             return
@@ -2500,9 +2501,12 @@ extension LinksMacOSAppModel {
             try await messaging.disbandGroup(conversationID: conversation.id, directory: directory,
                                              preKeyAPI: preKeyAPI)
             try await authClient.deleteGroup(accessToken: token, groupID: conversation.id)
-            conversations[index].groupActive = false
+            conversations.removeAll { $0.id == conversation.id }
+            if selectedConversationID == conversation.id {
+                selectedConversationID = nil
+            }
             groupMembers = []
-            conversationSetupStatus = "You disbanded this group"
+            conversationSetupStatus = ""
             groupStatus = ""
             persistLocalState()
         } catch {

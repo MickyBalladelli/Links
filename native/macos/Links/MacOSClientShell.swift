@@ -1722,7 +1722,7 @@ private struct GroupMembersView: View {
             Button("Disband", role: .destructive) {
                 Task {
                     await model.disbandSelectedGroup()
-                    if model.selectedConversation?.groupActive == false { dismiss() }
+                    if model.selectedConversation == nil { dismiss() }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -1738,7 +1738,7 @@ private struct GroupMembersView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You stop receiving messages. The conversation history stays on this Mac.")
+            Text("You leave the group and it disappears from your chats.")
         }
     }
 }

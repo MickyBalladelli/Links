@@ -1485,10 +1485,11 @@ extension IOSMobileAppModel {
             }
             try? messaging.leaveGroup(conversationID: conversationID)
         }
-        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
-            conversations[index].groupActive = false
+        conversations.removeAll { $0.id == conversationID }
+        groupMembers[conversationID] = nil
+        if activeConversationID == conversationID {
+            activeConversationID = nil
         }
-        groupMembers[conversationID] = []
         persistLocalState()
     }
 
@@ -1505,10 +1506,11 @@ extension IOSMobileAppModel {
             try await messaging.disbandGroup(conversationID: conversationID, directory: directory,
                                              preKeyAPI: preKeyAPI)
             try await authClient.deleteGroup(accessToken: token, groupID: conversationID)
-            if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
-                conversations[index].groupActive = false
+            conversations.removeAll { $0.id == conversationID }
+            groupMembers[conversationID] = nil
+            if activeConversationID == conversationID {
+                activeConversationID = nil
             }
-            groupMembers[conversationID] = []
             groupStatus = ""
             persistLocalState()
         } catch {

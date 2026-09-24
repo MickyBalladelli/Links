@@ -1402,7 +1402,7 @@ private struct IOSGroupMembersSheet: View {
                 Button("Disband", role: .destructive) {
                     Task {
                         await model.disbandGroup(conversationID)
-                        if model.conversation(withID: conversationID)?.groupActive == false {
+                        if model.conversation(withID: conversationID) == nil {
                             dismiss()
                         }
                     }
@@ -1419,7 +1419,7 @@ private struct IOSGroupMembersSheet: View {
                     }
                 }
             } message: {
-                Text("You stop receiving messages. The history stays on this iPhone.")
+                Text("You leave the group and it disappears from your chats.")
             }
         }
     }
