@@ -614,6 +614,12 @@ private final class MacOSRustSharedCore: SharedClientCore {
         }
     }
 
+    func disbandGroup(conversationID: String, transport: any IOSCoreTransport) throws {
+        try groupCall(conversationID, transport: transport) { core, id, idLength, _, _ in
+            links_desktop_core_disband_group(core, id, idLength)
+        }
+    }
+
     func leaveGroup(conversationID: String) throws {
         try groupCall(conversationID) { core, id, idLength, _, _ in
             links_desktop_core_leave_group(core, id, idLength)

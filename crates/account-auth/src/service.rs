@@ -2101,6 +2101,19 @@ impl AccountAuth {
         Ok(())
     }
 
+    /// Disband a group. The owner must already have sent the MLS commit that
+    /// removes every other member; this only deletes the control-plane record.
+    pub async fn delete_group(&self, token: &str, group_id: Uuid) -> Result<(), AuthError> {
+        if group_id.is_nil() {
+            return Err(AuthError::Invalid);
+        }
+        let account = self.authenticate(token).await?;
+        RelationalStore::from_pool(self.pool.clone())
+            .delete_group(group_id, account.user_id)
+            .await?;
+        Ok(())
+    }
+
     /// Revoke a physical client from the authenticated account. Every local
     /// MLS group containing that device must then stage a remove commit with
     /// `OpenMlsEngine::remove_devices`.

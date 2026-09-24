@@ -971,6 +971,30 @@ impl RelationalStore {
         Ok(())
     }
 
+    /// Delete a many-to-many group and every membership. Only an owner may
+    /// disband it. Direct chats stay under the two-person membership rules.
+    pub async fn delete_group(&self, group_id: Uuid, actor: Uuid) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        lock_group(&mut tx, group_id).await?;
+        require_active_account(&mut tx, actor).await?;
+        if role_in(&mut tx, group_id, actor).await? != Some(Role::Owner) {
+            return Err(StoreError::Forbidden);
+        }
+        let kind: String = sqlx::query_scalar("SELECT group_kind FROM groups WHERE group_id=$1")
+            .bind(group_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if kind != GroupKind::Group.as_str() {
+            return Err(StoreError::Forbidden);
+        }
+        sqlx::query("DELETE FROM groups WHERE group_id=$1")
+            .bind(group_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Return the current account-level membership snapshot to a group member.
     /// MLS leaves remain private to clients; this is only the RBAC control plane.
     pub async fn group_members(

@@ -1063,6 +1063,33 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         self.send_envelopes(envelopes)
     }
 
+    /// Remove every other member in one commit, then forget the local group.
+    fn disband_group(&mut self, conversation_id: &str) -> Result<(), CoreError> {
+        self.require_group(conversation_id)?;
+        let own = self.client.device_id().to_owned();
+        let leaves = self.client.mls().group_member_leaves(conversation_id)?;
+        let removed = leaves
+            .iter()
+            .filter(|(_, binding)| binding.device_id.to_string() != own)
+            .map(|(leaf, _)| *leaf)
+            .collect::<Vec<_>>();
+        if !removed.is_empty() {
+            let recipients = leaves
+                .iter()
+                .map(|(_, binding)| binding.device_id.to_string())
+                .filter(|device| device != &own)
+                .collect::<Vec<_>>();
+            let pending = self.client.mls_mut().remove_members(conversation_id, &removed)?;
+            let now = now_ms();
+            let expires = now.checked_add(protocol::MAX_RETENTION_MS).ok_or(CoreError::Provider)?;
+            let fanout = self.fanout_for_devices(&recipients)?;
+            let envelopes = self.client.seal_handshake_for_devices(&pending.commit, &fanout, expires, now)?;
+            self.client.mls_mut().merge_pending_commit(conversation_id)?;
+            self.send_envelopes(envelopes)?;
+        }
+        self.leave_group(conversation_id)
+    }
+
     fn leave_group(&mut self, conversation_id: &str) -> Result<(), CoreError> {
         protocol::validate_id(conversation_id)?;
         self.client.mls_mut().delete_group(conversation_id)?;
@@ -1945,6 +1972,15 @@ pub unsafe extern "C" fn links_desktop_core_remove_group_member(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_disband_group(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+) -> i32 {
+    unsafe { group_call(core, conversation_id, conversation_id_length, |core, conversation| core.disband_group(&conversation)) }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn links_desktop_core_leave_group(
     core: *mut LinksDesktopCore,
     conversation_id: *const u8,
@@ -2365,6 +2401,18 @@ mod group_tests {
         let mut remaining = vec![alice.user_id.clone(), bob.user_id.clone()];
         remaining.sort();
         assert_eq!(bob.members(&group), remaining);
+
+        assert_eq!(
+            unsafe { links_desktop_core_disband_group(alice.core, group.as_ptr(), group.len()) },
+            LINKS_DESKTOP_OK
+        );
+        mail.collect(&mut alice);
+        mail.deliver(&mut bob);
+        assert!(bob.host.events.contains(&(group.clone(), GROUP_EVENT_REMOVED, String::new())));
+        assert_eq!(
+            unsafe { links_desktop_core_group_members(alice.core, group.as_ptr(), group.len(), std::ptr::null_mut(), 0, &mut 0) },
+            LINKS_DESKTOP_AUTHENTICATION
+        );
 
         for device in [&alice, &bob, &carol] {
             unsafe { links_desktop_core_destroy(device.core) };

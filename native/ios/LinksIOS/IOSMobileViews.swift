@@ -1306,6 +1306,7 @@ private struct IOSGroupMembersSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selection = Set<String>()
     @State private var leaveConfirmationPresented = false
+    @State private var disbandConfirmationPresented = false
 
     private var members: [IOSMobileGroupMember] { model.groupMembers[conversationID] ?? [] }
     private var myRole: IOSUsernameAuthClient.GroupRole? { model.role(in: conversationID) }
@@ -1374,6 +1375,11 @@ private struct IOSGroupMembersSheet: View {
                 }
                 if model.conversation(withID: conversationID)?.groupActive == true {
                     Section {
+                        if myRole == .owner {
+                            Button("Disband group", role: .destructive) {
+                                disbandConfirmationPresented = true
+                            }
+                        }
                         Button("Leave group", role: .destructive) {
                             leaveConfirmationPresented = true
                         }
@@ -1388,6 +1394,19 @@ private struct IOSGroupMembersSheet: View {
                 }
             }
             .task { await model.refreshGroupMembers(conversationID) }
+            .confirmationDialog("Disband this group?", isPresented: $disbandConfirmationPresented,
+                                titleVisibility: .visible) {
+                Button("Disband", role: .destructive) {
+                    Task {
+                        await model.disbandGroup(conversationID)
+                        if model.conversation(withID: conversationID)?.groupActive == false {
+                            dismiss()
+                        }
+                    }
+                }
+            } message: {
+                Text("Everyone is removed and the group is deleted. Messages already on their devices stay there.")
+            }
             .confirmationDialog("Leave this group?", isPresented: $leaveConfirmationPresented,
                                 titleVisibility: .visible) {
                 Button("Leave", role: .destructive) {

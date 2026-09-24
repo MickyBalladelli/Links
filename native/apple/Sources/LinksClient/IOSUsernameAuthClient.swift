@@ -341,6 +341,15 @@ public final class IOSUsernameAuthClient: Sendable {
         try requireGroupStatus(response, [200, 204])
     }
 
+    /// Delete the group record. Only the owner is allowed.
+    public func deleteGroup(accessToken: String, groupID: String) async throws {
+        guard IOSClient.isCanonicalUUID(groupID) else { throw IOSUsernameAuthError.invalidRequest }
+        let request = try groupRequest("v1/groups/\(groupID)", method: "DELETE",
+                                       accessToken: accessToken)
+        let (_, response) = try await data(for: request)
+        try requireGroupStatus(response, [200, 204, 404])
+    }
+
     /// Remove a member, or leave when `userID` is the caller.
     public func removeGroupMember(accessToken: String, groupID: String,
                                   userID: String) async throws {

@@ -433,6 +433,18 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         scheduleRetry(for: manager)
     }
 
+    public func disbandGroup(conversationID: String, directory: any IOSDirectChatDirectory,
+                             preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID) else { throw IOSMessagingError.invalidMessage }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.disbandGroup(conversationID: conversationID, transport: manager)
+        }
+        scheduleRetry(for: manager)
+    }
+
     public func leaveGroup(conversationID: String) throws {
         guard Self.isValidTextID(conversationID) else { throw IOSMessagingError.invalidMessage }
         lock.lock()

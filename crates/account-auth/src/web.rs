@@ -68,6 +68,7 @@ pub fn router_with_trusted_proxies(
             "/v1/groups/{group_id}/members/{user_id}",
             delete(remove_group_member),
         )
+        .route("/v1/groups/{group_id}", delete(delete_group))
         .layer(DefaultBodyLimit::max(4096));
     let passkey_routes = Router::new()
         .route("/v1/passkeys/register/start", post(passkey_register_start))
@@ -567,6 +568,14 @@ async fn remove_group_member(
 ) -> Result<impl IntoResponse, AuthError> {
     auth.remove_group_member(bearer(&headers)?, group_id, user_id)
         .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn delete_group(
+    State(auth): State<Arc<AccountAuth>>,
+    Path(group_id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    auth.delete_group(bearer(&headers)?, group_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn passkey_register_start(

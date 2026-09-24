@@ -122,6 +122,7 @@ public protocol SharedClientCore: AnyObject {
                          transport: any IOSCoreTransport) throws
     func removeGroupMember(conversationID: String, userID: String,
                            transport: any IOSCoreTransport) throws
+    func disbandGroup(conversationID: String, transport: any IOSCoreTransport) throws
     func leaveGroup(conversationID: String) throws
     func sendGroupText(conversationID: String, text: String,
                        transport: any IOSCoreTransport) throws
@@ -145,6 +146,9 @@ public extension SharedClientCore {
     }
     func removeGroupMember(conversationID: String, userID: String,
                            transport: any IOSCoreTransport) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func disbandGroup(conversationID: String, transport: any IOSCoreTransport) throws {
         throw IOSMessagingError.groupsUnavailable
     }
     func leaveGroup(conversationID: String) throws {

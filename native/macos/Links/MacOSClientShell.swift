@@ -1596,6 +1596,7 @@ private struct GroupMembersView: View {
     @State private var name = ""
     @State private var memberToRemove: LinksMacOSGroupMember?
     @State private var leaveConfirmationPresented = false
+    @State private var disbandConfirmationPresented = false
 
     private var invitableContacts: [LinksMacOSContact] {
         let members = Set(model.groupMembers.map(\.userID))
@@ -1684,6 +1685,11 @@ private struct GroupMembersView: View {
             }
             HStack {
                 if model.selectedConversation?.groupActive == true {
+                    if model.selectedGroupRole == .owner {
+                        Button("Disband group", role: .destructive) {
+                            disbandConfirmationPresented = true
+                        }
+                    }
                     Button("Leave group", role: .destructive) {
                         leaveConfirmationPresented = true
                     }
@@ -1711,6 +1717,17 @@ private struct GroupMembersView: View {
             Button("Cancel", role: .cancel) { memberToRemove = nil }
         } message: {
             Text("They stop receiving new messages. Messages they already have stay on their device.")
+        }
+        .alert("Disband this group?", isPresented: $disbandConfirmationPresented) {
+            Button("Disband", role: .destructive) {
+                Task {
+                    await model.disbandSelectedGroup()
+                    if model.selectedConversation?.groupActive == false { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Everyone is removed and the group is deleted. Messages already on their devices stay there.")
         }
         .alert("Leave this group?", isPresented: $leaveConfirmationPresented) {
             Button("Leave", role: .destructive) {

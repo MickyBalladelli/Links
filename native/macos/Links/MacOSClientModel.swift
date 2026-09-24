@@ -2485,6 +2485,31 @@ extension LinksMacOSAppModel {
         persistLocalState()
     }
 
+    /// Owner-only. Everyone else is removed, then the group record is deleted.
+    func disbandSelectedGroup() async {
+        guard let conversation = selectedConversation, conversation.isGroup,
+              selectedGroupRole == .owner,
+              let index = conversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        guard let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites else {
+            groupStatus = "Connect before changing the group."
+            return
+        }
+        isUpdatingGroup = true
+        defer { isUpdatingGroup = false }
+        do {
+            try await messaging.disbandGroup(conversationID: conversation.id, directory: directory,
+                                             preKeyAPI: preKeyAPI)
+            try await authClient.deleteGroup(accessToken: token, groupID: conversation.id)
+            conversations[index].groupActive = false
+            groupMembers = []
+            conversationSetupStatus = "You disbanded this group"
+            groupStatus = ""
+            persistLocalState()
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "disband the group")
+        }
+    }
+
     /// Merge MLS membership with server roles. Owners and admins also remove
     /// MLS leaves of people who already left on the server.
     func refreshSelectedGroupMembers() async {

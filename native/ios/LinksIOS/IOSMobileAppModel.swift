@@ -1490,6 +1490,30 @@ extension IOSMobileAppModel {
         persistLocalState()
     }
 
+    /// Owner-only. Everyone else is removed, then the group record is deleted.
+    func disbandGroup(_ conversationID: String) async {
+        guard role(in: conversationID) == .owner,
+              let (messaging, directory, preKeyAPI, authClient, token) = groupPrerequisites else {
+            groupStatus = "Connect before changing the group."
+            return
+        }
+        isUpdatingGroup = true
+        defer { isUpdatingGroup = false }
+        do {
+            try await messaging.disbandGroup(conversationID: conversationID, directory: directory,
+                                             preKeyAPI: preKeyAPI)
+            try await authClient.deleteGroup(accessToken: token, groupID: conversationID)
+            if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+                conversations[index].groupActive = false
+            }
+            groupMembers[conversationID] = []
+            groupStatus = ""
+            persistLocalState()
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "disband the group")
+        }
+    }
+
     /// Merge MLS membership with server roles. Owners and admins also remove
     /// MLS leaves of people who already left on the server.
     func refreshGroupMembers(_ conversationID: String) async {

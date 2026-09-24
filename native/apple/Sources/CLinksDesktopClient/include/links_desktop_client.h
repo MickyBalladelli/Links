@@ -122,6 +122,8 @@ int32_t links_desktop_core_remove_group_member(LinksDesktopCore *core,
                                                const uint8_t *conversation_id,
                                                size_t conversation_id_length,
                                                const uint8_t *user_id, size_t user_id_length);
+int32_t links_desktop_core_disband_group(LinksDesktopCore *core, const uint8_t *conversation_id,
+                                         size_t conversation_id_length);
 int32_t links_desktop_core_leave_group(LinksDesktopCore *core, const uint8_t *conversation_id,
                                        size_t conversation_id_length);
 int32_t links_desktop_core_send_group_text(LinksDesktopCore *core,
