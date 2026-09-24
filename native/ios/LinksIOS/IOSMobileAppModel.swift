@@ -481,13 +481,13 @@ final class IOSMobileAppModel: ObservableObject {
         case .serviceRejected:
             return "Cannot reach the auth service at \(authEndpointText). Check the endpoint and local backend."
         case .networkUnavailable:
-            return "This iPhone has no usable network connection."
+            return "This device has no usable network connection."
         case .cannotConnect:
             return "Cannot connect to \(authEndpointText). Check the Mac IP, same Wi-Fi, and HTTPS proxy."
         case .timedOut:
             return "The auth service at \(authEndpointText) timed out. Check the Mac and local backend."
         case .tlsRejected:
-            return "The iPhone rejected the HTTPS certificate. Install and fully trust the Links local root certificate."
+            return "This device rejected the HTTPS certificate. Install and fully trust the Links local root certificate."
         case .serverRejected(let statusCode):
             switch statusCode {
             case 400:
@@ -505,10 +505,10 @@ final class IOSMobileAppModel: ObservableObject {
             }
         case .conflict:
             return action == .register
-                ? "This username or iPhone is already registered. Switch to Log in with the first username."
+                ? "This username or device is already registered. Switch to Log in with the first username."
                 : "Username already exists."
         case .deviceAlreadyRegistered:
-            return "This iPhone already has a registered username. Switch to Log in and use the first username."
+            return "This device already has a registered username. Switch to Log in and use the first username."
         case .rateLimited(let retryAfterSeconds):
             guard let retryAfterSeconds else {
                 return "Too many requests. Try again later."
@@ -884,7 +884,7 @@ final class IOSMobileAppModel: ObservableObject {
         } catch {
             messagingState = .failed
             messagingStatus = "Secure messaging unavailable"
-            self.error = "The encrypted messaging core could not start on this iPhone."
+            self.error = "The encrypted messaging core could not start on this device."
         }
     }
 
@@ -1098,7 +1098,7 @@ final class IOSMobileAppModel: ObservableObject {
             guard let self else { return }
             self.status = "Signed out"
             self.error = remoteFailure
-                ? "Signed out on this iPhone, but remote session revocation could not be confirmed."
+                ? "Signed out on this device, but remote session revocation could not be confirmed."
                 : nil
             self.refreshState()
         }

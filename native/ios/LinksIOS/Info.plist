@@ -41,6 +41,19 @@
 	<string>$(LINKS_LOCAL_CA_CERT_BASE64)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Links uses your local network to reach a development account service.</string>
 	<key>UILaunchScreen</key>

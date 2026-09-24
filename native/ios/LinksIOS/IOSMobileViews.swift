@@ -56,7 +56,7 @@ private struct IOSSessionRestoreView: View {
                     .font(.title2.weight(.bold))
 
                 Text(model.isRestoringSession
-                     ? "Your saved iPhone identity is signing in securely."
+                     ? "Your saved identity is signing in securely."
                      : "Try again, or log out to enter another account.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
@@ -133,7 +133,7 @@ private struct IOSOnboardingView: View {
                                 .multilineTextAlignment(.center)
                                 .foregroundStyle(.primary)
 
-                            Text("Your identity stays on this iPhone. Choose a username to continue.")
+                            Text("Your identity stays on this device. Choose a username to continue.")
                                 .font(.body)
                                 .multilineTextAlignment(.center)
                                 .foregroundStyle(.secondary)
@@ -283,7 +283,7 @@ private struct IOSOnboardingView: View {
                 Button("Create new identity") { model.enrollNewUsername() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your existing account stays on this iPhone. A separate secure profile will be created for this username.")
+                Text("Your existing account stays on this device. A separate secure profile will be created for this username.")
             }
         }
     }
@@ -352,11 +352,21 @@ private struct IOSAuthenticatedShell: View {
 
 private struct IOSChatsView: View {
     @ObservedObject var model: IOSMobileAppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingNewConversation = false
     @State private var showingNewGroup = false
     @State private var path = [String]()
+    @State private var selectedConversationID: String?
 
     var body: some View {
+        if horizontalSizeClass == .regular {
+            padChats
+        } else {
+            phoneChats
+        }
+    }
+
+    private var phoneChats: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -443,6 +453,113 @@ private struct IOSChatsView: View {
             }
         }
     }
+
+    private var padChats: some View {
+        NavigationSplitView {
+            Group {
+                if model.conversations.isEmpty {
+                    IOSEmptyConversations {
+                        model.clearConversationCreationStatus()
+                        showingNewConversation = true
+                    }
+                } else {
+                    List(selection: $selectedConversationID) {
+                        ForEach(model.conversations) { conversation in
+                            IOSConversationRow(
+                                conversation: conversation,
+                                imageJPEG: model.contactPictures[conversation.recipientUserID],
+                                showsDisclosure: false)
+                                .tag(conversation.id)
+                                .contextMenu {
+                                    Button("Delete conversation", role: .destructive) {
+                                        model.deleteConversation(conversation)
+                                    }
+                                }
+                        }
+                    }
+                    .listStyle(.sidebar)
+                }
+            }
+            .navigationTitle("Chats")
+            .toolbar { chatToolbar }
+        } detail: {
+            IOSPadConversationDetail(model: model, conversationID: selectedConversationID)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .sheet(isPresented: $showingNewGroup) {
+            IOSNewGroupSheet(model: model) { conversation in
+                selectedConversationID = conversation.id
+            }
+        }
+        .sheet(isPresented: $showingNewConversation) {
+            IOSNewConversationSheet(model: model) { conversation in
+                selectedConversationID = conversation.id
+            }
+        }
+        .onChange(of: model.conversations.map(\.id)) { ids in
+            if let selectedConversationID, !ids.contains(selectedConversationID) {
+                self.selectedConversationID = nil
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var chatToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(IOSLinksPalette.mint)
+                    .frame(width: 8, height: 8)
+                Text("Secure")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(IOSLinksPalette.mint)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(IOSLinksPalette.mint.opacity(0.11))
+            .clipShape(Capsule())
+
+            Button {
+                model.clearGroupStatus()
+                showingNewGroup = true
+            } label: {
+                Image(systemName: "person.3")
+            }
+            .accessibilityLabel("New group")
+
+            Button {
+                model.clearConversationCreationStatus()
+                showingNewConversation = true
+            } label: {
+                Image(systemName: "square.and.pencil")
+            }
+            .accessibilityLabel("New conversation")
+        }
+    }
+}
+
+private struct IOSPadConversationDetail: View {
+    @ObservedObject var model: IOSMobileAppModel
+    let conversationID: String?
+
+    var body: some View {
+        if let conversationID,
+           model.conversations.contains(where: { $0.id == conversationID }) {
+            IOSConversationView(model: model, conversationID: conversationID)
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 42, weight: .medium))
+                    .foregroundStyle(IOSLinksPalette.cobalt)
+                Text("Select a chat")
+                    .font(.title2.weight(.semibold))
+                Text("Choose a conversation, or start a new one.")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
+        }
+    }
 }
 
 private struct IOSEmptyConversations: View {
@@ -492,10 +609,11 @@ private struct IOSEmptyConversations: View {
 private struct IOSConversationRow: View {
     let conversation: IOSMobileConversation
     var imageJPEG: Data? = nil
+    var showsDisclosure = true
 
     var body: some View {
         HStack(spacing: 13) {
-            IOSAvatar(name: conversation.handle, size: 52, imageJPEG: imageJPEG)
+            IOSAvatar(name: conversation.handle, size: showsDisclosure ? 52 : 44, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 5) {
                 Text(conversation.displayTitle)
                     .font(.headline)
@@ -519,17 +637,21 @@ private struct IOSConversationRow: View {
                         .background(IOSLinksPalette.cobalt)
                         .clipShape(Capsule())
                 }
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
-        .padding(14)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(showsDisclosure ? 14 : 8)
+        .background(showsDisclosure ? Color(uiColor: .secondarySystemGroupedBackground) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: showsDisclosure ? 20 : 12, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.primary.opacity(0.055))
+            if showsDisclosure {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.primary.opacity(0.055))
+            }
         }
     }
 }
@@ -641,11 +763,21 @@ private struct IOSNewConversationSheet: View {
 
 private struct IOSPeopleView: View {
     @ObservedObject var model: IOSMobileAppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingNewConversation = false
     @State private var contactToRemove: IOSMobileContact?
     @State private var path = [String]()
+    @State private var selectedConversationID: String?
 
     var body: some View {
+        if horizontalSizeClass == .regular {
+            padPeople
+        } else {
+            phonePeople
+        }
+    }
+
+    private var phonePeople: some View {
         NavigationStack(path: $path) {
             Group {
                 if model.contacts.isEmpty {
@@ -758,6 +890,107 @@ private struct IOSPeopleView: View {
                 }
         }
     }
+
+    private var padPeople: some View {
+        NavigationSplitView {
+            Group {
+                if model.contacts.isEmpty {
+                    VStack(spacing: 15) {
+                        Image(systemName: "person.2")
+                            .font(.system(size: 44))
+                            .foregroundStyle(IOSLinksPalette.violet)
+                        Text("Your people will appear here")
+                            .font(.title3.weight(.semibold))
+                        Text("Add someone by username to keep them close.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Add someone") {
+                            model.clearConversationCreationStatus()
+                            showingNewConversation = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(model.contacts) { contact in
+                        Button {
+                            Task {
+                                if let conversation = await model.createConversation(handle: contact.handle) {
+                                    selectedConversationID = conversation.id
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 13) {
+                                IOSAvatar(
+                                    name: contact.handle,
+                                    size: 40,
+                                    imageJPEG: model.contactPictures[contact.userID])
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("@\(contact.handle)")
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text(contact.deviceCount == 1
+                                         ? "1 secure device" : "\(contact.deviceCount) secure devices")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Remove Contact", role: .destructive) {
+                                contactToRemove = contact
+                            }
+                        }
+                    }
+                    .listStyle(.sidebar)
+                }
+            }
+            .navigationTitle("People")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        model.clearConversationCreationStatus()
+                        showingNewConversation = true
+                    } label: {
+                        Image(systemName: "person.badge.plus")
+                    }
+                    .accessibilityLabel("Add someone")
+                }
+            }
+        } detail: {
+            IOSPadConversationDetail(model: model, conversationID: selectedConversationID)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .sheet(isPresented: $showingNewConversation) {
+            IOSNewConversationSheet(model: model) { conversation in
+                selectedConversationID = conversation.id
+            }
+        }
+        .alert("Remove contact?", isPresented: Binding(
+            get: { contactToRemove != nil },
+            set: { isPresented in
+                if !isPresented { contactToRemove = nil }
+            })) {
+                Button("Remove", role: .destructive) {
+                    if let contact = contactToRemove {
+                        model.removeContact(contact)
+                    }
+                    contactToRemove = nil
+                }
+                Button("Cancel", role: .cancel) { contactToRemove = nil }
+            } message: {
+                Text("This removes the saved contact. Existing conversations and messages stay.")
+            }
+        .onChange(of: model.conversations.map(\.id)) { ids in
+            if let selectedConversationID, !ids.contains(selectedConversationID) {
+                self.selectedConversationID = nil
+            }
+        }
+    }
 }
 
 private struct IOSProfileView: View {
@@ -799,7 +1032,7 @@ private struct IOSProfileView: View {
                         }
                         Text(model.profileName)
                             .font(.title2.weight(.bold))
-                        Label("Identity protected on this iPhone", systemImage: "checkmark.shield.fill")
+                        Label("Identity protected on this device", systemImage: "checkmark.shield.fill")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(IOSLinksPalette.mint)
                     }
@@ -847,6 +1080,8 @@ private struct IOSProfileView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("You")
@@ -858,7 +1093,7 @@ private struct IOSProfileView: View {
                 Button("Sign out", role: .destructive) { model.signOut() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your hardware identity and saved conversations stay on this iPhone.")
+                Text("Your hardware identity and saved conversations stay on this device.")
             }
             .confirmationDialog("Enroll another username?", isPresented: $showingNewUsername,
                                 titleVisibility: .visible) {
