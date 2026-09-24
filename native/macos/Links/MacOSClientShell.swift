@@ -1597,6 +1597,7 @@ private struct GroupMembersView: View {
     @State private var selection = Set<String>()
     @State private var name = ""
     @State private var memberToRemove: LinksMacOSGroupMember?
+    @State private var memberToOwn: LinksMacOSGroupMember?
     @State private var leaveConfirmationPresented = false
     @State private var disbandConfirmationPresented = false
 
@@ -1645,6 +1646,12 @@ private struct GroupMembersView: View {
                                     .clipShape(Capsule())
                             }
                             Spacer()
+                            if model.selectedGroupRole == .owner, !member.isSelf, member.role != .owner {
+                                Button("Make owner") {
+                                    memberToOwn = member
+                                }
+                                .controlSize(.small)
+                            }
                             if model.selectedGroupRole == .owner, !member.isSelf, member.role == .member {
                                 Button("Make admin") {
                                     Task { await model.makeAdminInSelectedGroup(member.userID) }
@@ -1691,9 +1698,10 @@ private struct GroupMembersView: View {
                         Button("Disband group", role: .destructive) {
                             disbandConfirmationPresented = true
                         }
-                    }
-                    Button("Leave group", role: .destructive) {
-                        leaveConfirmationPresented = true
+                    } else {
+                        Button("Leave group", role: .destructive) {
+                            leaveConfirmationPresented = true
+                        }
                     }
                 }
                 Spacer()
@@ -1719,6 +1727,19 @@ private struct GroupMembersView: View {
             Button("Cancel", role: .cancel) { memberToRemove = nil }
         } message: {
             Text("They stop receiving new messages. Messages they already have stay on their device.")
+        }
+        .alert("Make \(memberToOwn?.displayName ?? "this member") the owner?",
+               isPresented: Binding(get: { memberToOwn != nil },
+                                    set: { if !$0 { memberToOwn = nil } })) {
+            Button("Make owner") {
+                if let member = memberToOwn {
+                    Task { await model.giveOwnershipInSelectedGroup(to: member.userID) }
+                }
+                memberToOwn = nil
+            }
+            Button("Cancel", role: .cancel) { memberToOwn = nil }
+        } message: {
+            Text("You become a member. The owner can disband the group, and you can leave it.")
         }
         .alert("Disband this group?", isPresented: $disbandConfirmationPresented) {
             Button("Disband", role: .destructive) {

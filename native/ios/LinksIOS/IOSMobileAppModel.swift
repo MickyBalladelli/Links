@@ -1471,16 +1471,35 @@ extension IOSMobileAppModel {
         await refreshGroupMembers(conversationID)
     }
 
+    /// The current owner becomes a member. The group keeps exactly one owner.
+    func giveOwnership(to userID: String, in conversationID: String) async {
+        guard role(in: conversationID) == .owner,
+              let ownUserID = client?.userID, ownUserID != userID,
+              let (_, _, _, authClient, token) = groupPrerequisites else { return }
+        do {
+            try await authClient.setGroupRole(accessToken: token, groupID: conversationID,
+                                              userID: userID, role: .owner)
+            try await authClient.setGroupRole(accessToken: token, groupID: conversationID,
+                                              userID: ownUserID, role: .member)
+            groupStatus = "\(memberHandle(for: userID).map { "@\($0)" } ?? "Member") is now the owner."
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "give ownership")
+        }
+        await refreshGroupMembers(conversationID)
+    }
+
     func leaveGroup(_ conversationID: String) async {
+        if role(in: conversationID) == .owner {
+            groupStatus = "The owner cannot leave. Give ownership to someone else, or disband the group."
+            return
+        }
         if let (messaging, _, _, authClient, token) = groupPrerequisites,
            let ownUserID = client?.userID {
             do {
                 try await authClient.removeGroupMember(accessToken: token, groupID: conversationID,
                                                        userID: ownUserID)
             } catch {
-                groupStatus = role(in: conversationID) == .owner
-                    ? "Make another member the owner before leaving."
-                    : Self.groupFailureMessage(error, action: "leave the group")
+                groupStatus = Self.groupFailureMessage(error, action: "leave the group")
                 return
             }
             try? messaging.leaveGroup(conversationID: conversationID)

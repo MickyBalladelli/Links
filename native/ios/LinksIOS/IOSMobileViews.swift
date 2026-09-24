@@ -1310,6 +1310,7 @@ private struct IOSGroupMembersSheet: View {
     @State private var selection = Set<String>()
     @State private var leaveConfirmationPresented = false
     @State private var disbandConfirmationPresented = false
+    @State private var memberToOwn: IOSMobileGroupMember?
 
     private var members: [IOSMobileGroupMember] { model.groupMembers[conversationID] ?? [] }
     private var myRole: IOSUsernameAuthClient.GroupRole? { model.role(in: conversationID) }
@@ -1348,6 +1349,12 @@ private struct IOSGroupMembersSheet: View {
                                     Task { await model.removeMember(member.userID, from: conversationID) }
                                 }
                             }
+                            if myRole == .owner, !member.isSelf, member.role != .owner {
+                                Button("Make owner") {
+                                    memberToOwn = member
+                                }
+                                .tint(IOSLinksPalette.cobalt)
+                            }
                             if myRole == .owner, !member.isSelf, member.role == .member {
                                 Button("Make admin") {
                                     Task { await model.makeAdmin(member.userID, in: conversationID) }
@@ -1382,9 +1389,10 @@ private struct IOSGroupMembersSheet: View {
                             Button("Disband group", role: .destructive) {
                                 disbandConfirmationPresented = true
                             }
-                        }
-                        Button("Leave group", role: .destructive) {
-                            leaveConfirmationPresented = true
+                        } else {
+                            Button("Leave group", role: .destructive) {
+                                leaveConfirmationPresented = true
+                            }
                         }
                     }
                 }
@@ -1397,6 +1405,21 @@ private struct IOSGroupMembersSheet: View {
                 }
             }
             .task { await model.refreshGroupMembers(conversationID) }
+            .confirmationDialog(
+                "Make \(memberToOwn?.displayName ?? "this member") the owner?",
+                isPresented: Binding(get: { memberToOwn != nil },
+                                     set: { if !$0 { memberToOwn = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Make owner") {
+                    if let member = memberToOwn {
+                        Task { await model.giveOwnership(to: member.userID, in: conversationID) }
+                    }
+                    memberToOwn = nil
+                }
+            } message: {
+                Text("You become a member. The owner can disband the group, and you can leave it.")
+            }
             .confirmationDialog("Disband this group?", isPresented: $disbandConfirmationPresented,
                                 titleVisibility: .visible) {
                 Button("Disband", role: .destructive) {

@@ -2445,6 +2445,24 @@ extension LinksMacOSAppModel {
         await refreshSelectedGroupMembers()
     }
 
+    /// The current owner becomes a member. The group keeps exactly one owner.
+    func giveOwnershipInSelectedGroup(to userID: String) async {
+        guard selectedGroupRole == .owner,
+              let conversation = selectedConversation, conversation.isGroup,
+              let ownUserID = client?.userID, ownUserID != userID,
+              let (_, _, _, authClient, token) = groupPrerequisites else { return }
+        do {
+            try await authClient.setGroupRole(accessToken: token, groupID: conversation.id,
+                                              userID: userID, role: .owner)
+            try await authClient.setGroupRole(accessToken: token, groupID: conversation.id,
+                                              userID: ownUserID, role: .member)
+            groupStatus = "\(handle(for: userID).map { "@\($0)" } ?? "Member") is now the owner."
+        } catch {
+            groupStatus = Self.groupFailureMessage(error, action: "give ownership")
+        }
+        await refreshSelectedGroupMembers()
+    }
+
     func renameSelectedGroup(_ name: String) async {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let conversation = selectedConversation, conversation.isGroup,
@@ -2461,19 +2479,21 @@ extension LinksMacOSAppModel {
         }
     }
 
-    /// Leave on the server and forget local MLS state. An owner or admin
-    /// removes this device's leaf the next time they open the group.
+    /// Leave on the server and forget local MLS state. The owner stays until
+    /// they give ownership to someone else or disband the group.
     func leaveSelectedGroup() async {
         guard let conversation = selectedConversation, conversation.isGroup else { return }
+        if selectedGroupRole == .owner {
+            groupStatus = "The owner cannot leave. Give ownership to someone else, or disband the group."
+            return
+        }
         if let (messaging, _, _, authClient, token) = groupPrerequisites,
            let ownUserID = client?.userID {
             do {
                 try await authClient.removeGroupMember(accessToken: token, groupID: conversation.id,
                                                        userID: ownUserID)
             } catch {
-                groupStatus = selectedGroupRole == .owner
-                    ? "Make another member the owner before leaving."
-                    : Self.groupFailureMessage(error, action: "leave the group")
+                groupStatus = Self.groupFailureMessage(error, action: "leave the group")
                 return
             }
             try? messaging.leaveGroup(conversationID: conversation.id)
