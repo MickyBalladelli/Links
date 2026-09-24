@@ -433,6 +433,9 @@ private struct IOSChatsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .onChange(of: model.conversations.map(\.id)) { ids in
+                path.removeAll { !ids.contains($0) }
+            }
             .sheet(isPresented: $showingNewConversation) {
                 IOSNewConversationSheet(model: model) { conversation in
                     path.append(conversation.id)
@@ -1307,7 +1310,6 @@ private struct IOSGroupMembersSheet: View {
     @State private var selection = Set<String>()
     @State private var leaveConfirmationPresented = false
     @State private var disbandConfirmationPresented = false
-    @State private var memberToRemove: IOSMobileGroupMember?
 
     private var members: [IOSMobileGroupMember] { model.groupMembers[conversationID] ?? [] }
     private var myRole: IOSUsernameAuthClient.GroupRole? { model.role(in: conversationID) }
@@ -1338,17 +1340,6 @@ private struct IOSGroupMembersSheet: View {
                                     .padding(.vertical, 2)
                                     .background(IOSLinksPalette.cobalt.opacity(0.14))
                                     .clipShape(Capsule())
-                            }
-                            Spacer()
-                            if canRemove(member) {
-                                Button {
-                                    memberToRemove = member
-                                } label: {
-                                    Image(systemName: "person.badge.minus")
-                                        .foregroundStyle(.red)
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("Remove \(member.displayName)")
                             }
                         }
                         .swipeActions {
@@ -1406,21 +1397,6 @@ private struct IOSGroupMembersSheet: View {
                 }
             }
             .task { await model.refreshGroupMembers(conversationID) }
-            .confirmationDialog(
-                "Remove \(memberToRemove?.displayName ?? "member")?",
-                isPresented: Binding(get: { memberToRemove != nil },
-                                     set: { if !$0 { memberToRemove = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button("Remove", role: .destructive) {
-                    if let member = memberToRemove {
-                        Task { await model.removeMember(member.userID, from: conversationID) }
-                    }
-                    memberToRemove = nil
-                }
-            } message: {
-                Text("They stop receiving new messages. Messages they already have stay on their device.")
-            }
             .confirmationDialog("Disband this group?", isPresented: $disbandConfirmationPresented,
                                 titleVisibility: .visible) {
                 Button("Disband", role: .destructive) {

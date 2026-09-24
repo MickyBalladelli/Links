@@ -2108,10 +2108,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                   state.contacts.allSatisfy(isValidContact) else {
                 throw MacOSEncryptedStateStore.StateError.invalidState
             }
-            conversations = state.conversations
+            conversations = state.conversations.filter { !$0.isGroup || $0.groupActive }
             contacts = state.contacts
             selectedConversationID = state.selectedConversationID.flatMap { selectedID in
-                state.conversations.contains(where: { $0.id == selectedID }) ? selectedID : nil
+                conversations.contains(where: { $0.id == selectedID }) ? selectedID : nil
             }
             if let selectedConversation,
                selectedConversation.isIncoming,
@@ -2624,11 +2624,11 @@ extension LinksMacOSAppModel {
         case .membersChanged:
             break
         case .removed:
-            guard let index else { return }
-            conversations[index].groupActive = false
+            conversations.removeAll { $0.id == event.conversationID }
             if selectedConversationID == event.conversationID {
+                selectedConversationID = nil
                 groupMembers = []
-                conversationSetupStatus = "You were removed from this group"
+                conversationSetupStatus = ""
             }
         }
         persistLocalState()

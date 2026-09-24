@@ -1130,7 +1130,9 @@ final class IOSMobileAppModel: ObservableObject {
             return
         }
         contacts = state.contacts
-        conversations = state.conversations.sorted { $0.createdAt > $1.createdAt }
+        conversations = state.conversations
+            .filter { !$0.isGroup || $0.groupActive }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     private func persistLocalState() {
@@ -1614,9 +1616,11 @@ extension IOSMobileAppModel {
         case .membersChanged:
             break
         case .removed:
-            guard let index else { return }
-            conversations[index].groupActive = false
+            conversations.removeAll { $0.id == event.conversationID }
             groupMembers[event.conversationID] = []
+            if activeConversationID == event.conversationID {
+                activeConversationID = nil
+            }
         }
         persistLocalState()
         if event.kind != .removed, activeConversationID == event.conversationID {
