@@ -1141,7 +1141,9 @@ private struct LinksConversationDetail: View {
                 .padding(.horizontal, 22)
                 .padding(.vertical, 14)
 
-                DeliveryStatusBanner(model: model)
+                if model.deliveryState != .ready {
+                    DeliveryStatusBanner(model: model)
+                }
 
                 HStack(spacing: 7) {
                     Image(systemName: "lock.fill")
