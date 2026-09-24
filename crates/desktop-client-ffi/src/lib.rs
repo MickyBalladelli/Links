@@ -1307,12 +1307,23 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
 
     fn handle_batch(&mut self, batch: v1::SyncBatch) -> Result<(), CoreError> {
         protocol::validate_sync_batch(&batch)?;
-        if batch.recipient_device_id != self.client.device_id() || batch.after_cursor != self.cursor {
+        if batch.recipient_device_id != self.client.device_id() || batch.after_cursor > self.cursor {
             return Err(CoreError::InvalidSync);
         }
+        // Adding a member sends the commit, then the group name, before the
+        // recipient's ack updates the gateway checkpoint. The second delivery
+        // repeats the commit. Those items are already applied.
         let mut rendered = Vec::new();
         let mut events = Vec::new();
+        let mut expected = self.cursor;
         for item in &batch.items {
+            if item.cursor <= self.cursor {
+                continue;
+            }
+            expected = expected.checked_add(1).ok_or(CoreError::InvalidSync)?;
+            if item.cursor != expected {
+                return Err(CoreError::InvalidSync);
+            }
             let Some(entry) = item.entry.as_ref() else { return Err(CoreError::InvalidSync) };
             if let v1::queue_item::Entry::Envelope(envelope) = entry {
                 let storage_backup = self
@@ -1362,7 +1373,20 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                 }
             }
         }
-        self.cursor = batch.next_cursor;
+        if expected == self.cursor {
+            if self.cursor < batch.high_watermark {
+                let replay = self.encode_client_frame(v1::client_frame::Body::Replay(v1::Replay {
+                    after_cursor: self.cursor,
+                    limit: protocol::MAX_BATCH_ITEMS as u32,
+                }))?;
+                self.send_frame(&replay)?;
+            }
+            return Ok(());
+        }
+        if expected != batch.next_cursor {
+            return Err(CoreError::InvalidSync);
+        }
+        self.cursor = expected;
         self.save()?;
         let ack = self.encode_client_frame(v1::client_frame::Body::Ack(v1::QueueAck { through_cursor: self.cursor }))?;
         self.send_frame(&ack)?;
@@ -2344,6 +2368,75 @@ mod group_tests {
 
         for device in [&alice, &bob, &carol] {
             unsafe { links_desktop_core_destroy(device.core) };
+        }
+    }
+
+    #[test]
+    fn overlapping_group_delivery_is_not_a_stale_cursor() {
+        let mut alice = Device::new();
+        let mut bob = Device::new();
+        let mut mail = Mailboxes::default();
+        let group = Uuid::new_v4().to_string();
+        assert_eq!(unsafe { links_desktop_core_create_group(alice.core, group.as_ptr(), group.len()) }, LINKS_DESKTOP_OK);
+        alice.know(&bob);
+        let status = unsafe {
+            links_desktop_core_add_group_members(
+                alice.core, group.as_ptr(), group.len(), bob.user_id.as_ptr(), bob.user_id.len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK);
+        let name = "Weekend";
+        assert_eq!(
+            unsafe {
+                links_desktop_core_set_group_name(alice.core, group.as_ptr(), group.len(), name.as_ptr(), name.len())
+            },
+            LINKS_DESKTOP_OK
+        );
+        mail.collect(&mut alice);
+        let queued = mail.queues.remove(&bob.device_id).unwrap().into_iter().collect::<Vec<_>>();
+        assert!(queued.len() >= 2);
+
+        let deliver = |device: &mut Device, after: u64, envelopes: &[v1::Envelope]| {
+            let mut cursor = after;
+            let items = envelopes
+                .iter()
+                .map(|envelope| {
+                    cursor += 1;
+                    v1::QueueItem {
+                        cursor,
+                        entry: Some(v1::queue_item::Entry::Envelope(envelope.clone())),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let next = cursor;
+            let frame = v1::ServerFrame {
+                request_id: Uuid::new_v4().to_string(),
+                body: Some(v1::server_frame::Body::Batch(v1::SyncBatch {
+                    recipient_device_id: device.device_id.clone(),
+                    after_cursor: after,
+                    next_cursor: next,
+                    high_watermark: next,
+                    items,
+                })),
+            }
+            .encode_to_vec();
+            unsafe { links_desktop_core_handle_server_frame(device.core, frame.as_ptr(), frame.len()) }
+        };
+
+        assert_eq!(deliver(&mut bob, 0, &queued[..1]), LINKS_DESKTOP_OK);
+        assert!(bob.host.events.iter().any(|(_, kind, _)| *kind == GROUP_EVENT_JOINED));
+        // The gateway still checkpoints at the unacknowledged cursor, so this
+        // batch repeats the welcome and appends the group name.
+        assert_eq!(deliver(&mut bob, 0, &queued), LINKS_DESKTOP_OK);
+        assert_eq!(
+            bob.host.events.iter().filter(|(_, kind, _)| *kind == GROUP_EVENT_JOINED).count(),
+            1
+        );
+        assert!(bob.host.events.contains(&(group.clone(), GROUP_EVENT_RENAMED, name.to_owned())));
+
+        unsafe {
+            links_desktop_core_destroy(alice.core);
+            links_desktop_core_destroy(bob.core);
         }
     }
 }
