@@ -46,6 +46,19 @@ export const endpointGroups = [
     ]
   },
   {
+    name: 'Account profile',
+    endpoints: [
+      { name: 'Read display name', method: 'GET', path: '/v1/account/display-name', auth: 'bearer' },
+      {
+        name: 'Change display name',
+        method: 'PUT',
+        path: '/v1/account/display-name',
+        auth: 'bearer',
+        body: { display_name: 'Ava' }
+      }
+    ]
+  },
+  {
     name: 'Directory',
     endpoints: [
       { name: 'Find by username', method: 'GET', path: '/v1/directory/alice', auth: 'none' },

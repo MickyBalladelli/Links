@@ -98,7 +98,7 @@ public final class MainActivity extends Activity {
         layout.addView(displayNameInput);
 
         displayNameNote = new TextView(this);
-        displayNameNote.setText("Shown in this client. Your username and saved profile stay the same.");
+        displayNameNote.setText("Shown to people in your contacts and conversations.");
         displayNameNote.setTextSize(12);
         displayNameNote.setVisibility(View.GONE);
         layout.addView(displayNameNote);
@@ -228,6 +228,11 @@ public final class MainActivity extends Activity {
                 } catch (Exception ignored) {
                     // Keep the saved profile name if the optional refresh is unavailable.
                 }
+                try {
+                    syncDisplayNameFromAccount();
+                } catch (Exception ignored) {
+                    // Keep the last saved display name when the profile API is unavailable.
+                }
                 runOnUiThread(() -> {
                     pendingChallenge = null;
                     codeInput.setText("");
@@ -267,13 +272,39 @@ public final class MainActivity extends Activity {
     }
 
     private void saveDisplayName() {
-        if (session == null || !session.isAuthenticated()) return;
-        try {
-            session.saveProfileDisplayName(displayNameInput.getText().toString());
-            refreshStatus();
-            status.setText("Display name saved on this device");
-        } catch (Exception error) {
-            status.setText("Display name not saved\n" + error.getMessage());
+        if (session == null || otpClient == null || !session.isAuthenticated()) return;
+        String requestedName = displayNameInput.getText().toString();
+        saveDisplayNameButton.setEnabled(false);
+        displayNameInput.setEnabled(false);
+        status.setText("Saving display name…");
+        identityWorker.execute(() -> {
+            try {
+                String savedName = otpClient.changeDisplayName(session.accessToken(), requestedName);
+                session.saveProfileDisplayName(savedName);
+                runOnUiThread(() -> {
+                    displayNameInput.setText(savedName);
+                    refreshStatus();
+                    status.setText("Display name saved to your account");
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    refreshStatus();
+                    status.setText("Display name not saved\n" + error.getMessage());
+                });
+            }
+        });
+    }
+
+    private void syncDisplayNameFromAccount() throws Exception {
+        String token = session.accessToken();
+        OtpClient.DisplayName sharedName = otpClient.currentDisplayName(token);
+        if (sharedName.isSet()) {
+            session.saveProfileDisplayName(sharedName.name());
+        } else if (!session.profileDisplayName().isEmpty()) {
+            String publishedName = otpClient.changeDisplayName(token, session.profileDisplayName());
+            session.saveProfileDisplayName(publishedName);
+        } else {
+            session.saveProfileDisplayName("");
         }
     }
 

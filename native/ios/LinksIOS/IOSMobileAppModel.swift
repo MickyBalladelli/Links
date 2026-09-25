@@ -21,10 +21,12 @@ enum IOSUsernameAction: String, CaseIterable, Identifiable {
 
 struct IOSMobileContact: Identifiable, Equatable, Codable {
     var handle: String
+    var displayName: String? = nil
     let userID: String
-    let deviceCount: Int
+    var deviceCount: Int
 
     var id: String { userID }
+    var displayTitle: String { displayName ?? "@\(handle)" }
 }
 
 struct IOSMobileMessage: Identifiable, Equatable, Codable {
@@ -51,6 +53,7 @@ struct IOSMobileGroupMember: Identifiable, Equatable {
 struct IOSMobileConversation: Identifiable, Equatable, Codable {
     let id: String
     var handle: String
+    var displayName: String?
     let recipientUserID: String
     var deviceCount: Int
     let createdAt: Date
@@ -67,13 +70,15 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
     var groupActive = true
 
     var mlsConversationID: String { deliveryConversationID ?? id }
-    var displayTitle: String { isGroup ? handle : "@\(handle)" }
+    var displayTitle: String { isGroup ? handle : (displayName ?? "@\(handle)") }
 
     init(id: String, handle: String, recipientUserID: String, deviceCount: Int,
          createdAt: Date, messages: [IOSMobileMessage] = [], isSecureReady: Bool = false,
-         unreadCount: Int = 0, deliveryConversationID: String? = nil, isGroup: Bool = false) {
+         unreadCount: Int = 0, deliveryConversationID: String? = nil, isGroup: Bool = false,
+         displayName: String? = nil) {
         self.id = id
         self.handle = handle
+        self.displayName = displayName
         self.recipientUserID = recipientUserID
         self.deviceCount = deviceCount
         self.createdAt = createdAt
@@ -85,7 +90,7 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, handle, recipientUserID, deviceCount, createdAt, messages, isSecureReady,
+        case id, handle, displayName, recipientUserID, deviceCount, createdAt, messages, isSecureReady,
              unreadCount, deliveryConversationID, isGroup, groupActive
     }
 
@@ -93,6 +98,7 @@ struct IOSMobileConversation: Identifiable, Equatable, Codable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         handle = try values.decode(String.self, forKey: .handle)
+        displayName = try values.decodeIfPresent(String.self, forKey: .displayName)
         recipientUserID = try values.decode(String.self, forKey: .recipientUserID)
         deviceCount = try values.decode(Int.self, forKey: .deviceCount)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
@@ -206,6 +212,10 @@ final class IOSMobileAppModel: ObservableObject {
     private var activeConversationID: String?
     private var isRefreshingContactPictures = false
     private var contactPictureRefreshTask: Task<Void, Never>?
+    private var isRefreshingSavedContactNames = false
+    private var lastSavedContactNamesRefreshAt: Date?
+    private var isRefreshingOwnDisplayName = false
+    private var lastOwnDisplayNameRefreshAt: Date?
 
     init() {
         let endpointText = Bundle.main.object(forInfoDictionaryKey: "LINKS_AUTH_URL") as? String
@@ -699,19 +709,99 @@ final class IOSMobileAppModel: ObservableObject {
         return false
     }
 
-    func changeProfileDisplayName(_ requestedName: String) -> Bool {
-        guard let client else {
-            profileDisplayNameError = "This profile is not ready yet."
+    func changeProfileDisplayName(_ requestedName: String) async -> Bool {
+        guard let client, let usernameAuthClient, client.isAuthenticated,
+              let token = try? client.accessToken() else {
+            profileDisplayNameError = "Sign in before changing your display name."
+            return false
+        }
+        let cleanName = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.utf8.count <= 80,
+              !cleanName.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            profileDisplayNameError = "Use a name up to 80 bytes without control characters."
             return false
         }
         do {
-            try client.updateProfileDisplayName(requestedName)
-            profileDisplayName = client.profileDisplayName ?? client.profile.name
+            let savedName = try await usernameAuthClient.changeDisplayName(
+                accessToken: token, name: cleanName)
+            try client.updateProfileDisplayName(savedName.name ?? "")
+            profileDisplayName = savedName.name ?? client.profile.name
+            lastOwnDisplayNameRefreshAt = Date()
             profileDisplayNameError = nil
             return true
-        } catch {
+        } catch IOSUsernameAuthError.invalidRequest {
             profileDisplayNameError = "Use a name up to 80 bytes without control characters."
-            return false
+        } catch {
+            profileDisplayNameError = "Could not save your display name. Check your connection and try again."
+        }
+        return false
+    }
+
+    func refreshNamesFromAccount() async {
+        await refreshOwnDisplayName()
+        await refreshSavedContactNames()
+    }
+
+    private func refreshOwnDisplayName() async {
+        guard let client, let usernameAuthClient, client.isAuthenticated,
+              let token = try? client.accessToken(), !isRefreshingOwnDisplayName else { return }
+        if let lastOwnDisplayNameRefreshAt,
+           Date().timeIntervalSince(lastOwnDisplayNameRefreshAt) < 30 {
+            return
+        }
+        isRefreshingOwnDisplayName = true
+        lastOwnDisplayNameRefreshAt = Date()
+        defer { isRefreshingOwnDisplayName = false }
+        do {
+            let profileName = try await usernameAuthClient.currentDisplayName(accessToken: token)
+            if profileName.isSet {
+                try? client.updateProfileDisplayName(profileName.name ?? "")
+                profileDisplayName = profileName.name ?? client.profile.name
+            } else if let localName = client.profileDisplayName, !localName.isEmpty {
+                let savedName = try await usernameAuthClient.changeDisplayName(
+                    accessToken: token, name: localName)
+                profileDisplayName = savedName.name ?? client.profile.name
+            } else {
+                try? client.updateProfileDisplayName("")
+                profileDisplayName = client.profile.name
+            }
+        } catch {
+            // Keep the last saved name when the account service is offline.
+        }
+    }
+
+    private func refreshSavedContactNames() async {
+        guard let client, let usernameAuthClient, client.isAuthenticated,
+              let token = try? client.accessToken(), !isRefreshingSavedContactNames else { return }
+        if let lastSavedContactNamesRefreshAt,
+           Date().timeIntervalSince(lastSavedContactNamesRefreshAt) < 30 {
+            return
+        }
+        let userIDs = Set(contacts.map(\.userID) + conversations
+            .filter { !$0.isGroup }
+            .map(\.recipientUserID)
+            .filter { !$0.isEmpty })
+        guard !userIDs.isEmpty else { return }
+        isRefreshingSavedContactNames = true
+        lastSavedContactNamesRefreshAt = Date()
+        defer { isRefreshingSavedContactNames = false }
+        for userID in userIDs.sorted() {
+            do {
+                let directory = try await usernameAuthClient.lookup(
+                    userID: userID, accessToken: token)
+                guard directory.userID == userID else { continue }
+                refreshCachedRecipientHandle(
+                    userID: userID,
+                    handle: directory.handle,
+                    displayName: directory.displayName,
+                    deviceCount: directory.devices.count)
+            } catch IOSUsernameAuthError.rateLimited {
+                break
+            } catch {
+                continue
+            }
         }
     }
 
@@ -796,6 +886,7 @@ final class IOSMobileAppModel: ObservableObject {
 
         let contact = IOSMobileContact(
             handle: directory.handle,
+            displayName: directory.displayName,
             userID: directory.userID,
             deviceCount: directory.devices.count)
         if let contactIndex = contacts.firstIndex(where: { $0.userID == contact.userID }) {
@@ -812,6 +903,7 @@ final class IOSMobileAppModel: ObservableObject {
             let updated = IOSMobileConversation(
                 id: existing.id,
                 handle: directory.handle,
+                displayName: directory.displayName,
                 recipientUserID: directory.userID,
                 deviceCount: directory.devices.count,
                 createdAt: existing.createdAt,
@@ -828,6 +920,7 @@ final class IOSMobileAppModel: ObservableObject {
         let conversation = IOSMobileConversation(
             id: UUID().uuidString.lowercased(),
             handle: directory.handle,
+            displayName: directory.displayName,
             recipientUserID: directory.userID,
             deviceCount: directory.devices.count,
             createdAt: Date())
@@ -966,9 +1059,10 @@ final class IOSMobileAppModel: ObservableObject {
             let directory = IOSDirectoryChatAdapter(
                 directoryClient: usernameAuthClient,
                 keyPackageProvider: keyPackageProvider,
-                onDirectoryResolved: { [weak self] userID, handle in
+                onDirectoryResolved: { [weak self] userID, handle, displayName in
                     Task { @MainActor [weak self] in
-                        self?.refreshCachedRecipientHandle(userID: userID, handle: handle)
+                        self?.refreshCachedRecipientHandle(
+                            userID: userID, handle: handle, displayName: displayName)
                     }
                 })
             let directMessaging = IOSDirectMessaging(
@@ -1418,9 +1512,11 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                     $0.id == conversationID && $0.recipientUserID == senderUserID
                 }) else { return }
                 self.conversations[index].handle = directory.handle
+                self.conversations[index].displayName = directory.displayName
                 self.conversations[index].deviceCount = directory.devices.count
                 let contact = IOSMobileContact(
                     handle: directory.handle,
+                    displayName: directory.displayName,
                     userID: directory.userID,
                     deviceCount: directory.devices.count)
                 if let contactIndex = self.contacts.firstIndex(where: {
@@ -1486,18 +1582,29 @@ extension IOSMobileAppModel {
         contacts.first(where: { $0.userID == userID })?.handle ?? memberHandles[userID]
     }
 
-    func refreshCachedRecipientHandle(userID: String, handle: String) {
+    func refreshCachedRecipientHandle(userID: String, handle: String,
+                                      displayName: String? = nil,
+                                      deviceCount: Int? = nil) {
         var changed = false
-        if let index = contacts.firstIndex(where: { $0.userID == userID }),
-           contacts[index].handle != handle {
-            contacts[index].handle = handle
-            contacts.sort { $0.handle < $1.handle }
-            changed = true
+        if let index = contacts.firstIndex(where: { $0.userID == userID }) {
+            if contacts[index].handle != handle
+                || contacts[index].displayName != displayName
+                || (deviceCount.map { contacts[index].deviceCount != $0 } ?? false) {
+                contacts[index].handle = handle
+                contacts[index].displayName = displayName
+                if let deviceCount { contacts[index].deviceCount = deviceCount }
+                contacts.sort { $0.handle < $1.handle }
+                changed = true
+            }
         }
         for index in conversations.indices where !conversations[index].isGroup
             && conversations[index].recipientUserID == userID {
-            if conversations[index].handle != handle {
+            if conversations[index].handle != handle
+                || conversations[index].displayName != displayName
+                || (deviceCount.map { conversations[index].deviceCount != $0 } ?? false) {
                 conversations[index].handle = handle
+                conversations[index].displayName = displayName
+                if let deviceCount { conversations[index].deviceCount = deviceCount }
                 changed = true
             }
         }

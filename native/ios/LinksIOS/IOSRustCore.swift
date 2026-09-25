@@ -806,11 +806,11 @@ final class IOSRustCoreFactory: SharedClientCoreFactory {
 final class IOSDirectoryChatAdapter: IOSDirectChatDirectory {
     private let directoryClient: IOSUsernameAuthClient
     private let keyPackageProvider: IOSHTTPMLSKeyPackageProvider
-    private let onDirectoryResolved: (String, String) -> Void
+    private let onDirectoryResolved: (String, String, String?) -> Void
 
     init(directoryClient: IOSUsernameAuthClient,
          keyPackageProvider: IOSHTTPMLSKeyPackageProvider,
-         onDirectoryResolved: @escaping (String, String) -> Void = { _, _ in }) {
+         onDirectoryResolved: @escaping (String, String, String?) -> Void = { _, _, _ in }) {
         self.directoryClient = directoryClient
         self.keyPackageProvider = keyPackageProvider
         self.onDirectoryResolved = onDirectoryResolved
@@ -823,7 +823,7 @@ final class IOSDirectoryChatAdapter: IOSDirectChatDirectory {
         guard directory.userID == recipientUserID else {
             throw IOSPreKeyError.invalidRecipient
         }
-        onDirectoryResolved(directory.userID, directory.handle)
+        onDirectoryResolved(directory.userID, directory.handle, directory.displayName)
         guard !directory.devices.isEmpty,
               directory.devices.count <= 100 else {
             throw IOSPreKeyError.invalidRecipient

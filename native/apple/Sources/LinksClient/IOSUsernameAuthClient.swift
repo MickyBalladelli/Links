@@ -153,6 +153,7 @@ public struct IOSDirectoryDevice: Sendable {
 public struct IOSUsernameDirectory: Sendable {
     public let handle: String
     public let userID: String
+    public let displayName: String?
     public let devices: [IOSDirectoryDevice]
 
     fileprivate init(object: [String: Any]) throws {
@@ -164,6 +165,17 @@ public struct IOSUsernameDirectory: Sendable {
         }
         self.handle = handle
         self.userID = userID
+        if let displayName = object["display_name"] as? String {
+            guard displayName.utf8.count <= 80,
+                  !displayName.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else {
+                throw IOSUsernameAuthError.invalidResponse
+            }
+            self.displayName = displayName.isEmpty ? nil : displayName
+        } else {
+            self.displayName = nil
+        }
         let deviceObjects = object["devices"] as? [[String: Any]] ?? []
         self.devices = try deviceObjects.map(IOSDirectoryDevice.init)
     }
@@ -472,6 +484,37 @@ public final class IOSUsernameAuthClient: Sendable {
         return directory
     }
 
+    public func currentDisplayName(accessToken: String) async throws -> (name: String?, isSet: Bool) {
+        guard !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/account/display-name"))
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        return try Self.profileDisplayName(from: await get(request))
+    }
+
+    @discardableResult
+    public func changeDisplayName(accessToken: String, name: String) async throws
+        -> (name: String?, isSet: Bool) {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.utf8.count <= 80,
+              !cleanName.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        let request = try makeRequest(
+            path: "v1/account/display-name",
+            body: ["display_name": cleanName],
+            bearer: accessToken,
+            method: "PUT")
+        return try Self.profileDisplayName(from: await post(request))
+    }
+
     public func registerDevice(accessToken: String,
                                payload: IOSPairingPayload)
         async throws -> IOSPairingRegistrationResponse {
@@ -590,6 +633,25 @@ public final class IOSUsernameAuthClient: Sendable {
             throw IOSUsernameAuthError.invalidResponse
         }
         return object
+    }
+
+    private static func displayName(from object: [String: Any]) throws -> String? {
+        guard let name = object["display_name"] as? String else { return nil }
+        guard name.utf8.count <= 80,
+              !name.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return name.isEmpty ? nil : name
+    }
+
+    private static func profileDisplayName(from object: [String: Any]) throws
+        -> (name: String?, isSet: Bool) {
+        guard let isSet = object["display_name_set"] as? Bool else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return (try displayName(from: object), isSet)
     }
 
     private static func errorCode(from data: Data) -> String? {

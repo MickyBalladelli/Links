@@ -51,6 +51,7 @@ const profileDisplayNameDraft = signal(profileDisplayName.value)
 const profileDisplayNameError = signal('')
 const isChangingUsername = signal(false)
 const profileUsernameError = signal('')
+const isSavingDisplayName = signal(false)
 const profilePicture = signal('')
 const profilePictureSrc = signal('')
 const profilePictureError = signal('')
@@ -286,22 +287,54 @@ function validDisplayName(value) {
     && !/[\u0000-\u001f\u007f-\u009f]/u.test(cleanName)
 }
 
-function saveProfileDisplayName() {
+async function saveProfileDisplayName() {
+  if (isSavingDisplayName.value) return
   profileDisplayNameError.value = ''
   const cleanName = profileDisplayNameDraft.value.trim()
   if (!validDisplayName(cleanName)) {
     profileDisplayNameError.value = 'Use a name up to 80 bytes without control characters.'
     return
   }
-  profileDisplayName.value = cleanName
-  profileDisplayNameDraft.value = cleanName
+  if (!accessToken.value.trim()) {
+    profileDisplayNameError.value = 'Add a bearer token for your signed-in account.'
+    return
+  }
+  isSavingDisplayName.value = true
   try {
-    localStorage.setItem(profileDisplayNameKey, cleanName)
-  } catch {
-    // Keep the name in this tab when browser storage is unavailable.
+    const response = await fetch(`${authBase()}/v1/account/display-name`, {
+      method: 'PUT',
+      headers: {
+        ...authHeaders(),
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ display_name: cleanName }),
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (response.status === 401) throw new Error('Sign in again before changing your display name.')
+    if (!response.ok) throw new Error('Could not save the display name. Check the account service.')
+    const result = await response.json()
+    const savedName = typeof result.display_name === 'string' ? result.display_name : ''
+    if (savedName !== cleanName || !result.display_name_set) {
+      throw new Error('The account service returned an invalid display name.')
+    }
+    profileDisplayName.value = savedName
+    profileDisplayNameDraft.value = savedName
+    try {
+      localStorage.setItem(profileDisplayNameKey, cleanName)
+    } catch {
+      // Keep the account name in this tab when browser storage is unavailable.
+    }
+  } catch (error) {
+    profileDisplayNameError.value = error.message || 'Could not save the display name.'
+    return
+  } finally {
+    isSavingDisplayName.value = false
   }
   profileOpen.value = false
-  notice.value = 'Display name saved in this client. Your username stays the same.'
+  notice.value = 'Display name saved to your account.'
 }
 
 function authHeaders() {
@@ -389,6 +422,51 @@ async function refreshProfileUsername() {
   }
 }
 
+async function refreshProfileDisplayName() {
+  if (!accessToken.value.trim()) return
+  try {
+    const response = await fetch(`${authBase()}/v1/account/display-name`, {
+      headers: { ...authHeaders(), Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (!response.ok) return
+    const result = await response.json()
+    if (result.display_name_set) {
+      const name = typeof result.display_name === 'string' ? result.display_name : ''
+      if (name && !validDisplayName(name)) return
+      profileDisplayName.value = name
+      profileDisplayNameDraft.value = name
+      try {
+        if (name) localStorage.setItem(profileDisplayNameKey, name)
+        else localStorage.removeItem(profileDisplayNameKey)
+      } catch {
+        // Keep the account name in this tab when browser storage is unavailable.
+      }
+      return
+    }
+    const savedLocalName = profileDisplayName.value
+    if (!validDisplayName(savedLocalName)) return
+    const publishResponse = await fetch(`${authBase()}/v1/account/display-name`, {
+      method: 'PUT',
+      headers: {
+        ...authHeaders(),
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ display_name: savedLocalName }),
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (!publishResponse.ok) return
+    profileDisplayNameDraft.value = savedLocalName
+  } catch {
+    // Keep the last saved profile name when the account service is offline.
+  }
+}
+
 async function lookupHandle(handle) {
   const cleanHandle = normalizeHandle(handle)
   if (!validHandle(cleanHandle)) {
@@ -412,10 +490,73 @@ async function lookupHandle(handle) {
   const result = await response.json()
   return {
     handle: normalizeHandle(result.handle || cleanHandle),
+    displayName: typeof result.display_name === 'string' && validDisplayName(result.display_name)
+      ? result.display_name.trim()
+      : null,
     userID: result.user_id || result.userID,
     deviceCount: Array.isArray(result.devices) ? result.devices.length : Number(result.device_count || 0)
   }
 }
+
+let lastSavedContactNamesRefreshAt = 0
+let isRefreshingSavedContactNames = false
+
+async function refreshSavedContactNames() {
+  const token = accessToken.value.trim()
+  if (!token || isRefreshingSavedContactNames || Date.now() - lastSavedContactNamesRefreshAt < 30000) return
+  const userIDs = [...new Set([
+    ...contacts.value.map(contact => contact.userID),
+    ...conversations.value.map(conversation => conversation.recipientUserID)
+  ].filter(Boolean))]
+  if (userIDs.length === 0) return
+  isRefreshingSavedContactNames = true
+  lastSavedContactNamesRefreshAt = Date.now()
+  try {
+    for (const userID of userIDs) {
+      try {
+        const response = await fetch(`${authBase()}/v1/directory/users/${encodeURIComponent(userID)}`, {
+          headers: { ...authHeaders(), Accept: 'application/json' },
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error'
+        })
+        if (response.status === 429) break
+        if (!response.ok) continue
+        const result = await response.json()
+        if ((result.user_id || result.userID) !== userID) continue
+        const contact = {
+          handle: normalizeHandle(result.handle),
+          displayName: typeof result.display_name === 'string' && validDisplayName(result.display_name)
+            ? result.display_name.trim()
+            : null,
+          userID,
+          deviceCount: Array.isArray(result.devices) ? result.devices.length : Number(result.device_count || 0)
+        }
+        contacts.value = contacts.value.map(saved => saved.userID === userID ? contact : saved)
+        conversations.value = conversations.value.map(conversation => (
+          conversation.recipientUserID === userID
+            ? { ...conversation, title: `@${contact.handle}`, displayName: contact.displayName }
+            : conversation
+        ))
+      } catch {
+        continue
+      }
+    }
+    persistState()
+  } finally {
+    isRefreshingSavedContactNames = false
+  }
+}
+
+function refreshNamesWhenVisible() {
+  if (document.visibilityState !== 'hidden') {
+    refreshProfileDisplayName()
+    refreshSavedContactNames()
+  }
+}
+
+window.addEventListener('focus', refreshNamesWhenVisible)
+document.addEventListener('visibilitychange', refreshNamesWhenVisible)
 
 function selectConversation(id) {
   selectedConversationID.value = id
@@ -429,12 +570,19 @@ function selectConversation(id) {
 function openConversation(contact) {
   const existing = conversations.value.find(conversation => conversation.recipientUserID === contact.userID)
   if (existing) {
+    conversations.value = conversations.value.map(conversation => (
+      conversation.id === existing.id
+        ? { ...conversation, title: `@${contact.handle}`, displayName: contact.displayName }
+        : conversation
+    ))
     selectConversation(existing.id)
+    persistState()
     return
   }
   const conversation = {
     id: crypto.randomUUID(),
     title: `@${contact.handle}`,
+    displayName: contact.displayName,
     recipientUserID: contact.userID,
     unreadCount: 0,
     messages: []
@@ -506,7 +654,9 @@ const selectedConversation = computed(() => (
 
 const filteredConversations = computed(() => {
   const query = normalizeHandle(searchQuery.value)
-  return conversations.value.filter(conversation => !query || normalizeHandle(conversation.title).includes(query))
+  return conversations.value.filter(conversation => !query
+    || normalizeHandle(conversation.displayName || conversation.title).includes(query)
+    || normalizeHandle(conversation.title).includes(query))
 })
 
 const statusLabel = computed(() => connectionState.value === 'ready' ? 'Connected' : 'UI preview')
@@ -524,10 +674,11 @@ function ConversationList() {
     >
       {contactPictures.value[conversation.recipientUserID]
         ? <img class="profile-picture is-medium" src={contactPictures.value[conversation.recipientUserID]} alt="" />
-        : <Avatar name={avatarName(conversation.title)} size="medium" />}
+        : <Avatar name={avatarName(conversation.displayName || conversation.title)} size="medium" />}
       <span class="conversation-copy">
-        <strong>{conversation.title}</strong>
-        <span>{conversation.messages.at(-1)?.text || 'No messages yet'}</span>
+        <strong>{conversation.displayName || conversation.title}</strong>
+        <span>{conversation.displayName ? conversation.title : (conversation.messages.at(-1)?.text || 'No messages yet')}</span>
+        {conversation.displayName ? <span>{conversation.messages.at(-1)?.text || 'No messages yet'}</span> : null}
       </span>
       {conversation.unreadCount > 0 ? <Badge value={conversation.unreadCount > 99 ? '99+' : conversation.unreadCount} tone="info" /> : null}
     </button>
@@ -558,10 +709,10 @@ function ContactList() {
       <button type="button" class="contact-open" onClick={() => openConversation(contact)}>
         {contactPictures.value[contact.userID]
           ? <img class="profile-picture is-small" src={contactPictures.value[contact.userID]} alt="" />
-          : <Avatar name={avatarName(contact.handle)} size="small" />}
+          : <Avatar name={avatarName(contact.displayName || contact.handle)} size="small" />}
         <span class="contact-copy">
-          <strong>@{contact.handle}</strong>
-          <small>{contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
+          <strong>{contact.displayName || `@${contact.handle}`}</strong>
+          <small>@{contact.handle} · {contact.deviceCount || 'No'} active {contact.deviceCount === 1 ? 'device' : 'devices'}</small>
         </span>
       </button>
       <button
@@ -631,7 +782,7 @@ function Sidebar() {
         <div class="contact-list"><ContactList /></div>
       </section>
 
-      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileDisplayNameDraft.value = profileDisplayName.value; profileDisplayNameError.value = ''; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername() }}>
+      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileDisplayNameDraft.value = profileDisplayName.value; profileDisplayNameError.value = ''; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername(); refreshProfileDisplayName(); refreshSavedContactNames() }}>
         <ProfilePicture />
         <span class="profile-copy">
           <strong>{computed(() => profileDisplayName.value || `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
@@ -683,10 +834,10 @@ function ConversationDetail() {
           <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
           {contactPictures.value[conversation.recipientUserID]
             ? <img class="profile-picture is-large" src={contactPictures.value[conversation.recipientUserID]} alt="" />
-            : <Avatar name={avatarName(conversation.title)} size="large" />}
+            : <Avatar name={avatarName(conversation.displayName || conversation.title)} size="large" />}
           <div class="conversation-heading">
-            <h1>{conversation.title}</h1>
-            <p>Private one-to-one conversation</p>
+            <h1>{conversation.displayName || conversation.title}</h1>
+            <p>{conversation.title}</p>
           </div>
           <div class="conversation-status"><StatusDot /><span>{statusLabel}</span></div>
         </header>
@@ -780,12 +931,12 @@ function ProfilePopup() {
     <Popup
       open={profileOpen}
       title="Web profile"
-      ariaDescription="Change the local display name, account username, and directory access."
+      ariaDescription="Change the shared display name, account username, and directory access."
       size="medium"
       footer={() => (
         <div class="popup-actions is-split">
           <Button label="Reset preview" variant="tertiary" onClick={resetPreview} />
-          <Button label="Save display name" variant="secondary" onClick={saveProfileDisplayName} />
+          <Button label="Save display name" variant="secondary" loading={isSavingDisplayName} disabled={isSavingDisplayName} onClick={saveProfileDisplayName} />
           <Button label="Change username" variant="primary" loading={isChangingUsername} disabled={isChangingUsername} onClick={changeProfileUsername} />
         </div>
       )}
@@ -813,7 +964,7 @@ function ProfilePopup() {
         </div>
         <label for="profile-display-name">Display name</label>
         <TextField id="profile-display-name" value={profileDisplayNameDraft} placeholder="Name" autocomplete="name" />
-        <p>Shown in this client. Your username and saved profile stay the same.</p>
+        <p>Shown to people in your contacts and conversations.</p>
         {computed(() => profileDisplayNameError.value ? <Alert tone="error">{profileDisplayNameError}</Alert> : null)}
         <label for="profile-handle">New username</label>
         <TextField id="profile-handle" value={profileHandleDraft} placeholder="username" autocomplete="username" />
@@ -822,7 +973,7 @@ function ProfilePopup() {
         <label for="auth-base">Account service</label>
         <TextField id="auth-base" value={authBaseURL} placeholder="/links-api" autocomplete="off" />
         <label for="access-token">Bearer token</label>
-        <TextField id="access-token" value={accessToken} type="password" placeholder="Required to change username" autocomplete="off" />
+        <TextField id="access-token" value={accessToken} type="password" placeholder="Required to change names" autocomplete="off" />
         <div class="privacy-copy"><LockIcon size="0.9rem" /><span>The token stays in memory and is never written to browser storage.</span></div>
       </div>
     </Popup>

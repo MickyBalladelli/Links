@@ -466,8 +466,8 @@ public final class IOSClient: SharedCoreIdentitySigner {
         accountHandle = cleanHandle
     }
 
-    /// Save a local profile label without changing the stable profile namespace.
-    /// An empty name clears the label and lets the app show its default name.
+    /// Cache the account display name without changing the stable profile namespace.
+    /// An empty name clears the cached label and lets the app show its default name.
     public func updateProfileDisplayName(_ name: String) throws {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleanName.utf8.count <= 80,

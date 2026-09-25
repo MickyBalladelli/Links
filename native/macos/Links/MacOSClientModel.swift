@@ -29,6 +29,7 @@ struct LinksMacOSGroupMember: Identifiable, Equatable {
 struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     let id: String
     var title: String
+    var displayName: String? = nil
     var recipientUserID: String
     var peerUserID: String?
     var messages: [LinksMacOSMessage]
@@ -43,12 +44,14 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
 
     var isIncoming: Bool { !isGroup && recipientUserID.isEmpty }
     var mlsConversationID: String { deliveryConversationID ?? id }
+    var displayTitle: String { isGroup ? title : (displayName ?? title) }
 
     init(id: String, title: String, recipientUserID: String,
          peerUserID: String? = nil, messages: [LinksMacOSMessage], unreadCount: Int = 0,
-         isGroup: Bool = false) {
+         isGroup: Bool = false, displayName: String? = nil) {
         self.id = id
         self.title = title
+        self.displayName = displayName
         self.recipientUserID = recipientUserID
         self.peerUserID = peerUserID
         self.messages = messages
@@ -57,7 +60,7 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, recipientUserID, peerUserID, messages, unreadCount,
+        case id, title, displayName, recipientUserID, peerUserID, messages, unreadCount,
              deliveryConversationID, isGroup, groupActive
     }
 
@@ -65,6 +68,7 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
+        displayName = try values.decodeIfPresent(String.self, forKey: .displayName)
         recipientUserID = try values.decode(String.self, forKey: .recipientUserID)
         peerUserID = try values.decodeIfPresent(String.self, forKey: .peerUserID)
         messages = try values.decodeIfPresent([LinksMacOSMessage].self, forKey: .messages) ?? []
@@ -78,10 +82,12 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
 
 struct LinksMacOSContact: Identifiable, Equatable, Codable {
     var handle: String
+    var displayName: String? = nil
     let userID: String
-    let deviceCount: Int
+    var deviceCount: Int
 
     var id: String { userID }
+    var displayTitle: String { displayName ?? "@\(handle)" }
 }
 
 enum LinksMacOSAuthMode: String, CaseIterable, Identifiable {
@@ -300,6 +306,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var sendAfterSetupConversationID: String?
     private var isRefreshingContactPictures = false
     private var contactPictureRefreshTask: Task<Void, Never>?
+    private var isRefreshingSavedContactNames = false
+    private var lastSavedContactNamesRefreshAt: Date?
+    private var isRefreshingOwnDisplayName = false
+    private var lastOwnDisplayNameRefreshAt: Date?
     var requestNewProfileRegistration: ((String) -> Void)?
 
     init(profileOverride: ClientProfile? = nil) {
@@ -614,19 +624,100 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
 
-    func changeProfileDisplayName(to requestedName: String) -> Bool {
-        guard !profileTornDown, let client else {
-            profileDisplayNameError = "This profile is not ready yet."
+    func changeProfileDisplayName(to requestedName: String) async -> Bool {
+        guard !profileTornDown, let client, let authClient, client.isAuthenticated,
+              let token = try? client.accessToken() else {
+            profileDisplayNameError = "Sign in before changing your display name."
+            return false
+        }
+        let cleanName = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.utf8.count <= 80,
+              !cleanName.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            profileDisplayNameError = "Use a name up to 80 bytes without control characters."
             return false
         }
         do {
-            try client.updateProfileDisplayName(requestedName)
-            profileDisplayName = client.profileDisplayName ?? profileName
+            let savedName = try await authClient.changeDisplayName(
+                accessToken: token, name: cleanName)
+            try client.updateProfileDisplayName(savedName.name ?? "")
+            profileDisplayName = savedName.name ?? profileName
+            lastOwnDisplayNameRefreshAt = Date()
             profileDisplayNameError = nil
             return true
-        } catch {
+        } catch IOSUsernameAuthError.invalidRequest {
             profileDisplayNameError = "Use a name up to 80 bytes without control characters."
-            return false
+        } catch {
+            profileDisplayNameError = "Could not save your display name. Check your connection and try again."
+        }
+        return false
+    }
+
+    func refreshNamesFromAccount() async {
+        await refreshOwnDisplayName()
+        await refreshSavedContactNames()
+    }
+
+    private func refreshOwnDisplayName() async {
+        guard !profileTornDown, let client, let authClient, client.isAuthenticated,
+              let token = try? client.accessToken(), !isRefreshingOwnDisplayName else { return }
+        if let lastOwnDisplayNameRefreshAt,
+           Date().timeIntervalSince(lastOwnDisplayNameRefreshAt) < 30 {
+            return
+        }
+        isRefreshingOwnDisplayName = true
+        lastOwnDisplayNameRefreshAt = Date()
+        defer { isRefreshingOwnDisplayName = false }
+        do {
+            let profileName = try await authClient.currentDisplayName(accessToken: token)
+            if profileName.isSet {
+                try? client.updateProfileDisplayName(profileName.name ?? "")
+                profileDisplayName = profileName.name ?? self.profileName
+            } else if let localName = client.profileDisplayName, !localName.isEmpty {
+                let savedName = try await authClient.changeDisplayName(
+                    accessToken: token, name: localName)
+                profileDisplayName = savedName.name ?? self.profileName
+            } else {
+                try? client.updateProfileDisplayName("")
+                profileDisplayName = self.profileName
+            }
+        } catch {
+            // Keep the last saved name when the account service is offline.
+        }
+    }
+
+    private func refreshSavedContactNames() async {
+        guard !profileTornDown, let client, let authClient, client.isAuthenticated,
+              let token = try? client.accessToken(), !isRefreshingSavedContactNames else { return }
+        if let lastSavedContactNamesRefreshAt,
+           Date().timeIntervalSince(lastSavedContactNamesRefreshAt) < 30 {
+            return
+        }
+        let savedConversationUserIDs = conversations.flatMap { conversation -> [String] in
+            guard !conversation.isGroup else { return [] }
+            return [conversation.recipientUserID, conversation.peerUserID ?? ""]
+                .filter { !$0.isEmpty }
+        }
+        let userIDs = Set(contacts.map(\.userID) + savedConversationUserIDs)
+        guard !userIDs.isEmpty else { return }
+        isRefreshingSavedContactNames = true
+        lastSavedContactNamesRefreshAt = Date()
+        defer { isRefreshingSavedContactNames = false }
+        for userID in userIDs.sorted() {
+            do {
+                let directory = try await authClient.lookup(userID: userID, accessToken: token)
+                guard directory.userID == userID else { continue }
+                refreshCachedRecipientHandle(
+                    userID: userID,
+                    handle: directory.handle,
+                    displayName: directory.displayName,
+                    deviceCount: directory.devices.count)
+            } catch IOSUsernameAuthError.rateLimited {
+                break
+            } catch {
+                continue
+            }
         }
     }
 
@@ -782,6 +873,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         case .active:
             profileLogger?.record(.active)
             lifecycleStatus = "Active"
+            Task { await refreshNamesFromAccount() }
             if reconnectAfterBackground {
                 reconnectAfterBackground = false
                 connect()
@@ -1486,7 +1578,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         publishProfileStatus()
     }
 
-    func createConversation(title: String, recipientUserID: String) -> Bool {
+    func createConversation(title: String, recipientUserID: String,
+                           displayName: String? = nil) -> Bool {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanRecipient = recipientUserID
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1501,7 +1594,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             title: cleanTitle,
             recipientUserID: cleanRecipient,
             peerUserID: cleanRecipient,
-            messages: [])
+            messages: [],
+            displayName: displayName)
         conversations.append(conversation)
         selectedConversationID = conversation.id
         actionError = nil
@@ -1541,6 +1635,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
 
             let contact = LinksMacOSContact(
                 handle: directory.handle,
+                displayName: directory.displayName,
                 userID: directory.userID,
                 deviceCount: directory.devices.count)
             if let contactIndex = contacts.firstIndex(where: { $0.userID == contact.userID }) {
@@ -1593,6 +1688,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             }
             let contact = LinksMacOSContact(
                 handle: directory.handle,
+                displayName: directory.displayName,
                 userID: directory.userID,
                 deviceCount: directory.devices.count)
             if let index = contacts.firstIndex(where: { $0.userID == contact.userID }) {
@@ -1616,20 +1712,29 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         persistLocalState()
     }
 
-    func refreshCachedRecipientHandle(userID: String, handle: String) {
+    func refreshCachedRecipientHandle(userID: String, handle: String,
+                                      displayName: String? = nil,
+                                      deviceCount: Int? = nil) {
         var changed = false
-        if let index = contacts.firstIndex(where: { $0.userID == userID }),
-           contacts[index].handle != handle {
-            contacts[index].handle = handle
-            contacts.sort { $0.handle < $1.handle }
-            changed = true
+        if let index = contacts.firstIndex(where: { $0.userID == userID }) {
+            if contacts[index].handle != handle
+                || contacts[index].displayName != displayName
+                || (deviceCount.map { contacts[index].deviceCount != $0 } ?? false) {
+                contacts[index].handle = handle
+                contacts[index].displayName = displayName
+                if let deviceCount { contacts[index].deviceCount = deviceCount }
+                contacts.sort { $0.handle < $1.handle }
+                changed = true
+            }
         }
         for index in conversations.indices where !conversations[index].isGroup
             && (conversations[index].peerUserID == userID
                 || conversations[index].recipientUserID == userID) {
             let updatedTitle = "@\(handle)"
-            if conversations[index].title != updatedTitle {
+            if conversations[index].title != updatedTitle
+                || conversations[index].displayName != displayName {
                 conversations[index].title = updatedTitle
+                conversations[index].displayName = displayName
                 changed = true
             }
         }
@@ -1651,16 +1756,20 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     recipientUserID: contact.userID,
                     peerUserID: contact.userID,
                     messages: conversations[index].messages,
-                    unreadCount: conversations[index].unreadCount)
+                    unreadCount: conversations[index].unreadCount,
+                    displayName: contact.displayName)
             } else {
                 conversations[index].title = "@\(contact.handle)"
+                conversations[index].displayName = contact.displayName
             }
             selectedConversationID = conversations[index].id
             markConversationRead(conversations[index].id)
             persistLocalState()
             return
         }
-        _ = createConversation(title: "@\(contact.handle)", recipientUserID: contact.userID)
+        _ = createConversation(
+            title: "@\(contact.handle)", recipientUserID: contact.userID,
+            displayName: contact.displayName)
     }
 
     func openSavedContact(userID: String) async {
@@ -1676,9 +1785,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 startConversation(with: contact)
                 return
             }
-            refreshCachedRecipientHandle(userID: userID, handle: directory.handle)
+            refreshCachedRecipientHandle(
+                userID: userID,
+                handle: directory.handle,
+                displayName: directory.displayName,
+                deviceCount: directory.devices.count)
             let refreshedContact = LinksMacOSContact(
                 handle: directory.handle,
+                displayName: directory.displayName,
                 userID: directory.userID,
                 deviceCount: directory.devices.count)
             startConversation(with: refreshedContact)
@@ -2025,6 +2139,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             }
             if let knownContact {
                 conversations[index].title = "@\(knownContact.handle)"
+                conversations[index].displayName = knownContact.displayName
             }
             conversations[index].messages.append(received)
             if selectedConversationID != conversations[index].id
@@ -2039,7 +2154,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 recipientUserID: message.senderUserID,
                 peerUserID: message.senderUserID,
                 messages: [received],
-                unreadCount: 1))
+                unreadCount: 1,
+                displayName: knownContact?.displayName))
             conversationID = message.conversationID
         }
         initializedConversationIDs.insert(conversationID)
@@ -2070,6 +2186,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     $0.id == conversationID && $0.peerUserID == senderUserID
                 }) else { return }
                 self.conversations[index].title = "@\(directory.handle)"
+                self.conversations[index].displayName = directory.displayName
                 self.conversations[index].recipientUserID = senderUserID
                 self.initializedConversationIDs.insert(conversationID)
                 if let contactIndex = self.contacts.firstIndex(where: {
@@ -2077,11 +2194,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 }) {
                     self.contacts[contactIndex] = LinksMacOSContact(
                         handle: directory.handle,
+                        displayName: directory.displayName,
                         userID: directory.userID,
                         deviceCount: directory.devices.count)
                 } else {
                     self.contacts.append(LinksMacOSContact(
                         handle: directory.handle,
+                        displayName: directory.displayName,
                         userID: directory.userID,
                         deviceCount: directory.devices.count))
                 }
@@ -2157,6 +2276,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         configureMessagingIfPossible()
         if client.isAuthenticated {
+            Task { await refreshNamesFromAccount() }
             let unresolved = conversations.compactMap { conversation -> (String, String)? in
                 guard let peerUserID = conversation.peerUserID,
                       contacts.contains(where: { $0.userID == peerUserID }) == false else {
@@ -2188,9 +2308,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         let directory = MacOSDirectoryChatAdapter(
             directoryClient: authClient,
             keyPackageProvider: keyPackageProvider,
-            onDirectoryResolved: { [weak self] userID, handle in
+            onDirectoryResolved: { [weak self] userID, handle, displayName in
                 Task { @MainActor [weak self] in
-                    self?.refreshCachedRecipientHandle(userID: userID, handle: handle)
+                    self?.refreshCachedRecipientHandle(
+                        userID: userID, handle: handle, displayName: displayName)
                 }
             })
         do {

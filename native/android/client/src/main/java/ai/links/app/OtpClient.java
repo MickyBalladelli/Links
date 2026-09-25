@@ -105,6 +105,59 @@ public final class OtpClient {
         }
     }
 
+    public String changeDisplayName(String accessToken, String name) throws IOException {
+        decodeExact(accessToken, 32);
+        String cleanName = name == null ? "" : name.trim();
+        if (cleanName.getBytes(StandardCharsets.UTF_8).length > 80)
+            throw new IOException("Use a display name up to 80 bytes");
+        for (int index = 0; index < cleanName.length(); index++) {
+            if (Character.isISOControl(cleanName.charAt(index)))
+                throw new IOException("Use a display name without control characters");
+        }
+        JSONObject body = new JSONObject();
+        put(body, "display_name", cleanName);
+        JSONObject response = request("PUT", "/v1/account/display-name", body, accessToken);
+        return readDisplayName(response).name;
+    }
+
+    public DisplayName currentDisplayName(String accessToken) throws IOException {
+        decodeExact(accessToken, 32);
+        JSONObject response = request("GET", "/v1/account/display-name", null, accessToken);
+        return readDisplayName(response);
+    }
+
+    private static DisplayName readDisplayName(JSONObject response) throws IOException {
+        try {
+            if (!response.has("display_name_set"))
+                throw new IOException("Invalid display name response");
+            boolean isSet = response.getBoolean("display_name_set");
+            String name = response.isNull("display_name") ? "" : response.getString("display_name");
+            if (name.getBytes(StandardCharsets.UTF_8).length > 80)
+                throw new IOException("Invalid display name response");
+            for (int index = 0; index < name.length(); index++) {
+                if (Character.isISOControl(name.charAt(index)))
+                    throw new IOException("Invalid display name response");
+            }
+            if (!isSet && !name.isEmpty()) throw new IOException("Invalid display name response");
+            return new DisplayName(name, isSet);
+        } catch (JSONException error) {
+            throw new IOException("Invalid display name response", error);
+        }
+    }
+
+    public static final class DisplayName {
+        private final String name;
+        private final boolean isSet;
+
+        private DisplayName(String name, boolean isSet) {
+            this.name = name;
+            this.isSet = isSet;
+        }
+
+        public String name() { return name; }
+        public boolean isSet() { return isSet; }
+    }
+
     /** Revoke the current bearer. Local callers must clear their session even if this fails. */
     public void logout(String accessToken) throws IOException {
         decodeExact(accessToken, 32);

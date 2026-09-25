@@ -92,10 +92,12 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /v1/auth/username/login` | `challenge_id`, `signature` | Atomically consumes a login challenge and returns one session after the registered device key proves possession. |
 | `GET /v1/account/username` | Current bearer | Returns the account's public username, or `null` if none is set. |
 | `PUT /v1/account/username` | Current bearer and canonical `handle` | Changes the account's public username and returns it. The previous username is released. |
+| `GET /v1/account/display-name` | Current bearer | Returns the shared display name and whether the account has set one. |
+| `PUT /v1/account/display-name` | Current bearer and `display_name` (up to 80 UTF-8 bytes) | Sets the public display name. An empty string clears it. |
 | `POST /v1/auth/logout` | Current bearer | Deletes only the current session and returns no body. Repetition is safe. |
 | `DELETE /v1/auth/sessions/others` | Current bearer | Revokes every other session for the account while preserving the current session. |
-| `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's W3C `did:key`, public identity key, MLS node ID and MLS credential. |
-| `GET /v1/directory/users/{user_id}` | Bearer session and sender user ID | Resolves an incoming sender to the same active username directory record so clients can label a newly received conversation. |
+| `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Current username, shared display name, active user ID, and every active device's W3C `did:key`, public identity key, MLS node ID and MLS credential. |
+| `GET /v1/directory/users/{user_id}` | Bearer session and sender user ID | Resolves the current username and display name for saved contacts and conversations without changing the stable user ID. |
 | `GET /v1/contact-discovery/parameters` | Bearer session | OPRF public key and opaque active phone-directory membership filter. |
 | `POST /v1/contact-discovery/query` | Bearer session plus bounded blinded Ristretto points | One verifiable OPRF evaluation per blinded input. |
 | `GET /v1/privacy-pass/parameters` | None | Privacy Pass VOPRF public key and key identifier. |

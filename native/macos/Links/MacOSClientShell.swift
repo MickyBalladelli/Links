@@ -1041,6 +1041,7 @@ private struct MacOSChangeDisplayNameSheet: View {
     @ObservedObject var model: LinksMacOSAppModel
     @Binding var displayName: String
     @Environment(\.dismiss) private var dismiss
+    @State private var isSaving = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1051,7 +1052,7 @@ private struct MacOSChangeDisplayNameSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
 
-            Text("Shown in this client. Your username and saved profile stay the same.")
+            Text("Shown to people in your contacts and conversations.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1067,12 +1068,15 @@ private struct MacOSChangeDisplayNameSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
-                    if model.changeProfileDisplayName(to: displayName) {
-                        dismiss()
+                    Task {
+                        isSaving = true
+                        let saved = await model.changeProfileDisplayName(to: displayName)
+                        isSaving = false
+                        if saved { dismiss() }
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -1118,16 +1122,24 @@ private struct ConversationRow: View {
                     .background(Color.accentColor.opacity(0.15))
                     .clipShape(Circle())
             } else {
-                ProfileAvatar(title: conversation.title, size: 30, imageJPEG: imageJPEG)
+                ProfileAvatar(title: conversation.displayTitle, size: 30, imageJPEG: imageJPEG)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(conversation.title)
+                Text(conversation.displayTitle)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
-                Text(conversation.messages.last?.text ?? "No messages")
+                Text(conversation.isGroup
+                     ? (conversation.messages.last?.text ?? "No messages")
+                     : conversation.title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if !conversation.isGroup {
+                    Text(conversation.messages.last?.text ?? "No messages")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             if conversation.unreadCount > 0 {
                 Text(conversation.unreadCount > 99 ? "99+" : "\(conversation.unreadCount)")
@@ -1149,14 +1161,14 @@ private struct ContactRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ProfileAvatar(title: contact.handle, size: 30, imageJPEG: imageJPEG)
+            ProfileAvatar(title: contact.displayTitle, size: 30, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 3) {
-                Text("@\(contact.handle)")
+                Text(contact.displayTitle)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
-                Text(contact.deviceCount == 1
+                Text("@\(contact.handle) · " + (contact.deviceCount == 1
                      ? "1 active device"
-                     : "\(contact.deviceCount) active devices")
+                     : "\(contact.deviceCount) active devices"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1215,15 +1227,15 @@ private struct LinksConversationDetail: View {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     ProfileAvatar(
-                        title: conversation.title,
+                        title: conversation.displayTitle,
                         size: 38,
                         imageJPEG: model.pictureJPEG(for: conversation))
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(conversation.title)
+                        Text(conversation.displayTitle)
                             .font(.title2.weight(.semibold))
                         Text(conversation.isGroup
                              ? groupSubtitle(conversation)
-                             : "Private one-to-one conversation")
+                             : conversation.title)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1667,7 +1679,12 @@ private struct ContactPicker: View {
                             set: { isOn in
                                 if isOn { selection.insert(contact.userID) } else { selection.remove(contact.userID) }
                             })) {
-                            Text("@\(contact.handle)")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(contact.displayTitle)
+                                Text("@\(contact.handle)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .toggleStyle(.checkbox)
                     }

@@ -189,10 +189,23 @@ pub struct CurrentUsernameResponse {
     pub handle: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayNameChangeRequest {
+    pub display_name: String,
+}
+
+#[derive(Serialize)]
+pub struct DisplayNameResponse {
+    pub display_name: Option<String>,
+    pub display_name_set: bool,
+}
+
 #[derive(Serialize)]
 pub struct UsernameDirectoryResponse {
     pub handle: String,
     pub user_id: Uuid,
+    pub display_name: Option<String>,
     pub devices: Vec<UsernameDirectoryDeviceResponse>,
     pub verification_badge: Option<String>,
 }
@@ -1604,6 +1617,60 @@ impl AccountAuth {
         Ok(UsernameChangeResponse { handle: request.handle })
     }
 
+    /// Return the authenticated account's shared display name.
+    pub async fn current_display_name(
+        &self,
+        token: &str,
+    ) -> Result<DisplayNameResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let row = sqlx::query(
+            "SELECT display_name, display_name_set FROM accounts
+             WHERE user_id=$1 AND disabled_at IS NULL",
+        )
+        .bind(account.user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AuthError::Denied)?;
+        Ok(DisplayNameResponse {
+            display_name: row.try_get("display_name")?,
+            display_name_set: row.try_get("display_name_set")?,
+        })
+    }
+
+    /// Set the account-wide display name. An empty string clears it.
+    pub async fn change_display_name(
+        &self,
+        token: &str,
+        request: DisplayNameChangeRequest,
+    ) -> Result<DisplayNameResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let clean_name = request.display_name.trim();
+        if clean_name.len() > 80
+            || clean_name
+                .chars()
+                .any(|character| character.is_control())
+        {
+            return Err(AuthError::Invalid);
+        }
+        let display_name = (!clean_name.is_empty()).then(|| clean_name.to_owned());
+        let updated = sqlx::query(
+            "UPDATE accounts SET display_name=$1, display_name_set=TRUE
+             WHERE user_id=$2 AND disabled_at IS NULL
+               AND account_kind IN ('consumer', 'pseudonymous')",
+        )
+        .bind(&display_name)
+        .bind(account.user_id)
+        .execute(&self.pool)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(AuthError::Denied);
+        }
+        Ok(DisplayNameResponse {
+            display_name,
+            display_name_set: true,
+        })
+    }
+
     /// Replace the authenticated account's public profile picture.
     /// Callers must send a JPEG no larger than 128 KiB.
     pub async fn put_profile_picture(&self, token: &str, jpeg: Vec<u8>) -> Result<(), AuthError> {
@@ -1673,6 +1740,13 @@ impl AccountAuth {
         let Some(directory) = directory else {
             return Ok(None);
         };
+        let display_name = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT display_name FROM accounts WHERE user_id=$1 AND disabled_at IS NULL",
+        )
+        .bind(directory.user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten();
         let mut devices = Vec::with_capacity(directory.devices.len());
         for device in directory.devices {
             let public_key: [u8; 32] = device
@@ -1702,6 +1776,7 @@ impl AccountAuth {
         Ok(Some(UsernameDirectoryResponse {
             handle: handle.to_owned(),
             user_id: directory.user_id,
+            display_name,
             devices,
             verification_badge: directory.verification_badge.as_deref().map(encode),
         }))

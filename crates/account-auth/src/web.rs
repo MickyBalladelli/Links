@@ -3,7 +3,7 @@ use crate::{
         AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest, CreateGroupRequest,
         DelegatedDeviceRegistrationRequest, DeviceRegistrationRequest,
         EncryptedKeyBackupRequest, FinishRequest,
-        OrganizationControlsRequest,
+        DisplayNameChangeRequest, OrganizationControlsRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
         PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest, UsernameChangeRequest,
         UsernameChallengeRequest,
@@ -45,6 +45,10 @@ pub fn router_with_trusted_proxies(
         .route(
             "/v1/account/username",
             get(current_username).put(change_username),
+        )
+        .route(
+            "/v1/account/display-name",
+            get(current_display_name).put(change_display_name),
         )
         .route("/v1/auth/logout", post(logout))
         .route("/v1/auth/sessions/others", delete(revoke_other_sessions))
@@ -495,6 +499,25 @@ async fn current_username(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(auth.current_username(bearer(&headers)?).await?))
+}
+async fn change_display_name(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<DisplayNameChangeRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.change_display_name(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn current_display_name(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.current_display_name(bearer(&headers)?).await?))
 }
 async fn organization_controls(
     State(auth): State<Arc<AccountAuth>>,

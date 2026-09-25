@@ -4,6 +4,7 @@ import LinksClient
 
 struct IOSMobileRootView: View {
     @ObservedObject var model: IOSMobileAppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -24,6 +25,14 @@ struct IOSMobileRootView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: model.isAuthenticated)
+        .task(id: model.isAuthenticated) {
+            guard model.isAuthenticated, scenePhase == .active else { return }
+            await model.refreshNamesFromAccount()
+        }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task { await model.refreshNamesFromAccount() }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = model.error {
                 IOSNoticeBanner(text: error, tint: .red) {
@@ -659,7 +668,9 @@ private struct IOSConversationRow: View {
                 Text(conversation.displayTitle)
                     .font(.headline)
                     .foregroundStyle(.primary)
-                Label(conversation.isGroup ? "Encrypted group" : "Private conversation",
+                Label(conversation.isGroup ? "Encrypted group" :
+                        (conversation.displayName == nil
+                         ? "Private conversation" : "@\(conversation.handle) · Private conversation"),
                       systemImage: conversation.isGroup ? "person.3.fill" : "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -702,7 +713,9 @@ private struct IOSConversationRow: View {
                     Image(systemName: conversation.isGroup ? "person.3.fill" : "lock.fill")
                         .font(.caption)
                         .padding(.top, 1)
-                    Text(conversation.isGroup ? "Encrypted group" : "Private conversation")
+                    Text(conversation.isGroup ? "Encrypted group" :
+                            (conversation.displayName == nil
+                             ? "Private conversation" : "@\(conversation.handle) · Private conversation"))
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -897,11 +910,11 @@ private struct IOSPeopleView: View {
                                         size: 46,
                                         imageJPEG: model.contactPictures[contact.userID])
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text("@\(contact.handle)")
+                                        Text(contact.displayTitle)
                                             .font(.headline)
                                             .foregroundStyle(.primary)
-                                        Text(contact.deviceCount == 1
-                                             ? "1 secure device" : "\(contact.deviceCount) secure devices")
+                                        Text("@\(contact.handle) · " + (contact.deviceCount == 1
+                                             ? "1 secure device" : "\(contact.deviceCount) secure devices"))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -1011,11 +1024,11 @@ private struct IOSPeopleView: View {
                                     size: 40,
                                     imageJPEG: model.contactPictures[contact.userID])
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("@\(contact.handle)")
+                                    Text(contact.displayTitle)
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    Text(contact.deviceCount == 1
-                                         ? "1 secure device" : "\(contact.deviceCount) secure devices")
+                                    Text("@\(contact.handle) · " + (contact.deviceCount == 1
+                                         ? "1 secure device" : "\(contact.deviceCount) secure devices"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -1284,6 +1297,7 @@ private struct IOSChangeDisplayNameSheet: View {
     @ObservedObject var model: IOSMobileAppModel
     @Binding var displayName: String
     @Environment(\.dismiss) private var dismiss
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -1293,7 +1307,7 @@ private struct IOSChangeDisplayNameSheet: View {
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
                 } footer: {
-                    Text("Shown in this client. Your username and saved profile stay the same.")
+                    Text("Shown to people in your contacts and conversations.")
                 }
 
                 if let error = model.profileDisplayNameError {
@@ -1309,11 +1323,14 @@ private struct IOSChangeDisplayNameSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if model.changeProfileDisplayName(displayName) {
-                            dismiss()
+                        Task {
+                            isSaving = true
+                            let saved = await model.changeProfileDisplayName(displayName)
+                            isSaving = false
+                            if saved { dismiss() }
                         }
                     }
-                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                 }
             }
         }
@@ -1687,7 +1704,7 @@ private struct IOSContactPickerSection: View {
                     }
                 } label: {
                     HStack {
-                        Text("@\(contact.handle)")
+                        Text(contact.displayTitle)
                             .foregroundStyle(.primary)
                         Spacer()
                         if selection.contains(contact.userID) {
