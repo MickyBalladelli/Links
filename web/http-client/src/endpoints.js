@@ -67,6 +67,13 @@ export const endpointGroups = [
         method: 'GET',
         path: '/v1/directory/users/<user UUID>',
         auth: 'bearer'
+      },
+      {
+        name: 'Sync saved contact profiles',
+        method: 'POST',
+        path: '/v1/directory/profiles/sync',
+        auth: 'bearer',
+        body: { user_ids: ['<user UUID>'] }
       }
     ]
   },

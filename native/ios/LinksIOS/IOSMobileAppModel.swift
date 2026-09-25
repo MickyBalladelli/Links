@@ -213,6 +213,7 @@ final class IOSMobileAppModel: ObservableObject {
     private var activeConversationID: String?
     private var isRefreshingContactPictures = false
     private var contactPictureRefreshTask: Task<Void, Never>?
+    private var profileSyncTask: Task<Void, Never>?
     private var isRefreshingSavedContactNames = false
     private var lastSavedContactNamesRefreshAt: Date?
     private var isRefreshingOwnDisplayName = false
@@ -745,6 +746,23 @@ final class IOSMobileAppModel: ObservableObject {
         await refreshSavedContactNames()
     }
 
+    func setProfileSyncActive(_ active: Bool) {
+        guard active, isAuthenticated else {
+            profileSyncTask?.cancel()
+            profileSyncTask = nil
+            return
+        }
+        guard profileSyncTask == nil else { return }
+        profileSyncTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, let self else { break }
+                guard self.isAuthenticated else { continue }
+                await self.refreshSavedContactNames()
+            }
+        }
+    }
+
     private func refreshOwnDisplayName() async {
         guard let client, let usernameAuthClient, client.isAuthenticated,
               let token = try? client.accessToken(), !isRefreshingOwnDisplayName else { return }
@@ -777,7 +795,7 @@ final class IOSMobileAppModel: ObservableObject {
         guard let client, let usernameAuthClient, client.isAuthenticated,
               let token = try? client.accessToken(), !isRefreshingSavedContactNames else { return }
         if let lastSavedContactNamesRefreshAt,
-           Date().timeIntervalSince(lastSavedContactNamesRefreshAt) < 30 {
+           Date().timeIntervalSince(lastSavedContactNamesRefreshAt) < 4 {
             return
         }
         let userIDs = Set(contacts.map(\.userID) + conversations
@@ -788,21 +806,18 @@ final class IOSMobileAppModel: ObservableObject {
         isRefreshingSavedContactNames = true
         lastSavedContactNamesRefreshAt = Date()
         defer { isRefreshingSavedContactNames = false }
-        for userID in userIDs.sorted() {
-            do {
-                let directory = try await usernameAuthClient.lookup(
-                    userID: userID, accessToken: token)
-                guard directory.userID == userID else { continue }
+        do {
+            let profiles = try await usernameAuthClient.lookupProfiles(
+                userIDs: userIDs.sorted(), accessToken: token)
+            for profile in profiles {
                 refreshCachedRecipientHandle(
-                    userID: userID,
-                    handle: directory.handle,
-                    displayName: directory.displayName,
-                    deviceCount: directory.devices.count)
-            } catch IOSUsernameAuthError.rateLimited {
-                break
-            } catch {
-                continue
+                    userID: profile.userID,
+                    handle: profile.handle,
+                    displayName: profile.displayName,
+                    deviceCount: profile.deviceCount)
             }
+        } catch {
+            // Keep cached names if the profile sync service is offline.
         }
     }
 

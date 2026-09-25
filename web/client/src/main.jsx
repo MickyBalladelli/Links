@@ -500,10 +500,11 @@ async function lookupHandle(handle) {
 
 let lastSavedContactNamesRefreshAt = 0
 let isRefreshingSavedContactNames = false
+let lastOwnProfileRefreshAt = 0
 
 async function refreshSavedContactNames() {
   const token = accessToken.value.trim()
-  if (!token || isRefreshingSavedContactNames || Date.now() - lastSavedContactNamesRefreshAt < 30000) return
+  if (!token || isRefreshingSavedContactNames || Date.now() - lastSavedContactNamesRefreshAt < 4000) return
   const userIDs = [...new Set([
     ...contacts.value.map(contact => contact.userID),
     ...conversations.value.map(conversation => conversation.recipientUserID)
@@ -512,10 +513,17 @@ async function refreshSavedContactNames() {
   isRefreshingSavedContactNames = true
   lastSavedContactNamesRefreshAt = Date.now()
   try {
-    for (const userID of userIDs) {
+    for (let offset = 0; offset < userIDs.length; offset += 256) {
+      const batch = userIDs.slice(offset, offset + 256)
       try {
-        const response = await fetch(`${authBase()}/v1/directory/users/${encodeURIComponent(userID)}`, {
-          headers: { ...authHeaders(), Accept: 'application/json' },
+        const response = await fetch(`${authBase()}/v1/directory/profiles/sync`, {
+          method: 'POST',
+          headers: {
+            ...authHeaders(),
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: batch }),
           cache: 'no-store',
           credentials: 'omit',
           redirect: 'error'
@@ -523,21 +531,28 @@ async function refreshSavedContactNames() {
         if (response.status === 429) break
         if (!response.ok) continue
         const result = await response.json()
-        if ((result.user_id || result.userID) !== userID) continue
-        const contact = {
-          handle: normalizeHandle(result.handle),
-          displayName: typeof result.display_name === 'string' && validDisplayName(result.display_name)
-            ? result.display_name.trim()
-            : null,
-          userID,
-          deviceCount: Array.isArray(result.devices) ? result.devices.length : Number(result.device_count || 0)
+        if (!Array.isArray(result.profiles)) continue
+        for (const profile of result.profiles) {
+          const userID = profile.user_id || profile.userID
+          const handle = normalizeHandle(profile.handle)
+          if (!batch.includes(userID) || !validHandle(handle)) continue
+          const contact = {
+            handle,
+            displayName: typeof profile.display_name === 'string' && validDisplayName(profile.display_name)
+              ? profile.display_name.trim()
+              : null,
+            userID,
+            deviceCount: Math.max(0, Number(profile.device_count) || 0)
+          }
+          contacts.value = contacts.value
+            .map(saved => saved.userID === userID ? contact : saved)
+            .sort((left, right) => left.handle.localeCompare(right.handle))
+          conversations.value = conversations.value.map(conversation => (
+            conversation.recipientUserID === userID
+              ? { ...conversation, title: `@${contact.handle}`, displayName: contact.displayName }
+              : conversation
+          ))
         }
-        contacts.value = contacts.value.map(saved => saved.userID === userID ? contact : saved)
-        conversations.value = conversations.value.map(conversation => (
-          conversation.recipientUserID === userID
-            ? { ...conversation, title: `@${contact.handle}`, displayName: contact.displayName }
-            : conversation
-        ))
       } catch {
         continue
       }
@@ -550,13 +565,18 @@ async function refreshSavedContactNames() {
 
 function refreshNamesWhenVisible() {
   if (document.visibilityState !== 'hidden') {
-    refreshProfileDisplayName()
+    if (Date.now() - lastOwnProfileRefreshAt >= 30000) {
+      lastOwnProfileRefreshAt = Date.now()
+      refreshProfileUsername()
+      refreshProfileDisplayName()
+    }
     refreshSavedContactNames()
   }
 }
 
 window.addEventListener('focus', refreshNamesWhenVisible)
 document.addEventListener('visibilitychange', refreshNamesWhenVisible)
+window.setInterval(refreshNamesWhenVisible, 5000)
 
 function selectConversation(id) {
   selectedConversationID.value = id

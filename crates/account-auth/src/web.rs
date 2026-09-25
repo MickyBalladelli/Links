@@ -2,6 +2,7 @@ use crate::{
     service::{
         AccountAuth, ChatProofOfWorkVerifyRequest, ContactPsiQueryRequest, CreateGroupRequest,
         DelegatedDeviceRegistrationRequest, DeviceRegistrationRequest,
+        DirectoryProfileSyncRequest,
         EncryptedKeyBackupRequest, FinishRequest,
         DisplayNameChangeRequest, OrganizationControlsRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
@@ -103,6 +104,9 @@ pub fn router_with_trusted_proxies(
         .route("/v1/directory/users/{user_id}", get(directory_lookup_by_user_id))
         .route("/v1/directory/{handle}", get(directory_lookup))
         .layer(DefaultBodyLimit::max(4096));
+    let directory_profile_routes = Router::new()
+        .route("/v1/directory/profiles/sync", post(directory_profile_sync))
+        .layer(DefaultBodyLimit::max(16 * 1024));
     let profile_picture_routes = Router::new()
         .route(
             "/v1/profile/picture",
@@ -152,6 +156,7 @@ pub fn router_with_trusted_proxies(
         .merge(prekey_routes)
         .merge(mls_routes)
         .merge(directory_routes)
+        .merge(directory_profile_routes)
         .merge(profile_picture_routes)
         .merge(admin_routes)
         .merge(contact_psi_routes)
@@ -282,6 +287,20 @@ async fn directory_lookup_by_user_id(
         Some(directory) => Ok(Json(directory).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
+}
+
+async fn directory_profile_sync(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<DirectoryProfileSyncRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.sync_directory_profiles(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0.user_ids,
+        )
+        .await?,
+    ))
 }
 
 async fn put_profile_picture(

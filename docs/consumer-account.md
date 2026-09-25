@@ -78,7 +78,8 @@ No custom signature or encryption algorithm is introduced.
 
 ## API contract
 
-Auth routes are under `/v1/auth`. JSON bodies are limited to 4 KiB. Binary fields
+Auth routes are under `/v1/auth`. Most JSON bodies are limited to 4 KiB. The
+directory profile sync body is limited to 16 KiB and 256 user IDs. Binary fields
 are base64url without padding. UUIDs are UUID strings. Responses, including errors,
 have `Cache-Control: no-store`. Do not enable request/response-body logging at the
 application, proxy, provider SDK, or analytics layer.
@@ -98,6 +99,7 @@ application, proxy, provider SDK, or analytics layer.
 | `DELETE /v1/auth/sessions/others` | Current bearer | Revokes every other session for the account while preserving the current session. |
 | `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Current username, shared display name, active user ID, and every active device's W3C `did:key`, public identity key, MLS node ID and MLS credential. |
 | `GET /v1/directory/users/{user_id}` | Bearer session and sender user ID | Resolves the current username and display name for saved contacts and conversations without changing the stable user ID. |
+| `POST /v1/directory/profiles/sync` | Bearer session and 1–256 `user_ids` | Returns current usernames, display names, and active device counts for saved contacts. |
 | `GET /v1/contact-discovery/parameters` | Bearer session | OPRF public key and opaque active phone-directory membership filter. |
 | `POST /v1/contact-discovery/query` | Bearer session plus bounded blinded Ristretto points | One verifiable OPRF evaluation per blinded input. |
 | `GET /v1/privacy-pass/parameters` | None | Privacy Pass VOPRF public key and key identifier. |
@@ -113,6 +115,9 @@ application, proxy, provider SDK, or analytics layer.
 | `GET /v1/groups/{group_id}/members` | Bearer session | Returns the current member user IDs and RBAC roles. |
 | `PUT /v1/groups/{group_id}/members/{user_id}/role` | Bearer session plus `role` | Applies owner/admin RBAC to add or change a member role. |
 | `DELETE /v1/groups/{group_id}/members/{user_id}` | Bearer session | Removes a permitted member, or lets the authenticated member leave. |
+
+Foreground clients refresh saved contact profiles every five seconds and when
+they become active. Clients that were offline refresh after they return.
 
 Username challenge starts use separate registration and login buckets: 20 per
 source IP per minute and 200 per source IP per hour for each purpose, plus 10,000

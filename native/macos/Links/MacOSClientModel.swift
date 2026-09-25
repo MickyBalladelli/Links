@@ -307,6 +307,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     private var sendAfterSetupConversationID: String?
     private var isRefreshingContactPictures = false
     private var contactPictureRefreshTask: Task<Void, Never>?
+    private var savedContactProfileSyncTask: Task<Void, Never>?
     private var isRefreshingSavedContactNames = false
     private var lastSavedContactNamesRefreshAt: Date?
     private var isRefreshingOwnDisplayName = false
@@ -692,7 +693,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         guard !profileTornDown, let client, let authClient, client.isAuthenticated,
               let token = try? client.accessToken(), !isRefreshingSavedContactNames else { return }
         if let lastSavedContactNamesRefreshAt,
-           Date().timeIntervalSince(lastSavedContactNamesRefreshAt) < 30 {
+           Date().timeIntervalSince(lastSavedContactNamesRefreshAt) < 4 {
             return
         }
         let savedConversationUserIDs = conversations.flatMap { conversation -> [String] in
@@ -705,20 +706,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         isRefreshingSavedContactNames = true
         lastSavedContactNamesRefreshAt = Date()
         defer { isRefreshingSavedContactNames = false }
-        for userID in userIDs.sorted() {
-            do {
-                let directory = try await authClient.lookup(userID: userID, accessToken: token)
-                guard directory.userID == userID else { continue }
+        do {
+            let profiles = try await authClient.lookupProfiles(
+                userIDs: userIDs.sorted(), accessToken: token)
+            for profile in profiles {
                 refreshCachedRecipientHandle(
-                    userID: userID,
-                    handle: directory.handle,
-                    displayName: directory.displayName,
-                    deviceCount: directory.devices.count)
-            } catch IOSUsernameAuthError.rateLimited {
-                break
-            } catch {
-                continue
+                    userID: profile.userID,
+                    handle: profile.handle,
+                    displayName: profile.displayName,
+                    deviceCount: profile.deviceCount)
             }
+        } catch {
+            // Keep cached names if the profile sync service is offline.
         }
     }
 
@@ -875,6 +874,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             profileLogger?.record(.active)
             lifecycleStatus = "Active"
             Task { await refreshNamesFromAccount() }
+            startSavedContactProfileSync()
             if reconnectAfterBackground {
                 reconnectAfterBackground = false
                 connect()
@@ -882,9 +882,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         case .inactive:
             profileLogger?.record(.inactive)
             lifecycleStatus = "Inactive"
+            stopSavedContactProfileSync()
         case .background:
             profileLogger?.record(.background)
             lifecycleStatus = "Background"
+            stopSavedContactProfileSync()
             reconnectAfterBackground = connectionRequested && messaging != nil
             messaging?.shutdown()
             connectionStatus = "Offline"
@@ -893,6 +895,25 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         @unknown default:
             lifecycleStatus = "Unknown"
         }
+    }
+
+    private func startSavedContactProfileSync() {
+        guard savedContactProfileSyncTask == nil else { return }
+        savedContactProfileSyncTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, let self else { break }
+                guard self.lifecycleStatus == "Active", self.client?.isAuthenticated == true else {
+                    continue
+                }
+                await self.refreshSavedContactNames()
+            }
+        }
+    }
+
+    private func stopSavedContactProfileSync() {
+        savedContactProfileSyncTask?.cancel()
+        savedContactProfileSyncTask = nil
     }
 
     func enrollIdentity() {

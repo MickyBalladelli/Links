@@ -210,6 +210,25 @@ pub struct UsernameDirectoryResponse {
     pub verification_badge: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryProfileSyncRequest {
+    pub user_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+pub struct DirectoryProfileSyncResponse {
+    pub profiles: Vec<DirectoryProfileSummary>,
+}
+
+#[derive(Serialize)]
+pub struct DirectoryProfileSummary {
+    pub user_id: Uuid,
+    pub handle: String,
+    pub display_name: Option<String>,
+    pub device_count: i32,
+}
+
 #[derive(Serialize)]
 pub struct UsernameDirectoryDeviceResponse {
     pub device_id: Uuid,
@@ -1085,6 +1104,36 @@ impl AccountAuth {
         Ok(())
     }
 
+    async fn enforce_profile_sync_rate_limit(&self, user_id: Uuid) -> Result<(), AuthError> {
+        let key = self.digest(
+            b"links/directory-profile-sync-user-minute/v1\0",
+            user_id.as_bytes(),
+        );
+        let now = self.now()?;
+        let attempts: Option<i32> = sqlx::query_scalar(
+            "INSERT INTO auth_rate_limits (key_hash,window_start_ms,attempts) \
+             VALUES ($1,$2,1) \
+             ON CONFLICT (key_hash) DO UPDATE SET \
+               attempts=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 \
+                 THEN 1 ELSE auth_rate_limits.attempts+1 END, \
+               window_start_ms=CASE WHEN auth_rate_limits.window_start_ms <= $2-$3 \
+                 THEN $2 ELSE auth_rate_limits.window_start_ms END \
+             WHERE auth_rate_limits.window_start_ms <= $2-$3 \
+                OR auth_rate_limits.attempts < $4 \
+             RETURNING attempts",
+        )
+        .bind(key.as_slice())
+        .bind(now)
+        .bind(60_000_i64)
+        .bind(120_i32)
+        .fetch_optional(&self.pool)
+        .await?;
+        if attempts.is_none() {
+            return Err(AuthError::RateLimited);
+        }
+        Ok(())
+    }
+
     async fn enforce_contact_psi_rate_limits(
         &self,
         user_id: Uuid,
@@ -1802,6 +1851,48 @@ impl AccountAuth {
             return Ok(None);
         };
         self.lookup_username_directory(&handle, peer_ip).await
+    }
+
+    /// Return current public names for a bounded set of saved contact IDs.
+    /// Clients use this to refresh labels without coupling chats to usernames.
+    pub async fn sync_directory_profiles(
+        &self,
+        token: &str,
+        user_ids: Vec<Uuid>,
+    ) -> Result<DirectoryProfileSyncResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        if user_ids.is_empty()
+            || user_ids.len() > 256
+            || user_ids.iter().any(Uuid::is_nil)
+        {
+            return Err(AuthError::Invalid);
+        }
+        self.enforce_profile_sync_rate_limit(account.user_id).await?;
+
+        let rows = sqlx::query(
+            "SELECT a.user_id, h.handle, a.display_name, \
+                    COUNT(d.device_id)::INT AS device_count \
+             FROM accounts a \
+             JOIN handles h USING (user_id) \
+             JOIN devices d ON d.user_id = a.user_id AND d.revoked_at IS NULL \
+             WHERE a.user_id = ANY($1) AND a.disabled_at IS NULL \
+             GROUP BY a.user_id, h.handle, a.display_name \
+             ORDER BY h.handle",
+        )
+        .bind(&user_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut profiles = Vec::with_capacity(rows.len());
+        for row in rows {
+            profiles.push(DirectoryProfileSummary {
+                user_id: row.try_get("user_id")?,
+                handle: row.try_get("handle")?,
+                display_name: row.try_get("display_name")?,
+                device_count: row.try_get("device_count")?,
+            });
+        }
+        Ok(DirectoryProfileSyncResponse { profiles })
     }
 
     /// Issue a public verification badge after an external verification

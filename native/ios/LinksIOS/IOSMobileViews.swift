@@ -26,13 +26,16 @@ struct IOSMobileRootView: View {
         }
         .animation(.easeOut(duration: 0.25), value: model.isAuthenticated)
         .task(id: model.isAuthenticated) {
+            model.setProfileSyncActive(model.isAuthenticated && scenePhase == .active)
             guard model.isAuthenticated, scenePhase == .active else { return }
             await model.refreshNamesFromAccount()
         }
         .onChange(of: scenePhase) { phase in
+            model.setProfileSyncActive(phase == .active && model.isAuthenticated)
             guard phase == .active else { return }
             Task { await model.refreshNamesFromAccount() }
         }
+        .onDisappear { model.setProfileSyncActive(false) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = model.error {
                 IOSNoticeBanner(text: error, tint: .red) {

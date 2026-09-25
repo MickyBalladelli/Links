@@ -181,6 +181,38 @@ public struct IOSUsernameDirectory: Sendable {
     }
 }
 
+public struct IOSUsernameDirectoryProfile: Sendable {
+    public let handle: String
+    public let userID: String
+    public let displayName: String?
+    public let deviceCount: Int
+
+    fileprivate init(object: [String: Any]) throws {
+        guard let handle = object["handle"] as? String,
+              IOSUsernameAuthSession.isCanonicalHandle(handle),
+              let userID = object["user_id"] as? String,
+              IOSClient.isCanonicalUUID(userID),
+              let count = object["device_count"] as? NSNumber,
+              count.intValue >= 0 else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        self.handle = handle
+        self.userID = userID
+        self.deviceCount = count.intValue
+        if let displayName = object["display_name"] as? String {
+            guard displayName.utf8.count <= 80,
+                  !displayName.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else {
+                throw IOSUsernameAuthError.invalidResponse
+            }
+            self.displayName = displayName.isEmpty ? nil : displayName
+        } else {
+            self.displayName = nil
+        }
+    }
+}
+
 /// Local-development account API. Bearer tokens stay in memory and are sent
 /// only in the Authorization header for authenticated device registration.
 public final class IOSUsernameAuthClient: Sendable {
@@ -482,6 +514,34 @@ public final class IOSUsernameAuthClient: Sendable {
             throw IOSUsernameAuthError.invalidResponse
         }
         return directory
+    }
+
+    public func lookupProfiles(userIDs: [String], accessToken: String) async throws
+        -> [IOSUsernameDirectoryProfile] {
+        let uniqueIDs = Array(Set(userIDs)).sorted()
+        guard !accessToken.isEmpty, accessToken.count <= 4096,
+              !uniqueIDs.isEmpty, uniqueIDs.count <= 256,
+              uniqueIDs.allSatisfy(IOSClient.isCanonicalUUID) else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        let request = try makeRequest(
+            path: "v1/directory/profiles/sync",
+            body: ["user_ids": uniqueIDs],
+            bearer: accessToken)
+        let object = try await post(request)
+        guard let profiles = object["profiles"] as? [[String: Any]],
+              profiles.count <= uniqueIDs.count else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        let requestedIDs = Set(uniqueIDs)
+        var seenIDs = Set<String>()
+        let decodedProfiles = try profiles.map(IOSUsernameDirectoryProfile.init)
+        guard decodedProfiles.allSatisfy({
+            requestedIDs.contains($0.userID) && seenIDs.insert($0.userID).inserted
+        }) else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return decodedProfiles
     }
 
     public func currentDisplayName(accessToken: String) async throws -> (name: String?, isSet: Bool) {
