@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.UUID;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONException;
@@ -70,6 +71,40 @@ public final class OtpClient {
         return new Session(post("/v1/auth/finish", body));
     }
 
+    public String changeUsername(String accessToken, String handle) throws IOException {
+        decodeExact(accessToken, 32);
+        String cleanHandle = handle == null ? "" : handle.trim()
+                .replaceFirst("^@", "").toLowerCase(Locale.ROOT);
+        if (!cleanHandle.matches("[a-z][a-z0-9_]{2,31}"))
+            throw new IOException("Use a lowercase username with 3–32 letters, numbers, or underscores");
+        JSONObject body = new JSONObject();
+        put(body, "handle", cleanHandle);
+        JSONObject response = request("PUT", "/v1/account/username", body, accessToken);
+        try {
+            String updatedHandle = response.getString("handle");
+            if (!cleanHandle.equals(updatedHandle))
+                throw new IOException("Invalid username response");
+            return updatedHandle;
+        } catch (JSONException error) {
+            throw new IOException("Invalid username response", error);
+        }
+    }
+
+    public String currentUsername(String accessToken) throws IOException {
+        decodeExact(accessToken, 32);
+        JSONObject response = request("GET", "/v1/account/username", null, accessToken);
+        try {
+            if (!response.has("handle")) throw new IOException("Invalid username response");
+            if (response.isNull("handle")) return "";
+            String handle = response.getString("handle");
+            if (!handle.matches("[a-z][a-z0-9_]{2,31}"))
+                throw new IOException("Invalid username response");
+            return handle;
+        } catch (JSONException error) {
+            throw new IOException("Invalid username response", error);
+        }
+    }
+
     /** Revoke the current bearer. Local callers must clear their session even if this fails. */
     public void logout(String accessToken) throws IOException {
         decodeExact(accessToken, 32);
@@ -99,6 +134,11 @@ public final class OtpClient {
     }
 
     private JSONObject post(String path, JSONObject body) throws IOException {
+        return request("POST", path, body, null);
+    }
+
+    private JSONObject request(String method, String path, JSONObject body, String accessToken)
+            throws IOException {
         HttpsURLConnection connection = null;
         try {
             URL endpoint = new URL(baseUrl + path);
@@ -108,21 +148,34 @@ public final class OtpClient {
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(10000);
             connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setFixedLengthStreamingMode(body.toString().getBytes(StandardCharsets.UTF_8).length);
+            connection.setRequestMethod(method);
             connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            byte[] encodedBody = body.toString().getBytes(StandardCharsets.UTF_8);
-            try (OutputStream output = connection.getOutputStream()) {
-                output.write(encodedBody);
+            if (accessToken != null)
+                connection.setRequestProperty("Authorization", "Bearer " + accessToken);
+            if (body != null) {
+                byte[] encodedBody = body.toString().getBytes(StandardCharsets.UTF_8);
+                connection.setDoOutput(true);
+                connection.setFixedLengthStreamingMode(encodedBody.length);
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(encodedBody);
+                }
             }
             int responseCode = connection.getResponseCode();
             InputStream responseStream = responseCode >= 400
                     ? connection.getErrorStream() : connection.getInputStream();
             String response = readLimited(responseStream);
-            if (responseCode < 200 || responseCode >= 300)
+            if (responseCode < 200 || responseCode >= 300) {
+                if ("/v1/account/username".equals(path)) {
+                    if (responseCode == 400)
+                        throw new IOException("Use a valid lowercase username");
+                    if (responseCode == 401)
+                        throw new IOException("Sign in again to manage this username");
+                    if (responseCode == 409)
+                        throw new IOException("That username is already in use");
+                }
                 throw new IOException("OTP service rejected request");
+            }
             try {
                 return new JSONObject(response);
             } catch (JSONException error) {

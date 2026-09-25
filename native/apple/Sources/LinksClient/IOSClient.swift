@@ -444,6 +444,24 @@ public final class IOSClient: SharedCoreIdentitySigner {
         return authenticated.accessToken
     }
 
+    public func updateAccountHandle(_ handle: String) throws {
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        try IOSUsernameAuthClient.validateHandle(cleanHandle)
+        guard let identity, let deviceID, let mlsNodeID, let userID,
+              Self.isCanonicalUUID(userID) else {
+            throw IOSClientError.metadataUnavailable
+        }
+        try saveMetadata(StoredMetadata(
+            handle: identity.handle,
+            publicKey: identity.publicKey,
+            deviceID: deviceID,
+            mlsNodeID: mlsNodeID,
+            userID: userID,
+            accountHandle: cleanHandle,
+            mlsCredential: mlsCredential))
+        accountHandle = cleanHandle
+    }
+
     /// Register or log in a local-development username using this hardware
     /// identity. The username is not a password; the identity signs a fresh
     /// nonce-bound transcript and the bearer remains memory-only.

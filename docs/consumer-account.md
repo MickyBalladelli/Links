@@ -90,6 +90,8 @@ application, proxy, provider SDK, or analytics layer.
 | `POST /v1/auth/username/challenge` | `purpose` (`registration` or `login`), `handle`, `device_id`, `mls_node_id`, `public_key` | Returns the server challenge ID/value, exact bound identity fields, and expiry. |
 | `POST /v1/auth/username/register` | `challenge_id`, `signature` | Atomically consumes a registration challenge, creates a pseudonymous account, and returns its session, handle, and MLS credential. |
 | `POST /v1/auth/username/login` | `challenge_id`, `signature` | Atomically consumes a login challenge and returns one session after the registered device key proves possession. |
+| `GET /v1/account/username` | Current bearer | Returns the account's public username, or `null` if none is set. |
+| `PUT /v1/account/username` | Current bearer and canonical `handle` | Changes the account's public username and returns it. The previous username is released. |
 | `POST /v1/auth/logout` | Current bearer | Deletes only the current session and returns no body. Repetition is safe. |
 | `DELETE /v1/auth/sessions/others` | Current bearer | Revokes every other session for the account while preserving the current session. |
 | `GET /v1/directory/{handle}` | Canonical handle, optionally prefixed with display-only `@` | Active user ID plus every active device's W3C `did:key`, public identity key, MLS node ID and MLS credential. |
@@ -252,7 +254,9 @@ a token-recovery endpoint.
 Tokens contain 32 random bytes, expire after 15 minutes, and are stored only as
 SHA-256 digests. Every authenticated request checks expiry, account disablement
 and device revocation. There are no refresh tokens, phone-number change, account
-erasure, SIM-swap recovery, or key-replacement endpoints in this slice. Account
+erasure, SIM-swap recovery, or key-replacement endpoints in this slice. A username
+change keeps the same account and devices but releases the previous username.
+Account
 creation, device registration, credential storage, token insertion and challenge
 consumption commit together. Existing devices are never overwritten.
 

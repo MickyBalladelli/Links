@@ -5,10 +5,12 @@ import android.text.Editable;
 import android.os.Bundle;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import java.util.concurrent.ExecutorService;
@@ -21,8 +23,11 @@ public final class MainActivity extends Activity {
     private Button createButton;
     private Button sendCodeButton;
     private Button verifyButton;
+    private Button changeUsernameButton;
+    private TextView usernameNote;
     private EditText phoneInput;
     private EditText codeInput;
+    private EditText usernameInput;
     private Spinner channelInput;
     private ClientSession session;
     private OtpClient otpClient;
@@ -79,6 +84,28 @@ public final class MainActivity extends Activity {
         verifyButton.setText("Verify phone");
         verifyButton.setOnClickListener(view -> verifyOtp());
         layout.addView(verifyButton);
+
+        usernameInput = new EditText(this);
+        usernameInput.setHint("New username");
+        usernameInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        usernameInput.setSingleLine(true);
+        usernameInput.setVisibility(View.GONE);
+        layout.addView(usernameInput);
+
+        usernameNote = new TextView(this);
+        usernameNote.setText("Use 3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.");
+        usernameNote.setTextSize(12);
+        usernameNote.setVisibility(View.GONE);
+        layout.addView(usernameNote);
+
+        changeUsernameButton = new Button(this);
+        changeUsernameButton.setText("Change username");
+        changeUsernameButton.setOnClickListener(view -> changeUsername());
+        changeUsernameButton.setVisibility(View.GONE);
+        layout.addView(changeUsernameButton);
+
         codeInput.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
@@ -93,7 +120,10 @@ public final class MainActivity extends Activity {
             @Override
             public void afterTextChanged(Editable text) {}
         });
-        setContentView(layout);
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+        scrollView.addView(layout);
+        setContentView(scrollView);
 
         createButton.setEnabled(false);
         sendCodeButton.setEnabled(false);
@@ -169,11 +199,15 @@ public final class MainActivity extends Activity {
         identityWorker.execute(() -> {
             try {
                 session.finishOtp(otpClient, challenge, code);
+                try {
+                    session.saveProfileUsername(otpClient.currentUsername(session.accessToken()));
+                } catch (Exception ignored) {
+                    // Keep the saved profile name if the optional refresh is unavailable.
+                }
                 runOnUiThread(() -> {
                     pendingChallenge = null;
                     codeInput.setText("");
                     refreshStatus();
-                    status.setText("Phone verified\nAccount: " + session.userId());
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -184,16 +218,50 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void changeUsername() {
+        if (session == null || otpClient == null || !session.isAuthenticated()) return;
+        String requestedHandle = usernameInput.getText().toString();
+        changeUsernameButton.setEnabled(false);
+        usernameInput.setEnabled(false);
+        status.setText("Changing username…");
+        identityWorker.execute(() -> {
+            try {
+                String handle = otpClient.changeUsername(session.accessToken(), requestedHandle);
+                session.saveProfileUsername(handle);
+                runOnUiThread(() -> {
+                    usernameInput.setText(handle);
+                    refreshStatus();
+                    status.setText("Username changed to @" + handle);
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    refreshStatus();
+                    status.setText("Username not changed\n" + error.getMessage());
+                });
+            }
+        });
+    }
+
     private void refreshStatus() {
         boolean enrolled = session != null && session.isEnrolled();
         boolean authenticated = enrolled && session.isAuthenticated();
+        boolean usernameWasVisible = usernameInput.getVisibility() == View.VISIBLE;
         createButton.setEnabled(session != null && !enrolled);
         sendCodeButton.setEnabled(enrolled && !authenticated);
         codeInput.setEnabled(enrolled && !authenticated && pendingChallenge != null);
         verifyButton.setEnabled(enrolled && !authenticated && pendingChallenge != null
                 && codeInput.getText().length() > 0);
+        usernameInput.setVisibility(authenticated ? View.VISIBLE : View.GONE);
+        usernameNote.setVisibility(authenticated ? View.VISIBLE : View.GONE);
+        changeUsernameButton.setVisibility(authenticated ? View.VISIBLE : View.GONE);
+        usernameInput.setEnabled(authenticated);
+        changeUsernameButton.setEnabled(authenticated);
+        if (authenticated && !usernameWasVisible)
+            usernameInput.setText(session.profileUsername());
         if (authenticated) {
-            status.setText("Phone verified\nAccount: " + session.userId());
+            String username = session.profileUsername();
+            String usernameLine = username.isEmpty() ? "" : "\nUsername: @" + username;
+            status.setText("Phone verified\nAccount: " + session.userId() + usernameLine);
         } else if (enrolled) {
             status.setText("Identity ready\nDevice: " + session.deviceId()
                     + "\nVerify phone to continue");

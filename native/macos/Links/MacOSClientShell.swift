@@ -815,6 +815,8 @@ private struct ProfileSummaryCard: View {
     @Binding var showingPairing: Bool
     @State private var showingDetails = false
     @State private var logoutConfirmationPresented = false
+    @State private var showingUsernameChange = false
+    @State private var usernameDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -895,6 +897,20 @@ private struct ProfileSummaryCard: View {
                 .foregroundStyle(.secondary)
             }
 
+            Button("Change username") {
+                usernameDraft = model.usernameInput
+                model.usernameChangeError = nil
+                showingUsernameChange = true
+                Task {
+                    if let current = await model.refreshCurrentUsername() {
+                        usernameDraft = current
+                    }
+                }
+            }
+            .buttonStyle(.link)
+            .controlSize(.small)
+            .disabled(model.requiresAccountAuthentication)
+
             DisclosureGroup("Profile details", isExpanded: $showingDetails) {
                 VStack(alignment: .leading, spacing: 7) {
                     StateRow(title: "Device", value: model.deviceStatus)
@@ -926,6 +942,9 @@ private struct ProfileSummaryCard: View {
         } message: {
             Text("Your identity, contacts, conversations, and encrypted local state stay on this Mac. You will need to sign in again to reconnect.")
         }
+        .sheet(isPresented: $showingUsernameChange) {
+            MacOSChangeUsernameSheet(model: model, username: $usernameDraft)
+        }
     }
 
     private func chooseProfilePicture() {
@@ -944,6 +963,61 @@ private struct ProfileSummaryCard: View {
             return
         }
         model.replaceProfilePicture(with: data)
+    }
+}
+
+private struct MacOSChangeUsernameSheet: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Binding var username: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Change username")
+                .font(.title2.weight(.semibold))
+
+            TextField("New username", text: $username)
+                .textFieldStyle(.roundedBorder)
+                .textContentType(.username)
+                .autocorrectionDisabled()
+
+            Text("Use 3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let error = model.usernameChangeError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button {
+                    Task {
+                        if await model.changeUsername(to: username) {
+                            dismiss()
+                        }
+                    }
+                } label: {
+                    if model.isChangingUsername {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Save")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || model.isChangingUsername)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 390)
     }
 }
 

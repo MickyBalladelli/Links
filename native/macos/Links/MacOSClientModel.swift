@@ -231,6 +231,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
     @Published private(set) var isEnrolling = false
+    @Published private(set) var isChangingUsername = false
+    @Published var usernameChangeError: String?
     @Published private(set) var isRestoringSession = false
     @Published private(set) var requiresManualSignIn = true
     @Published private(set) var profileName = ClientProfile.default.name
@@ -917,6 +919,71 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 self.onboardingError = Self.usernameAuthenticationErrorMessage(error)
                 self.refreshClientState()
             }
+        }
+    }
+
+    func changeUsername(to requestedHandle: String) async -> Bool {
+        guard !isChangingUsername,
+              let client,
+              let authClient,
+              client.isAuthenticated else {
+            usernameChangeError = "Sign in before changing your username."
+            return false
+        }
+        let cleanHandle = requestedHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "^@", with: "", options: .regularExpression)
+            .lowercased()
+        do {
+            try IOSUsernameAuthClient.validateHandle(cleanHandle)
+        } catch {
+            usernameChangeError = "Use a lowercase username with 3–32 letters, numbers, or underscores."
+            return false
+        }
+
+        isChangingUsername = true
+        usernameChangeError = nil
+        defer { isChangingUsername = false }
+        do {
+            let token = try client.accessToken()
+            let updatedHandle = try await authClient.changeUsername(
+                accessToken: token,
+                handle: cleanHandle)
+            do {
+                try client.updateAccountHandle(updatedHandle)
+            } catch {
+                usernameChangeError = "Username changed on the server, but this Mac could not save it. Sign in with @\(updatedHandle)."
+                return false
+            }
+            usernameInput = updatedHandle
+            refreshClientState()
+            return true
+        } catch IOSUsernameAuthError.conflict {
+            usernameChangeError = "That username is already in use."
+        } catch IOSUsernameAuthError.serverRejected(let statusCode) where statusCode == 401 {
+            usernameChangeError = "Your sign-in expired. Sign in again, then change your username."
+        } catch {
+            usernameChangeError = "Could not change your username. Check the connection and try again."
+        }
+        return false
+    }
+
+    func refreshCurrentUsername() async -> String? {
+        guard let client, let authClient, client.isAuthenticated,
+              let token = try? client.accessToken() else {
+            return nil
+        }
+        do {
+            guard let handle = try await authClient.currentUsername(accessToken: token) else {
+                return nil
+            }
+            if client.accountHandle != handle {
+                try? client.updateAccountHandle(handle)
+                usernameInput = handle
+                refreshClientState()
+            }
+            return handle
+        } catch {
+            return nil
         }
     }
 

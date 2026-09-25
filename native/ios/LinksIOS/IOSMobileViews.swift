@@ -534,8 +534,14 @@ private struct IOSChatsView: View {
                     model.clearGroupStatus()
                     showingNewGroup = true
                 } label: {
-                    Label("New group", systemImage: "person.3")
-                        .frame(maxWidth: .infinity)
+                    VStack(spacing: 5) {
+                        Image(systemName: "person.3")
+                            .font(.body.weight(.semibold))
+                        Text("New group")
+                            .font(.subheadline.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 54)
                 }
                 .accessibilityLabel("New group")
 
@@ -543,8 +549,14 @@ private struct IOSChatsView: View {
                     model.clearConversationCreationStatus()
                     showingNewConversation = true
                 } label: {
-                    Label("New chat", systemImage: "square.and.pencil")
-                        .frame(maxWidth: .infinity)
+                    VStack(spacing: 5) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.body.weight(.semibold))
+                        Text("New chat")
+                            .font(.subheadline.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 54)
                 }
                 .accessibilityLabel("New conversation")
             }
@@ -675,16 +687,32 @@ private struct IOSConversationRow: View {
     }
 
     private var padRow: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             IOSAvatar(name: conversation.handle, size: 44, imageJPEG: imageJPEG)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(conversation.displayTitle)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: conversation.isGroup ? "person.3.fill" : "lock.fill")
+                        .font(.caption)
+                        .padding(.top, 1)
+                    Text(conversation.isGroup ? "Encrypted group" : "Private conversation")
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                    .foregroundStyle(.secondary)
+
                 HStack(spacing: 6) {
-                    Text(conversation.displayTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
+                    Text(conversation.createdAt, format: .dateTime.month(.abbreviated).day())
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
 
                     Spacer(minLength: 0)
 
@@ -692,20 +720,10 @@ private struct IOSConversationRow: View {
                         unreadBadge
                     }
                 }
-
-                Label(conversation.isGroup ? "Encrypted group" : "Private conversation",
-                      systemImage: conversation.isGroup ? "person.3.fill" : "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-
-                Text(conversation.createdAt, format: .dateTime.month(.abbreviated).day())
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 9)
         .contentShape(Rectangle())
     }
 
@@ -1063,6 +1081,7 @@ private struct IOSProfileView: View {
     @State private var showingPairDevice = false
     @State private var showingSignOut = false
     @State private var showingNewUsername = false
+    @State private var showingUsernameChange = false
     @State private var pictureItem: PhotosPickerItem?
 
     var body: some View {
@@ -1104,6 +1123,16 @@ private struct IOSProfileView: View {
                     .padding(.vertical, 22)
 
                     VStack(spacing: 0) {
+                        Button {
+                            model.clearError()
+                            showingUsernameChange = true
+                        } label: {
+                            IOSProfileRow(icon: "at", color: IOSLinksPalette.cobalt,
+                                          title: "Username", value: model.profileName,
+                                          showsDisclosure: true)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 54)
                         IOSProfileRow(icon: "person.text.rectangle", color: IOSLinksPalette.cobalt,
                                       title: "Account", value: model.accountStatus)
                         Divider().padding(.leading, 54)
@@ -1153,6 +1182,9 @@ private struct IOSProfileView: View {
             .sheet(isPresented: $showingPairDevice) {
                 IOSPairDeviceSheet(model: model)
             }
+            .sheet(isPresented: $showingUsernameChange) {
+                IOSChangeUsernameSheet(model: model)
+            }
             .confirmationDialog("Sign out of Links?", isPresented: $showingSignOut,
                                 titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { model.signOut() }
@@ -1171,11 +1203,71 @@ private struct IOSProfileView: View {
     }
 }
 
+private struct IOSChangeUsernameSheet: View {
+    @ObservedObject var model: IOSMobileAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var handle = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("New username") {
+                    TextField("username", text: $handle)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.username)
+                } footer: {
+                    Text("3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.")
+                }
+
+                if let error = model.error {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Change username")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task {
+                            if await model.changeUsername(handle) {
+                                dismiss()
+                            }
+                        }
+                    } label: {
+                        if model.isChangingUsername {
+                            ProgressView()
+                        } else {
+                            Text("Save")
+                        }
+                    }
+                    .disabled(handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || model.isChangingUsername)
+                }
+            }
+            .onAppear {
+                handle = model.accountUsername ?? ""
+                Task {
+                    if let current = await model.refreshCurrentUsername() {
+                        handle = current
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 private struct IOSProfileRow: View {
     let icon: String
     let color: Color
     let title: String
     let value: String
+    var showsDisclosure = false
 
     var body: some View {
         HStack(spacing: 13) {
@@ -1197,7 +1289,7 @@ private struct IOSProfileRow: View {
                 }
             }
             Spacer()
-            if value.isEmpty {
+            if value.isEmpty || showsDisclosure {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.tertiary)

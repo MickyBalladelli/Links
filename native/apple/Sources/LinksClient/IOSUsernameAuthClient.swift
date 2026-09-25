@@ -276,6 +276,55 @@ public final class IOSUsernameAuthClient: Sendable {
         }
     }
 
+    public func changeUsername(accessToken: String, handle: String) async throws -> String {
+        let cleanHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        try Self.validateHandle(cleanHandle)
+        guard !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        let request = try makeRequest(
+            path: "v1/account/username",
+            body: ["handle": cleanHandle],
+            bearer: accessToken,
+            method: "PUT")
+        let object = try await post(request)
+        guard let updatedHandle = object["handle"] as? String,
+              updatedHandle == cleanHandle else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        do {
+            try Self.validateHandle(updatedHandle)
+        } catch {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return updatedHandle
+    }
+
+    public func currentUsername(accessToken: String) async throws -> String? {
+        guard !accessToken.isEmpty, accessToken.count <= 4096 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/account/username"))
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let object = try await get(request)
+        guard let value = object["handle"] else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        if value is NSNull { return nil }
+        guard let handle = value as? String else {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        do {
+            try Self.validateHandle(handle)
+        } catch {
+            throw IOSUsernameAuthError.invalidResponse
+        }
+        return handle
+    }
+
     // MARK: Group roles. The server only stores who belongs to a group and
     // with which role; names and messages stay inside MLS.
 
@@ -454,10 +503,11 @@ public final class IOSUsernameAuthClient: Sendable {
         return try IOSUsernameAuthSession(object: try await post(request))
     }
 
-    private func makeRequest(path: String, body: [String: Any], bearer: String? = nil)
+    private func makeRequest(path: String, body: [String: Any], bearer: String? = nil,
+                             method: String = "POST")
         throws -> URLRequest {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = "POST"
+        request.httpMethod = method
         request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")

@@ -24,7 +24,20 @@ const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
 const accessToken = signal('')
 const profilePictureKey = 'links-web-client-profile-picture-v1'
-const profileHandle = signal('micky')
+const profileHandleKey = 'links-web-client-profile-handle-v1'
+function loadProfileHandle() {
+  try {
+    const saved = localStorage.getItem(profileHandleKey)
+    if (validHandle(saved)) return saved
+  } catch {
+    // Keep the preview usable when browser storage is unavailable.
+  }
+  return 'micky'
+}
+const profileHandle = signal(loadProfileHandle())
+const profileHandleDraft = signal(profileHandle.value)
+const isChangingUsername = signal(false)
+const profileUsernameError = signal('')
 const profilePicture = signal('')
 const profilePictureSrc = signal('')
 const profilePictureError = signal('')
@@ -249,12 +262,92 @@ function avatarName(value) {
 }
 
 function validHandle(value) {
-  return /^[a-z0-9_]{3,32}$/.test(value)
+  return /^[a-z][a-z0-9_]{2,31}$/.test(value)
 }
 
 function authHeaders() {
   const token = accessToken.value.trim()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function changeProfileUsername() {
+  if (isChangingUsername.value) return
+  profileUsernameError.value = ''
+  const handle = normalizeHandle(profileHandleDraft.value)
+  if (!validHandle(handle)) {
+    profileUsernameError.value = 'Use 3–32 lowercase letters, numbers, or underscores.'
+    return
+  }
+  const token = accessToken.value.trim()
+  if (!token) {
+    profileUsernameError.value = 'Add a bearer token for your signed-in account.'
+    return
+  }
+
+  isChangingUsername.value = true
+  try {
+    const base = authBaseURL.value.trim().replace(/\/$/, '')
+    const response = await fetch(`${base}/v1/account/username`, {
+      method: 'PUT',
+      headers: {
+        ...authHeaders(),
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ handle }),
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (response.status === 400) throw new Error('Use a valid lowercase username.')
+    if (response.status === 401) throw new Error('Sign in again before changing your username.')
+    if (response.status === 409) throw new Error('That username is already in use.')
+    if (!response.ok) throw new Error('Could not change the username. Check the account service.')
+    const result = await response.json()
+    if (result.handle !== handle || !validHandle(result.handle)) {
+      throw new Error('The account service returned an invalid username.')
+    }
+    profileHandle.value = result.handle
+    profileHandleDraft.value = result.handle
+    try {
+      localStorage.setItem(profileHandleKey, result.handle)
+    } catch {
+      // Keep the updated username in this tab when browser storage is unavailable.
+    }
+    profileOpen.value = false
+    notice.value = `Username changed to @${result.handle}. Your old username is now available to others.`
+  } catch (error) {
+    profileUsernameError.value = error.message || 'Could not change the username.'
+  } finally {
+    isChangingUsername.value = false
+  }
+}
+
+async function refreshProfileUsername() {
+  const token = accessToken.value.trim()
+  if (!token) return
+  try {
+    const base = authBaseURL.value.trim().replace(/\/$/, '')
+    const response = await fetch(`${base}/v1/account/username`, {
+      headers: { ...authHeaders(), Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (!response.ok) return
+    const result = await response.json()
+    if (result.handle == null) return
+    if (!validHandle(result.handle)) return
+    profileHandle.value = result.handle
+    profileHandleDraft.value = result.handle
+    try {
+      localStorage.setItem(profileHandleKey, result.handle)
+    } catch {
+      // Keep the account name in this tab when browser storage is unavailable.
+    }
+  } catch {
+    // Keep the last saved profile name when the account service is offline.
+  }
 }
 
 async function lookupHandle(handle) {
@@ -499,7 +592,7 @@ function Sidebar() {
         <div class="contact-list"><ContactList /></div>
       </section>
 
-      <button type="button" class="profile-card" onClick={() => { profileOpen.value = true }}>
+      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername() }}>
         <ProfilePicture />
         <span class="profile-copy">
           <strong>{computed(() => `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
@@ -648,12 +741,12 @@ function ProfilePopup() {
     <Popup
       open={profileOpen}
       title="Web profile"
-      ariaDescription="Configure the local interface preview and directory access."
+      ariaDescription="Change the account username and configure directory access."
       size="medium"
       footer={() => (
         <div class="popup-actions is-split">
           <Button label="Reset preview" variant="tertiary" onClick={resetPreview} />
-          <Button label="Save" variant="primary" onClick={() => { profileOpen.value = false; notice.value = 'Profile settings updated.' }} />
+          <Button label="Change username" variant="primary" loading={isChangingUsername} disabled={isChangingUsername} onClick={changeProfileUsername} />
         </div>
       )}
     >
@@ -678,12 +771,14 @@ function ProfilePopup() {
           </div>
           {computed(() => profilePictureError.value ? <Alert tone="error">{profilePictureError}</Alert> : null)}
         </div>
-        <label for="profile-handle">Profile username</label>
-        <TextField id="profile-handle" value={profileHandle} placeholder="username" autocomplete="username" />
+        <label for="profile-handle">New username</label>
+        <TextField id="profile-handle" value={profileHandleDraft} placeholder="username" autocomplete="username" />
+        <p>Use 3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.</p>
+        {computed(() => profileUsernameError.value ? <Alert tone="error">{profileUsernameError}</Alert> : null)}
         <label for="auth-base">Account service</label>
         <TextField id="auth-base" value={authBaseURL} placeholder="/links-api" autocomplete="off" />
         <label for="access-token">Bearer token</label>
-        <TextField id="access-token" value={accessToken} type="password" placeholder="Optional for directory lookup" autocomplete="off" />
+        <TextField id="access-token" value={accessToken} type="password" placeholder="Required to change username" autocomplete="off" />
         <div class="privacy-copy"><LockIcon size="0.9rem" /><span>The token stays in memory and is never written to browser storage.</span></div>
       </div>
     </Popup>

@@ -5,7 +5,8 @@ use crate::{
         EncryptedKeyBackupRequest, FinishRequest,
         OrganizationControlsRequest,
         PasskeyAssertionFinishRequest, PasskeyRegistrationFinishRequest, PrivacyPassIssueRequest,
-        PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest, UsernameChallengeRequest,
+        PrivacyPassRedeemRequest, SetGroupRoleRequest, StartRequest, UsernameChangeRequest,
+        UsernameChallengeRequest,
     },
     AuthError,
 };
@@ -41,6 +42,10 @@ pub fn router_with_trusted_proxies(
         .route("/v1/auth/username/challenge", post(username_challenge))
         .route("/v1/auth/username/register", post(username_register))
         .route("/v1/auth/username/login", post(username_login))
+        .route(
+            "/v1/account/username",
+            get(current_username).put(change_username),
+        )
         .route("/v1/auth/logout", post(logout))
         .route("/v1/auth/sessions/others", delete(revoke_other_sessions))
         .route("/v1/auth/me", get(me))
@@ -471,6 +476,25 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(auth.authenticate(bearer(&headers)?).await?))
+}
+async fn change_username(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+    request: Result<Json<UsernameChangeRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(
+        auth.change_username(
+            bearer(&headers)?,
+            request.map_err(|_| AuthError::Invalid)?.0,
+        )
+        .await?,
+    ))
+}
+async fn current_username(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.current_username(bearer(&headers)?).await?))
 }
 async fn organization_controls(
     State(auth): State<Arc<AccountAuth>>,

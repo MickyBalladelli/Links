@@ -23,6 +23,7 @@ public final class ClientSession {
     private static final String DEVICE_ID = "device_id";
     private static final String MLS_NODE_ID = "mls_node_id";
     private static final String USER_ID = "user_id";
+    private static final String PROFILE_USERNAME = "profile_username";
 
     private final HardwareIdentityStore identityStore;
     private final SharedPreferences preferences;
@@ -54,6 +55,24 @@ public final class ClientSession {
 
     public synchronized String userId() {
         return userId;
+    }
+
+    public synchronized String profileUsername() {
+        return preferences.getString(PROFILE_USERNAME, "");
+    }
+
+    public synchronized void saveProfileUsername(String handle) throws IOException {
+        if (handle == null)
+            throw new IOException("Invalid username");
+        if (handle.isEmpty()) {
+            if (!preferences.edit().remove(PROFILE_USERNAME).commit())
+                throw new IOException("Username could not be saved on this device");
+            return;
+        }
+        if (!handle.matches("[a-z][a-z0-9_]{2,31}"))
+            throw new IOException("Invalid username");
+        if (!preferences.edit().putString(PROFILE_USERNAME, handle).commit())
+            throw new IOException("Username could not be saved on this device");
     }
 
     public synchronized boolean isAuthenticated() {

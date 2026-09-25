@@ -49,6 +49,18 @@ fn map_username_registration_write_error(error: sqlx::Error) -> AuthError {
     }
 }
 
+fn map_username_change_write_error(error: sqlx::Error) -> AuthError {
+    match &error {
+        sqlx::Error::Database(database) if database.code().as_deref() == Some("23505") => {
+            match database.constraint() {
+                Some("handles_pkey") => AuthError::UsernameConflict,
+                _ => AuthError::Conflict,
+            }
+        }
+        _ => AuthError::Unavailable,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountAuthMode {
     Production,
@@ -159,6 +171,22 @@ pub struct UsernameAuthResponse {
     pub session: Session,
     pub handle: String,
     pub mls_credential: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsernameChangeRequest {
+    pub handle: String,
+}
+
+#[derive(Serialize)]
+pub struct UsernameChangeResponse {
+    pub handle: String,
+}
+
+#[derive(Serialize)]
+pub struct CurrentUsernameResponse {
+    pub handle: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1443,7 +1471,7 @@ impl AccountAuth {
             tx.commit().await?;
             return Err(AuthError::Denied);
         }
-        let row = sqlx::query("SELECT a.user_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND d.device_id=$2 AND a.account_kind='pseudonymous' AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR SHARE OF a,d")
+        let row = sqlx::query("SELECT a.user_id,d.mls_node_id,d.identity_public_key,d.mls_credential FROM handles h JOIN accounts a USING (user_id) JOIN devices d USING (user_id) WHERE h.handle=$1 AND d.device_id=$2 AND a.account_kind IN ('pseudonymous','consumer') AND a.disabled_at IS NULL AND d.revoked_at IS NULL FOR SHARE OF a,d")
             .bind(&handle)
             .bind(device_id)
             .fetch_optional(&mut *tx)
@@ -1506,6 +1534,74 @@ impl AccountAuth {
             handle,
             mls_credential: encode(&credential),
         })
+    }
+
+    /// Return the authenticated account's current public username, if it has one.
+    pub async fn current_username(
+        &self,
+        token: &str,
+    ) -> Result<CurrentUsernameResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let handle = sqlx::query_scalar::<_, String>(
+            "SELECT handle FROM handles WHERE user_id=$1",
+        )
+        .bind(account.user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(CurrentUsernameResponse { handle })
+    }
+
+    /// Change the authenticated account's public username while keeping its
+    /// account and device identities intact.
+    pub async fn change_username(
+        &self,
+        token: &str,
+        request: UsernameChangeRequest,
+    ) -> Result<UsernameChangeResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        validate_handle(&request.handle).map_err(|_| AuthError::Invalid)?;
+
+        let mut tx = self.pool.begin().await?;
+        let account_kind: Option<String> = sqlx::query_scalar(
+            "SELECT account_kind FROM accounts
+             WHERE user_id=$1 AND disabled_at IS NULL FOR UPDATE",
+        )
+        .bind(account.user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if !matches!(account_kind.as_deref(), Some("consumer") | Some("pseudonymous")) {
+            return Err(AuthError::Denied);
+        }
+
+        let current_handle: Option<String> = sqlx::query_scalar(
+            "SELECT handle FROM handles WHERE user_id=$1 FOR UPDATE",
+        )
+        .bind(account.user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if current_handle.as_deref() == Some(request.handle.as_str()) {
+            tx.commit().await?;
+            return Ok(UsernameChangeResponse { handle: request.handle });
+        }
+
+        if current_handle.is_some() {
+            sqlx::query("UPDATE handles SET handle=$1, claimed_at=now() WHERE user_id=$2")
+                .bind(&request.handle)
+                .bind(account.user_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(map_username_change_write_error)?;
+        } else {
+            sqlx::query("INSERT INTO handles (handle,user_id) VALUES ($1,$2)")
+                .bind(&request.handle)
+                .bind(account.user_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(map_username_change_write_error)?;
+        }
+
+        tx.commit().await?;
+        Ok(UsernameChangeResponse { handle: request.handle })
     }
 
     /// Replace the authenticated account's public profile picture.
@@ -1623,7 +1719,7 @@ impl AccountAuth {
         if user_id.is_nil() {
             return Err(AuthError::Invalid);
         }
-        let handle: Option<String> = sqlx::query_scalar("SELECT h.handle FROM handles h JOIN accounts a USING (user_id) WHERE h.user_id=$1 AND a.account_kind='pseudonymous' AND a.disabled_at IS NULL")
+        let handle: Option<String> = sqlx::query_scalar("SELECT h.handle FROM handles h JOIN accounts a USING (user_id) WHERE h.user_id=$1 AND a.disabled_at IS NULL")
             .bind(user_id)
             .fetch_optional(&self.pool)
             .await?;
