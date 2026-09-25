@@ -456,32 +456,36 @@ private struct IOSChatsView: View {
 
     private var padChats: some View {
         NavigationSplitView {
-            Group {
-                if model.conversations.isEmpty {
-                    IOSEmptyConversations {
-                        model.clearConversationCreationStatus()
-                        showingNewConversation = true
-                    }
-                } else {
-                    List(selection: $selectedConversationID) {
-                        ForEach(model.conversations) { conversation in
-                            IOSConversationRow(
-                                conversation: conversation,
-                                imageJPEG: model.contactPictures[conversation.recipientUserID],
-                                showsDisclosure: false)
-                                .tag(conversation.id)
-                                .contextMenu {
-                                    Button("Delete conversation", role: .destructive) {
-                                        model.deleteConversation(conversation)
-                                    }
-                                }
+            VStack(spacing: 0) {
+                padChatsHeader
+
+                Group {
+                    if model.conversations.isEmpty {
+                        IOSEmptyConversations {
+                            model.clearConversationCreationStatus()
+                            showingNewConversation = true
                         }
+                    } else {
+                        List(selection: $selectedConversationID) {
+                            ForEach(model.conversations) { conversation in
+                                IOSConversationRow(
+                                    conversation: conversation,
+                                    imageJPEG: model.contactPictures[conversation.recipientUserID],
+                                    showsDisclosure: false)
+                                    .tag(conversation.id)
+                                    .contextMenu {
+                                        Button("Delete conversation", role: .destructive) {
+                                            model.deleteConversation(conversation)
+                                        }
+                                    }
+                            }
+                        }
+                        .listStyle(.sidebar)
                     }
-                    .listStyle(.sidebar)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationTitle("Chats")
-            .toolbar { chatToolbar }
+            .toolbar(.hidden, for: .navigationBar)
         } detail: {
             IOSPadConversationDetail(model: model, conversationID: selectedConversationID)
         }
@@ -503,38 +507,55 @@ private struct IOSChatsView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var chatToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(IOSLinksPalette.mint)
-                    .frame(width: 8, height: 8)
-                Text("Secure")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(IOSLinksPalette.mint)
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(IOSLinksPalette.mint.opacity(0.11))
-            .clipShape(Capsule())
+    private var padChatsHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Chats")
+                    .font(.largeTitle.weight(.bold))
 
-            Button {
-                model.clearGroupStatus()
-                showingNewGroup = true
-            } label: {
-                Image(systemName: "person.3")
-            }
-            .accessibilityLabel("New group")
+                Spacer(minLength: 8)
 
-            Button {
-                model.clearConversationCreationStatus()
-                showingNewConversation = true
-            } label: {
-                Image(systemName: "square.and.pencil")
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(IOSLinksPalette.mint)
+                        .frame(width: 8, height: 8)
+                    Text("Secure")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(IOSLinksPalette.mint)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(IOSLinksPalette.mint.opacity(0.11))
+                .clipShape(Capsule())
             }
-            .accessibilityLabel("New conversation")
+
+            HStack(spacing: 8) {
+                Button {
+                    model.clearGroupStatus()
+                    showingNewGroup = true
+                } label: {
+                    Label("New group", systemImage: "person.3")
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel("New group")
+
+                Button {
+                    model.clearConversationCreationStatus()
+                    showingNewConversation = true
+                } label: {
+                    Label("New chat", systemImage: "square.and.pencil")
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel("New conversation")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
     }
 }
 
@@ -612,8 +633,16 @@ private struct IOSConversationRow: View {
     var showsDisclosure = true
 
     var body: some View {
+        if showsDisclosure {
+            phoneRow
+        } else {
+            padRow
+        }
+    }
+
+    private var phoneRow: some View {
         HStack(spacing: 13) {
-            IOSAvatar(name: conversation.handle, size: showsDisclosure ? 52 : 44, imageJPEG: imageJPEG)
+            IOSAvatar(name: conversation.handle, size: 52, imageJPEG: imageJPEG)
             VStack(alignment: .leading, spacing: 5) {
                 Text(conversation.displayTitle)
                     .font(.headline)
@@ -629,30 +658,66 @@ private struct IOSConversationRow: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 if conversation.unreadCount > 0 {
-                    Text(conversation.unreadCount > 99 ? "99+" : "\(conversation.unreadCount)")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(IOSLinksPalette.cobalt)
-                        .clipShape(Capsule())
+                    unreadBadge
                 }
-                if showsDisclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(showsDisclosure ? 14 : 8)
-        .background(showsDisclosure ? Color(uiColor: .secondarySystemGroupedBackground) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: showsDisclosure ? 20 : 12, style: .continuous))
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
-            if showsDisclosure {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.primary.opacity(0.055))
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.055))
+        }
+    }
+
+    private var padRow: some View {
+        HStack(spacing: 12) {
+            IOSAvatar(name: conversation.handle, size: 44, imageJPEG: imageJPEG)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(conversation.displayTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 0)
+
+                    if conversation.unreadCount > 0 {
+                        unreadBadge
+                    }
+                }
+
+                Label(conversation.isGroup ? "Encrypted group" : "Private conversation",
+                      systemImage: conversation.isGroup ? "person.3.fill" : "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                Text(conversation.createdAt, format: .dateTime.month(.abbreviated).day())
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
         }
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+    }
+
+    private var unreadBadge: some View {
+        Text(conversation.unreadCount > 99 ? "99+" : "\(conversation.unreadCount)")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(IOSLinksPalette.cobalt)
+            .clipShape(Capsule())
+            .accessibilityLabel("\(conversation.unreadCount) unread")
     }
 }
 
