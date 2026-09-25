@@ -25,6 +25,7 @@ const authBaseURL = signal('/links-api')
 const accessToken = signal('')
 const profilePictureKey = 'links-web-client-profile-picture-v1'
 const profileHandleKey = 'links-web-client-profile-handle-v1'
+const profileDisplayNameKey = 'links-web-client-profile-display-name-v1'
 function loadProfileHandle() {
   try {
     const saved = localStorage.getItem(profileHandleKey)
@@ -34,8 +35,20 @@ function loadProfileHandle() {
   }
   return 'micky'
 }
+function loadProfileDisplayName() {
+  try {
+    const saved = localStorage.getItem(profileDisplayNameKey)
+    if (validDisplayName(saved)) return saved.trim()
+  } catch {
+    // Keep the preview usable when browser storage is unavailable.
+  }
+  return ''
+}
 const profileHandle = signal(loadProfileHandle())
 const profileHandleDraft = signal(profileHandle.value)
+const profileDisplayName = signal(loadProfileDisplayName())
+const profileDisplayNameDraft = signal(profileDisplayName.value)
+const profileDisplayNameError = signal('')
 const isChangingUsername = signal(false)
 const profileUsernameError = signal('')
 const profilePicture = signal('')
@@ -263,6 +276,32 @@ function avatarName(value) {
 
 function validHandle(value) {
   return /^[a-z][a-z0-9_]{2,31}$/.test(value)
+}
+
+function validDisplayName(value) {
+  if (typeof value !== 'string') return false
+  const cleanName = value.trim()
+  return cleanName.length > 0
+    && new TextEncoder().encode(cleanName).length <= 80
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(cleanName)
+}
+
+function saveProfileDisplayName() {
+  profileDisplayNameError.value = ''
+  const cleanName = profileDisplayNameDraft.value.trim()
+  if (!validDisplayName(cleanName)) {
+    profileDisplayNameError.value = 'Use a name up to 80 bytes without control characters.'
+    return
+  }
+  profileDisplayName.value = cleanName
+  profileDisplayNameDraft.value = cleanName
+  try {
+    localStorage.setItem(profileDisplayNameKey, cleanName)
+  } catch {
+    // Keep the name in this tab when browser storage is unavailable.
+  }
+  profileOpen.value = false
+  notice.value = 'Display name saved in this client. Your username stays the same.'
 }
 
 function authHeaders() {
@@ -592,11 +631,11 @@ function Sidebar() {
         <div class="contact-list"><ContactList /></div>
       </section>
 
-      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername() }}>
+      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileDisplayNameDraft.value = profileDisplayName.value; profileDisplayNameError.value = ''; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername() }}>
         <ProfilePicture />
         <span class="profile-copy">
-          <strong>{computed(() => `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
-          <span><StatusDot /> {statusLabel}</span>
+          <strong>{computed(() => profileDisplayName.value || `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
+          <span><span>@{computed(() => normalizeHandle(profileHandle.value) || 'profile')}</span><StatusDot /> {statusLabel}</span>
         </span>
         <SettingsIcon size="1rem" />
       </button>
@@ -741,11 +780,12 @@ function ProfilePopup() {
     <Popup
       open={profileOpen}
       title="Web profile"
-      ariaDescription="Change the account username and configure directory access."
+      ariaDescription="Change the local display name, account username, and directory access."
       size="medium"
       footer={() => (
         <div class="popup-actions is-split">
           <Button label="Reset preview" variant="tertiary" onClick={resetPreview} />
+          <Button label="Save display name" variant="secondary" onClick={saveProfileDisplayName} />
           <Button label="Change username" variant="primary" loading={isChangingUsername} disabled={isChangingUsername} onClick={changeProfileUsername} />
         </div>
       )}
@@ -771,6 +811,10 @@ function ProfilePopup() {
           </div>
           {computed(() => profilePictureError.value ? <Alert tone="error">{profilePictureError}</Alert> : null)}
         </div>
+        <label for="profile-display-name">Display name</label>
+        <TextField id="profile-display-name" value={profileDisplayNameDraft} placeholder="Name" autocomplete="name" />
+        <p>Shown in this client. Your username and saved profile stay the same.</p>
+        {computed(() => profileDisplayNameError.value ? <Alert tone="error">{profileDisplayNameError}</Alert> : null)}
         <label for="profile-handle">New username</label>
         <TextField id="profile-handle" value={profileHandleDraft} placeholder="username" autocomplete="username" />
         <p>Use 3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.</p>

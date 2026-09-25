@@ -1082,6 +1082,8 @@ private struct IOSProfileView: View {
     @State private var showingSignOut = false
     @State private var showingNewUsername = false
     @State private var showingUsernameChange = false
+    @State private var showingDisplayNameChange = false
+    @State private var displayNameDraft = ""
     @State private var pictureItem: PhotosPickerItem?
 
     var body: some View {
@@ -1089,7 +1091,8 @@ private struct IOSProfileView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     VStack(spacing: 12) {
-                        IOSAvatar(name: model.profileName, size: 82, imageJPEG: model.profilePictureJPEG)
+                        IOSAvatar(name: model.profileDisplayName, size: 82,
+                                  imageJPEG: model.profilePictureJPEG)
                         HStack(spacing: 10) {
                             PhotosPicker(selection: $pictureItem, matching: .images) {
                                 Label(model.profilePictureJPEG == nil ? "Add picture" : "Change picture",
@@ -1114,7 +1117,7 @@ private struct IOSProfileView: View {
                                 pictureItem = nil
                             }
                         }
-                        Text(model.profileName)
+                        Text(model.profileDisplayName)
                             .font(.title2.weight(.bold))
                         Label("Identity protected on this device", systemImage: "checkmark.shield.fill")
                             .font(.subheadline.weight(.medium))
@@ -1124,11 +1127,26 @@ private struct IOSProfileView: View {
 
                     VStack(spacing: 0) {
                         Button {
+                            displayNameDraft = model.profileDisplayName
+                            model.profileDisplayNameError = nil
+                            showingDisplayNameChange = true
+                        } label: {
+                            IOSProfileRow(icon: "person.crop.circle", color: IOSLinksPalette.cobalt,
+                                          title: "Display name", value: model.profileDisplayName,
+                                          showsDisclosure: true)
+                        }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $showingDisplayNameChange) {
+                            IOSChangeDisplayNameSheet(model: model, displayName: $displayNameDraft)
+                        }
+                        Divider().padding(.leading, 54)
+                        Button {
                             model.clearError()
                             showingUsernameChange = true
                         } label: {
                             IOSProfileRow(icon: "at", color: IOSLinksPalette.cobalt,
-                                          title: "Username", value: model.profileName,
+                                          title: "Username",
+                                          value: model.accountUsername.map { "@\($0)" } ?? "Not set",
                                           showsDisclosure: true)
                         }
                         .buttonStyle(.plain)
@@ -1255,6 +1273,47 @@ private struct IOSChangeUsernameSheet: View {
                     if let current = await model.refreshCurrentUsername() {
                         handle = current
                     }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+private struct IOSChangeDisplayNameSheet: View {
+    @ObservedObject var model: IOSMobileAppModel
+    @Binding var displayName: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Display name") {
+                    TextField("Name", text: $displayName)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("Shown in this client. Your username and saved profile stay the same.")
+                }
+
+                if let error = model.profileDisplayNameError {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Change display name")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if model.changeProfileDisplayName(displayName) {
+                            dismiss()
+                        }
+                    }
+                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

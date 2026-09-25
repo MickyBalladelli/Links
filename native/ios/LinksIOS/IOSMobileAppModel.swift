@@ -164,6 +164,8 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var isRestoringSession = false
     @Published private(set) var requiresManualSignIn = true
+    @Published private(set) var profileDisplayName = "Links user"
+    @Published var profileDisplayNameError: String?
     @Published private(set) var pairingStatus = "No pairing activity"
     @Published var error: String?
     @Published var username = ""
@@ -697,6 +699,22 @@ final class IOSMobileAppModel: ObservableObject {
         return false
     }
 
+    func changeProfileDisplayName(_ requestedName: String) -> Bool {
+        guard let client else {
+            profileDisplayNameError = "This profile is not ready yet."
+            return false
+        }
+        do {
+            try client.updateProfileDisplayName(requestedName)
+            profileDisplayName = client.profileDisplayName ?? client.profile.name
+            profileDisplayNameError = nil
+            return true
+        } catch {
+            profileDisplayNameError = "Use a name up to 80 bytes without control characters."
+            return false
+        }
+    }
+
     func createConversation(handle: String) async -> IOSMobileConversation? {
         guard let client, let usernameAuthClient, client.isAuthenticated,
               !isCreatingConversation else {
@@ -1216,6 +1234,7 @@ final class IOSMobileAppModel: ObservableObject {
         guard let client else {
             isEnrolled = false
             isAuthenticated = false
+            profileDisplayName = "Links user"
             identityStatus = "Identity store unavailable"
             accountStatus = "Signed out"
             deviceStatus = "Unavailable"
@@ -1223,6 +1242,7 @@ final class IOSMobileAppModel: ObservableObject {
         }
         isEnrolled = client.isEnrolled
         isAuthenticated = client.isAuthenticated
+        profileDisplayName = client.profileDisplayName ?? client.profile.name
         identityStatus = client.isEnrolled ? "Hardware identity enrolled" : "No identity enrolled"
         if let userID = client.userID {
             let handle = client.accountHandle.map { "@\($0) · " } ?? ""

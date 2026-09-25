@@ -23,10 +23,13 @@ public final class MainActivity extends Activity {
     private Button createButton;
     private Button sendCodeButton;
     private Button verifyButton;
+    private Button saveDisplayNameButton;
     private Button changeUsernameButton;
     private TextView usernameNote;
+    private TextView displayNameNote;
     private EditText phoneInput;
     private EditText codeInput;
+    private EditText displayNameInput;
     private EditText usernameInput;
     private Spinner channelInput;
     private ClientSession session;
@@ -84,6 +87,27 @@ public final class MainActivity extends Activity {
         verifyButton.setText("Verify phone");
         verifyButton.setOnClickListener(view -> verifyOtp());
         layout.addView(verifyButton);
+
+        displayNameInput = new EditText(this);
+        displayNameInput.setHint("Display name");
+        displayNameInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        displayNameInput.setSingleLine(true);
+        displayNameInput.setVisibility(View.GONE);
+        layout.addView(displayNameInput);
+
+        displayNameNote = new TextView(this);
+        displayNameNote.setText("Shown in this client. Your username and saved profile stay the same.");
+        displayNameNote.setTextSize(12);
+        displayNameNote.setVisibility(View.GONE);
+        layout.addView(displayNameNote);
+
+        saveDisplayNameButton = new Button(this);
+        saveDisplayNameButton.setText("Save display name");
+        saveDisplayNameButton.setOnClickListener(view -> saveDisplayName());
+        saveDisplayNameButton.setVisibility(View.GONE);
+        layout.addView(saveDisplayNameButton);
 
         usernameInput = new EditText(this);
         usernameInput.setHint("New username");
@@ -242,26 +266,50 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void saveDisplayName() {
+        if (session == null || !session.isAuthenticated()) return;
+        try {
+            session.saveProfileDisplayName(displayNameInput.getText().toString());
+            refreshStatus();
+            status.setText("Display name saved on this device");
+        } catch (Exception error) {
+            status.setText("Display name not saved\n" + error.getMessage());
+        }
+    }
+
     private void refreshStatus() {
         boolean enrolled = session != null && session.isEnrolled();
         boolean authenticated = enrolled && session.isAuthenticated();
         boolean usernameWasVisible = usernameInput.getVisibility() == View.VISIBLE;
+        boolean displayNameWasVisible = displayNameInput.getVisibility() == View.VISIBLE;
         createButton.setEnabled(session != null && !enrolled);
         sendCodeButton.setEnabled(enrolled && !authenticated);
         codeInput.setEnabled(enrolled && !authenticated && pendingChallenge != null);
         verifyButton.setEnabled(enrolled && !authenticated && pendingChallenge != null
                 && codeInput.getText().length() > 0);
+        displayNameInput.setVisibility(authenticated ? View.VISIBLE : View.GONE);
+        displayNameNote.setVisibility(authenticated ? View.VISIBLE : View.GONE);
+        saveDisplayNameButton.setVisibility(authenticated ? View.VISIBLE : View.GONE);
         usernameInput.setVisibility(authenticated ? View.VISIBLE : View.GONE);
         usernameNote.setVisibility(authenticated ? View.VISIBLE : View.GONE);
         changeUsernameButton.setVisibility(authenticated ? View.VISIBLE : View.GONE);
         usernameInput.setEnabled(authenticated);
         changeUsernameButton.setEnabled(authenticated);
+        displayNameInput.setEnabled(authenticated);
+        saveDisplayNameButton.setEnabled(authenticated);
+        if (authenticated && !displayNameWasVisible)
+            displayNameInput.setText(session.profileDisplayName().isEmpty()
+                    ? session.profileUsername() : session.profileDisplayName());
         if (authenticated && !usernameWasVisible)
             usernameInput.setText(session.profileUsername());
         if (authenticated) {
             String username = session.profileUsername();
             String usernameLine = username.isEmpty() ? "" : "\nUsername: @" + username;
-            status.setText("Phone verified\nAccount: " + session.userId() + usernameLine);
+            String displayName = session.profileDisplayName().isEmpty()
+                    ? username : session.profileDisplayName();
+            String displayNameLine = displayName.isEmpty() ? "" : "\nDisplay name: " + displayName;
+            status.setText("Phone verified\nAccount: " + session.userId()
+                    + displayNameLine + usernameLine);
         } else if (enrolled) {
             status.setText("Identity ready\nDevice: " + session.deviceId()
                     + "\nVerify phone to continue");

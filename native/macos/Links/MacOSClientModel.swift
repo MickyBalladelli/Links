@@ -236,6 +236,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var isRestoringSession = false
     @Published private(set) var requiresManualSignIn = true
     @Published private(set) var profileName = ClientProfile.default.name
+    @Published private(set) var profileDisplayName = ClientProfile.default.name
+    @Published var profileDisplayNameError: String?
     @Published private(set) var profilePictureJPEG: Data?
     @Published private(set) var contactPictures: [String: Data] = [:]
     @Published private(set) var profileRootPath = ""
@@ -349,6 +351,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 defaults: metadataDefaults,
                 profile: profile)
             profileName = profile.name
+            profileDisplayName = loadedClient.profileDisplayName ?? profile.name
             client = loadedClient
             sessionDefaults = metadataDefaults
             usernameInput = loadedClient.accountHandle ?? ""
@@ -401,6 +404,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             profileLogPath = "Unavailable"
             profileStatusPath = "Unavailable"
             profileName = "Invalid profile"
+            profileDisplayName = "Invalid profile"
             identityStatus = "Identity unavailable"
             accountStatus = "Unavailable"
             deviceStatus = "Unavailable"
@@ -607,6 +611,22 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             Task { await self.publishProfilePicture() }
         } catch {
             actionError = "The profile picture could not be saved."
+        }
+    }
+
+    func changeProfileDisplayName(to requestedName: String) -> Bool {
+        guard !profileTornDown, let client else {
+            profileDisplayNameError = "This profile is not ready yet."
+            return false
+        }
+        do {
+            try client.updateProfileDisplayName(requestedName)
+            profileDisplayName = client.profileDisplayName ?? profileName
+            profileDisplayNameError = nil
+            return true
+        } catch {
+            profileDisplayNameError = "Use a name up to 80 bytes without control characters."
+            return false
         }
     }
 

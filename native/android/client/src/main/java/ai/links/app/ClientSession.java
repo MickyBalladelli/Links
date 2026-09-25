@@ -24,6 +24,7 @@ public final class ClientSession {
     private static final String MLS_NODE_ID = "mls_node_id";
     private static final String USER_ID = "user_id";
     private static final String PROFILE_USERNAME = "profile_username";
+    private static final String PROFILE_DISPLAY_NAME = "profile_display_name";
 
     private final HardwareIdentityStore identityStore;
     private final SharedPreferences preferences;
@@ -73,6 +74,28 @@ public final class ClientSession {
             throw new IOException("Invalid username");
         if (!preferences.edit().putString(PROFILE_USERNAME, handle).commit())
             throw new IOException("Username could not be saved on this device");
+    }
+
+    public synchronized String profileDisplayName() {
+        return preferences.getString(PROFILE_DISPLAY_NAME, "");
+    }
+
+    public synchronized void saveProfileDisplayName(String name) throws IOException {
+        if (name == null) throw new IOException("Invalid display name");
+        String cleanName = name.trim();
+        if (cleanName.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 80)
+            throw new IOException("Use a display name up to 80 bytes");
+        for (int index = 0; index < cleanName.length(); index++) {
+            if (Character.isISOControl(cleanName.charAt(index)))
+                throw new IOException("Use a display name without control characters");
+        }
+        if (cleanName.isEmpty()) {
+            if (!preferences.edit().remove(PROFILE_DISPLAY_NAME).commit())
+                throw new IOException("Display name could not be saved on this device");
+            return;
+        }
+        if (!preferences.edit().putString(PROFILE_DISPLAY_NAME, cleanName).commit())
+            throw new IOException("Display name could not be saved on this device");
     }
 
     public synchronized boolean isAuthenticated() {

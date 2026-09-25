@@ -815,6 +815,8 @@ private struct ProfileSummaryCard: View {
     @Binding var showingPairing: Bool
     @State private var showingDetails = false
     @State private var logoutConfirmationPresented = false
+    @State private var showingDisplayNameChange = false
+    @State private var displayNameDraft = ""
     @State private var showingUsernameChange = false
     @State private var usernameDraft = ""
 
@@ -822,12 +824,13 @@ private struct ProfileSummaryCard: View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .top, spacing: 10) {
                 Button(action: chooseProfilePicture) {
-                    ProfileAvatar(title: model.profileName, size: 34, imageJPEG: model.profilePictureJPEG)
+                    ProfileAvatar(title: model.profileDisplayName, size: 34,
+                                  imageJPEG: model.profilePictureJPEG)
                 }
                 .buttonStyle(.plain)
                 .help(model.profilePictureJPEG == nil ? "Add picture" : "Change picture")
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.profileName)
+                    Text(model.profileDisplayName)
                         .font(.callout.weight(.semibold))
                         .lineLimit(1)
                     Text(model.accountStatus)
@@ -895,6 +898,17 @@ private struct ProfileSummaryCard: View {
                 .buttonStyle(.borderless)
                 .controlSize(.small)
                 .foregroundStyle(.secondary)
+            }
+
+            Button("Change display name") {
+                displayNameDraft = model.profileDisplayName
+                model.profileDisplayNameError = nil
+                showingDisplayNameChange = true
+            }
+            .buttonStyle(.link)
+            .controlSize(.small)
+            .sheet(isPresented: $showingDisplayNameChange) {
+                MacOSChangeDisplayNameSheet(model: model, displayName: $displayNameDraft)
             }
 
             Button("Change username") {
@@ -1013,6 +1027,50 @@ private struct MacOSChangeUsernameSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           || model.isChangingUsername)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 390)
+    }
+}
+
+private struct MacOSChangeDisplayNameSheet: View {
+    @ObservedObject var model: LinksMacOSAppModel
+    @Binding var displayName: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Change display name")
+                .font(.title2.weight(.semibold))
+
+            TextField("Display name", text: $displayName)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+
+            Text("Shown in this client. Your username and saved profile stay the same.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let error = model.profileDisplayNameError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    if model.changeProfileDisplayName(to: displayName) {
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
         }

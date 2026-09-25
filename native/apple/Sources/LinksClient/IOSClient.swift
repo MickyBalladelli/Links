@@ -278,6 +278,7 @@ public final class IOSClient: SharedCoreIdentitySigner {
     private let defaults: UserDefaults
     public let profile: ClientProfile
     private let metadataKey: String
+    private let profileDisplayNameKey: String
     private let sessionLock = NSLock()
     private var authenticated: AuthenticatedSession?
 
@@ -287,6 +288,7 @@ public final class IOSClient: SharedCoreIdentitySigner {
     public private(set) var userID: String?
     public private(set) var accountHandle: String?
     public private(set) var mlsCredential: Data?
+    public private(set) var profileDisplayName: String?
 
     public init(identityStore: HardwareIdentityStore = HardwareIdentityStore(),
                 defaults: UserDefaults = .standard,
@@ -295,9 +297,11 @@ public final class IOSClient: SharedCoreIdentitySigner {
         self.defaults = defaults
         self.profile = profile
         metadataKey = Self.metadataKey(for: profile)
+        profileDisplayNameKey = Self.profileDisplayNameKey(for: profile)
         guard identityStore.profile == profile else {
             throw IOSClientError.profileMismatch
         }
+        profileDisplayName = defaults.string(forKey: profileDisplayNameKey)
         try restoreMetadata()
     }
 
@@ -460,6 +464,28 @@ public final class IOSClient: SharedCoreIdentitySigner {
             accountHandle: cleanHandle,
             mlsCredential: mlsCredential))
         accountHandle = cleanHandle
+    }
+
+    /// Save a local profile label without changing the stable profile namespace.
+    /// An empty name clears the label and lets the app show its default name.
+    public func updateProfileDisplayName(_ name: String) throws {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.utf8.count <= 80,
+              !cleanName.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            throw IOSClientError.invalidMetadata
+        }
+        if cleanName.isEmpty {
+            defaults.removeObject(forKey: profileDisplayNameKey)
+            profileDisplayName = nil
+            return
+        }
+        defaults.set(cleanName, forKey: profileDisplayNameKey)
+        guard defaults.string(forKey: profileDisplayNameKey) == cleanName else {
+            throw IOSClientError.metadataUnavailable
+        }
+        profileDisplayName = cleanName
     }
 
     /// Register or log in a local-development username using this hardware
@@ -767,5 +793,9 @@ public final class IOSClient: SharedCoreIdentitySigner {
 
     private static func metadataKey(for profile: ClientProfile) -> String {
         profile == .default ? metadataKey : profileMetadataPrefix + profile.name
+    }
+
+    private static func profileDisplayNameKey(for profile: ClientProfile) -> String {
+        metadataKey(for: profile) + ".display_name"
     }
 }
