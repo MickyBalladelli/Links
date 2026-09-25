@@ -196,6 +196,7 @@ final class IOSMobileAppModel: ObservableObject {
     /// Handles learned for group members who are not saved contacts.
     fileprivate var memberHandles: [String: String] = [:]
     private var resolvingIncomingUserIDs = Set<String>()
+    private var pendingIncomingProfileRefreshes: [String: String] = [:]
 
     let authEndpointText: String
     private var client: IOSClient?
@@ -1488,32 +1489,46 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                 conversationID = message.conversationID
             }
             self.persistLocalState()
-            if knownContact == nil {
-                self.resolveIncomingUsername(
-                    conversationID: conversationID,
-                    senderUserID: message.senderUserID)
-            }
+            self.resolveIncomingUsername(
+                conversationID: conversationID,
+                senderUserID: message.senderUserID)
         }
     }
 
     private func resolveIncomingUsername(conversationID: String, senderUserID: String) {
-        guard !resolvingIncomingUserIDs.contains(senderUserID),
-              let usernameAuthClient,
+        guard let usernameAuthClient,
               let client,
               let accessToken = try? client.accessToken() else { return }
+        if resolvingIncomingUserIDs.contains(senderUserID) {
+            pendingIncomingProfileRefreshes[senderUserID] = conversationID
+            return
+        }
         resolvingIncomingUserIDs.insert(senderUserID)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.resolvingIncomingUserIDs.remove(senderUserID) }
+            defer {
+                self.resolvingIncomingUserIDs.remove(senderUserID)
+                if let pendingConversationID = self.pendingIncomingProfileRefreshes
+                    .removeValue(forKey: senderUserID) {
+                    self.resolveIncomingUsername(
+                        conversationID: pendingConversationID,
+                        senderUserID: senderUserID)
+                }
+            }
             do {
                 let directory = try await usernameAuthClient.lookup(
                     userID: senderUserID, accessToken: accessToken)
-                guard let index = self.conversations.firstIndex(where: {
-                    $0.id == conversationID && $0.recipientUserID == senderUserID
+                guard self.conversations.contains(where: {
+                    $0.id == conversationID
+                        && !$0.isGroup
+                        && $0.recipientUserID == senderUserID
                 }) else { return }
-                self.conversations[index].handle = directory.handle
-                self.conversations[index].displayName = directory.displayName
-                self.conversations[index].deviceCount = directory.devices.count
+                for index in self.conversations.indices where !self.conversations[index].isGroup
+                    && self.conversations[index].recipientUserID == senderUserID {
+                    self.conversations[index].handle = directory.handle
+                    self.conversations[index].displayName = directory.displayName
+                    self.conversations[index].deviceCount = directory.devices.count
+                }
                 let contact = IOSMobileContact(
                     handle: directory.handle,
                     displayName: directory.displayName,
@@ -1525,11 +1540,11 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                     self.contacts[contactIndex] = contact
                 } else {
                     self.contacts.append(contact)
-                    self.contacts.sort { $0.handle < $1.handle }
                 }
+                self.contacts.sort { $0.handle < $1.handle }
                 self.persistLocalState()
             } catch {
-                // Keep the non-identifying fallback; message receipt still succeeds.
+                // Keep the last cached labels if the account service is offline.
             }
         }
     }

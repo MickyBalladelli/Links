@@ -292,6 +292,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     /// so opening the conversation does not raise a pre-key alert.
     private var unavailableRecipientUserIDs = Set<String>()
     private var resolvingIncomingUserIDs = Set<String>()
+    private var pendingIncomingProfileRefreshes: [String: String] = [:]
     private var profileLogger: LinksMacOSProfileLogger?
     private var profileStatus: LinksMacOSProfileStatus?
     private let identityQueue = DispatchQueue(
@@ -2163,31 +2164,48 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         actionError = nil
         clearLastError()
         persistLocalState()
-        if knownContact == nil {
-            resolveIncomingUsername(
-                conversationID: conversationID,
-                senderUserID: message.senderUserID)
-        }
+        resolveIncomingUsername(
+            conversationID: conversationID,
+            senderUserID: message.senderUserID)
     }
 
     private func resolveIncomingUsername(conversationID: String, senderUserID: String) {
-        guard !resolvingIncomingUserIDs.contains(senderUserID),
-              let authClient,
+        guard let authClient,
               let client,
               let accessToken = try? client.accessToken() else { return }
+        if resolvingIncomingUserIDs.contains(senderUserID) {
+            pendingIncomingProfileRefreshes[senderUserID] = conversationID
+            return
+        }
         resolvingIncomingUserIDs.insert(senderUserID)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.resolvingIncomingUserIDs.remove(senderUserID) }
+            defer {
+                self.resolvingIncomingUserIDs.remove(senderUserID)
+                if let pendingConversationID = self.pendingIncomingProfileRefreshes
+                    .removeValue(forKey: senderUserID) {
+                    self.resolveIncomingUsername(
+                        conversationID: pendingConversationID,
+                        senderUserID: senderUserID)
+                }
+            }
             do {
                 let directory = try await authClient.lookup(
                     userID: senderUserID, accessToken: accessToken)
-                guard let index = self.conversations.firstIndex(where: {
-                    $0.id == conversationID && $0.peerUserID == senderUserID
+                guard self.conversations.contains(where: {
+                    $0.id == conversationID
+                        && !$0.isGroup
+                        && ($0.peerUserID == senderUserID
+                            || $0.recipientUserID == senderUserID)
                 }) else { return }
-                self.conversations[index].title = "@\(directory.handle)"
-                self.conversations[index].displayName = directory.displayName
-                self.conversations[index].recipientUserID = senderUserID
+                for index in self.conversations.indices where !self.conversations[index].isGroup
+                    && (self.conversations[index].peerUserID == senderUserID
+                        || self.conversations[index].recipientUserID == senderUserID) {
+                    self.conversations[index].title = "@\(directory.handle)"
+                    self.conversations[index].displayName = directory.displayName
+                    self.conversations[index].recipientUserID = senderUserID
+                    self.conversations[index].peerUserID = senderUserID
+                }
                 self.initializedConversationIDs.insert(conversationID)
                 if let contactIndex = self.contacts.firstIndex(where: {
                     $0.userID == senderUserID
@@ -2207,7 +2225,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 self.contacts.sort { $0.handle < $1.handle }
                 self.persistLocalState()
             } catch {
-                // Keep the non-identifying placeholder; message receipt still succeeds.
+                // Keep the last cached labels if the account service is offline.
             }
         }
     }
