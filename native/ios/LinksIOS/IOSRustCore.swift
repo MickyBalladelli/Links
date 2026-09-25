@@ -806,28 +806,25 @@ final class IOSRustCoreFactory: SharedClientCoreFactory {
 final class IOSDirectoryChatAdapter: IOSDirectChatDirectory {
     private let directoryClient: IOSUsernameAuthClient
     private let keyPackageProvider: IOSHTTPMLSKeyPackageProvider
-    private let handles: () -> [String: String]
+    private let onDirectoryResolved: (String, String) -> Void
 
     init(directoryClient: IOSUsernameAuthClient,
          keyPackageProvider: IOSHTTPMLSKeyPackageProvider,
-         handles: @escaping () -> [String: String]) {
+         onDirectoryResolved: @escaping (String, String) -> Void = { _, _ in }) {
         self.directoryClient = directoryClient
         self.keyPackageProvider = keyPackageProvider
-        self.handles = handles
+        self.onDirectoryResolved = onDirectoryResolved
     }
 
     func queryRecipientDevices(accessToken: String, recipientUserID: String)
         async throws -> [IOSRecipientDeviceDescriptor] {
-        // Group members are often not saved contacts; look them up by ID.
-        let directory: IOSUsernameDirectory
-        if let handle = handles()[recipientUserID] {
-            directory = try await directoryClient.lookup(handle: handle)
-        } else {
-            directory = try await directoryClient.lookup(
-                userID: recipientUserID, accessToken: accessToken)
+        let directory = try await directoryClient.lookup(
+            userID: recipientUserID, accessToken: accessToken)
+        guard directory.userID == recipientUserID else {
+            throw IOSPreKeyError.invalidRecipient
         }
-        guard directory.userID == recipientUserID,
-              !directory.devices.isEmpty,
+        onDirectoryResolved(directory.userID, directory.handle)
+        guard !directory.devices.isEmpty,
               directory.devices.count <= 100 else {
             throw IOSPreKeyError.invalidRecipient
         }

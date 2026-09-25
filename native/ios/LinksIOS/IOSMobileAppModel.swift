@@ -20,7 +20,7 @@ enum IOSUsernameAction: String, CaseIterable, Identifiable {
 }
 
 struct IOSMobileContact: Identifiable, Equatable, Codable {
-    let handle: String
+    var handle: String
     let userID: String
     let deviceCount: Int
 
@@ -735,56 +735,7 @@ final class IOSMobileAppModel: ObservableObject {
         defer { isCreatingConversation = false }
         do {
             let directory = try await usernameAuthClient.lookup(handle: cleanHandle)
-            guard directory.userID != client.userID else {
-                conversationCreationStatus = "Choose someone other than your own account."
-                return nil
-            }
-            guard !directory.devices.isEmpty else {
-                conversationCreationStatus = "@\(directory.handle) has no active devices."
-                return nil
-            }
-
-            let contact = IOSMobileContact(
-                handle: directory.handle,
-                userID: directory.userID,
-                deviceCount: directory.devices.count)
-            if let contactIndex = contacts.firstIndex(where: { $0.userID == contact.userID }) {
-                contacts[contactIndex] = contact
-            } else {
-                contacts.append(contact)
-                contacts.sort { $0.handle < $1.handle }
-            }
-
-            if let existingIndex = conversations.firstIndex(where: {
-                $0.recipientUserID == directory.userID
-            }) {
-                let existing = conversations.remove(at: existingIndex)
-                let updated = IOSMobileConversation(
-                    id: existing.id,
-                    handle: directory.handle,
-                    recipientUserID: directory.userID,
-                    deviceCount: directory.devices.count,
-                    createdAt: existing.createdAt,
-                    messages: existing.messages,
-                    isSecureReady: existing.isSecureReady,
-                    unreadCount: existing.unreadCount,
-                    deliveryConversationID: existing.deliveryConversationID)
-                conversations.insert(updated, at: 0)
-                conversationCreationStatus = "Opened @\(directory.handle)."
-                persistLocalState()
-                return updated
-            }
-
-            let conversation = IOSMobileConversation(
-                id: UUID().uuidString.lowercased(),
-                handle: directory.handle,
-                recipientUserID: directory.userID,
-                deviceCount: directory.devices.count,
-                createdAt: Date())
-            conversations.insert(conversation, at: 0)
-            conversationCreationStatus = "Conversation with @\(directory.handle) is ready."
-            persistLocalState()
-            return conversation
+            return openConversation(directory, ownUserID: client.userID)
         } catch let authError as IOSUsernameAuthError {
             switch authError {
             case .serverRejected(let statusCode) where statusCode == 404:
@@ -803,6 +754,87 @@ final class IOSMobileAppModel: ObservableObject {
             conversationCreationStatus = "Could not add @\(cleanHandle)."
             return nil
         }
+    }
+
+    func createConversation(contactUserID: String) async -> IOSMobileConversation? {
+        guard let client, let usernameAuthClient, client.isAuthenticated,
+              IOSClient.isCanonicalUUID(contactUserID), !isCreatingConversation else {
+            conversationCreationStatus = "Sign in before opening this contact."
+            return nil
+        }
+        isCreatingConversation = true
+        conversationCreationStatus = "Refreshing saved contact…"
+        defer { isCreatingConversation = false }
+        do {
+            let directory = try await usernameAuthClient.lookup(
+                userID: contactUserID,
+                accessToken: client.accessToken())
+            return openConversation(directory, ownUserID: client.userID)
+        } catch let authError as IOSUsernameAuthError {
+            if case .serverRejected(let statusCode) = authError, statusCode == 404 {
+                conversationCreationStatus = "This saved contact is no longer available."
+            } else {
+                conversationCreationStatus = "Could not refresh this contact. Check your connection."
+            }
+            return nil
+        } catch {
+            conversationCreationStatus = "Could not refresh this contact. Sign in again and retry."
+            return nil
+        }
+    }
+
+    private func openConversation(_ directory: IOSUsernameDirectory,
+                                  ownUserID: String?) -> IOSMobileConversation? {
+        guard directory.userID != ownUserID else {
+            conversationCreationStatus = "Choose someone other than your own account."
+            return nil
+        }
+        guard !directory.devices.isEmpty else {
+            conversationCreationStatus = "@\(directory.handle) has no active devices."
+            return nil
+        }
+
+        let contact = IOSMobileContact(
+            handle: directory.handle,
+            userID: directory.userID,
+            deviceCount: directory.devices.count)
+        if let contactIndex = contacts.firstIndex(where: { $0.userID == contact.userID }) {
+            contacts[contactIndex] = contact
+        } else {
+            contacts.append(contact)
+        }
+        contacts.sort { $0.handle < $1.handle }
+
+        if let existingIndex = conversations.firstIndex(where: {
+            $0.recipientUserID == directory.userID
+        }) {
+            let existing = conversations.remove(at: existingIndex)
+            let updated = IOSMobileConversation(
+                id: existing.id,
+                handle: directory.handle,
+                recipientUserID: directory.userID,
+                deviceCount: directory.devices.count,
+                createdAt: existing.createdAt,
+                messages: existing.messages,
+                isSecureReady: existing.isSecureReady,
+                unreadCount: existing.unreadCount,
+                deliveryConversationID: existing.deliveryConversationID)
+            conversations.insert(updated, at: 0)
+            conversationCreationStatus = "Opened @\(directory.handle)."
+            persistLocalState()
+            return updated
+        }
+
+        let conversation = IOSMobileConversation(
+            id: UUID().uuidString.lowercased(),
+            handle: directory.handle,
+            recipientUserID: directory.userID,
+            deviceCount: directory.devices.count,
+            createdAt: Date())
+        conversations.insert(conversation, at: 0)
+        conversationCreationStatus = "Conversation with @\(directory.handle) is ready."
+        persistLocalState()
+        return conversation
     }
 
     func prepareConversation(_ conversationID: String) async {
@@ -933,12 +965,12 @@ final class IOSMobileAppModel: ObservableObject {
             let keyPackageProvider = IOSHTTPMLSKeyPackageProvider(api: preKeyAPI)
             let directory = IOSDirectoryChatAdapter(
                 directoryClient: usernameAuthClient,
-                keyPackageProvider: keyPackageProvider) { [weak self] in
-                    guard let self else { return [:] }
-                    return Dictionary(uniqueKeysWithValues: self.contacts.map {
-                        ($0.userID, $0.handle)
-                    })
-                }
+                keyPackageProvider: keyPackageProvider,
+                onDirectoryResolved: { [weak self] userID, handle in
+                    Task { @MainActor [weak self] in
+                        self?.refreshCachedRecipientHandle(userID: userID, handle: handle)
+                    }
+                })
             let directMessaging = IOSDirectMessaging(
                 client: client,
                 factory: factory,
@@ -1452,6 +1484,27 @@ extension IOSMobileAppModel {
 
     func memberHandle(for userID: String) -> String? {
         contacts.first(where: { $0.userID == userID })?.handle ?? memberHandles[userID]
+    }
+
+    func refreshCachedRecipientHandle(userID: String, handle: String) {
+        var changed = false
+        if let index = contacts.firstIndex(where: { $0.userID == userID }),
+           contacts[index].handle != handle {
+            contacts[index].handle = handle
+            contacts.sort { $0.handle < $1.handle }
+            changed = true
+        }
+        for index in conversations.indices where !conversations[index].isGroup
+            && conversations[index].recipientUserID == userID {
+            if conversations[index].handle != handle {
+                conversations[index].handle = handle
+                changed = true
+            }
+        }
+        if memberHandles[userID] != nil, memberHandles[userID] != handle {
+            memberHandles[userID] = handle
+        }
+        if changed { persistLocalState() }
     }
 
     func senderLabel(for message: IOSMobileMessage) -> String? {

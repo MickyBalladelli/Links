@@ -139,31 +139,29 @@ public protocol IOSMLSKeyPackageProvider: AnyObject {
                     mlsNodeID: String, mlsCredential: Data) async throws -> Data
 }
 
-/// Concrete HTTPS directory adapter used by macOS and iOS hosts. The account
-/// service lookup is public; pre-key claims are deliberately left to
-/// `IOSDirectMessaging`, which calls the authenticated claim endpoint only
-/// after this snapshot has been validated.
+/// Concrete HTTPS directory adapter used by macOS and iOS hosts. Recipients
+/// resolve by stable user ID; pre-key claims remain in `IOSDirectMessaging`.
 public final class IOSUsernameDirectoryChatAdapter: IOSDirectChatDirectory {
     private let directoryClient: IOSUsernameAuthClient
-    private let handlesByUserID: [String: String]
     private let keyPackageProvider: any IOSMLSKeyPackageProvider
 
     public init(directoryClient: IOSUsernameAuthClient,
                 handlesByUserID: [String: String],
                 keyPackageProvider: any IOSMLSKeyPackageProvider) {
         self.directoryClient = directoryClient
-        self.handlesByUserID = handlesByUserID
+        // Retain the argument for source compatibility. Routing uses stable IDs.
+        _ = handlesByUserID
         self.keyPackageProvider = keyPackageProvider
     }
 
     public func queryRecipientDevices(accessToken: String, recipientUserID: String)
         async throws -> [IOSRecipientDeviceDescriptor] {
         guard !accessToken.isEmpty, accessToken.utf8.count <= 4096,
-              IOSClient.isCanonicalUUID(recipientUserID),
-              let handle = handlesByUserID[recipientUserID] else {
+              IOSClient.isCanonicalUUID(recipientUserID) else {
             throw IOSPreKeyError.invalidRecipient
         }
-        let directory = try await directoryClient.lookup(handle: handle)
+        let directory = try await directoryClient.lookup(
+            userID: recipientUserID, accessToken: accessToken)
         guard directory.userID == recipientUserID,
               !directory.devices.isEmpty,
               directory.devices.count <= 100 else {

@@ -718,7 +718,9 @@ private struct LinksSidebar: View {
                         ForEach(model.contacts) { contact in
                             HStack(spacing: 8) {
                                 Button {
-                                    model.startConversation(with: contact)
+                                    Task {
+                                        await model.openSavedContact(userID: contact.userID)
+                                    }
                                 } label: {
                                     ContactRow(
                                         contact: contact,

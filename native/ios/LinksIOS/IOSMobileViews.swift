@@ -886,7 +886,7 @@ private struct IOSPeopleView: View {
                         ForEach(model.contacts) { contact in
                             Button {
                                 Task {
-                                    if let conversation = await model.createConversation(handle: contact.handle) {
+                                    if let conversation = await model.createConversation(contactUserID: contact.userID) {
                                         path.append(conversation.id)
                                     }
                                 }
@@ -1000,7 +1000,7 @@ private struct IOSPeopleView: View {
                     List(model.contacts) { contact in
                         Button {
                             Task {
-                                if let conversation = await model.createConversation(handle: contact.handle) {
+                                if let conversation = await model.createConversation(contactUserID: contact.userID) {
                                     selectedConversationID = conversation.id
                                 }
                             }

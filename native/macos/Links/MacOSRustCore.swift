@@ -800,27 +800,22 @@ enum MacOSDirectoryError: Error {
 final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
     private let directoryClient: IOSUsernameAuthClient
     private let keyPackageProvider: IOSHTTPMLSKeyPackageProvider
-    private let handles: () -> [String: String]
+    private let onDirectoryResolved: (String, String) -> Void
 
     init(directoryClient: IOSUsernameAuthClient,
          keyPackageProvider: IOSHTTPMLSKeyPackageProvider,
-         handles: @escaping () -> [String: String]) {
+         onDirectoryResolved: @escaping (String, String) -> Void = { _, _ in }) {
         self.directoryClient = directoryClient
         self.keyPackageProvider = keyPackageProvider
-        self.handles = handles
+        self.onDirectoryResolved = onDirectoryResolved
     }
 
     func queryRecipientDevices(accessToken: String, recipientUserID: String)
         async throws -> [IOSRecipientDeviceDescriptor] {
         let directory: IOSUsernameDirectory
         do {
-            // Group members are often not saved contacts; look them up by ID.
-            if let handle = handles()[recipientUserID] {
-                directory = try await directoryClient.lookup(handle: handle)
-            } else {
-                directory = try await directoryClient.lookup(
-                    userID: recipientUserID, accessToken: accessToken)
-            }
+            directory = try await directoryClient.lookup(
+                userID: recipientUserID, accessToken: accessToken)
         } catch let error as IOSUsernameAuthError {
             if case .serverRejected(let statusCode) = error, statusCode == 404 {
                 throw MacOSDirectoryError.accountNotFound
@@ -830,6 +825,7 @@ final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
         guard directory.userID == recipientUserID else {
             throw MacOSDirectoryError.accountNotFound
         }
+        onDirectoryResolved(directory.userID, directory.handle)
         guard !directory.devices.isEmpty,
               directory.devices.count <= 100 else {
             throw IOSPreKeyError.invalidRecipient

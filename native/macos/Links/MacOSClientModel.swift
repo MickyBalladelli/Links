@@ -77,7 +77,7 @@ struct LinksMacOSConversation: Identifiable, Equatable, Codable {
 }
 
 struct LinksMacOSContact: Identifiable, Equatable, Codable {
-    let handle: String
+    var handle: String
     let userID: String
     let deviceCount: Int
 
@@ -1616,6 +1616,29 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         persistLocalState()
     }
 
+    func refreshCachedRecipientHandle(userID: String, handle: String) {
+        var changed = false
+        if let index = contacts.firstIndex(where: { $0.userID == userID }),
+           contacts[index].handle != handle {
+            contacts[index].handle = handle
+            contacts.sort { $0.handle < $1.handle }
+            changed = true
+        }
+        for index in conversations.indices where !conversations[index].isGroup
+            && (conversations[index].peerUserID == userID
+                || conversations[index].recipientUserID == userID) {
+            let updatedTitle = "@\(handle)"
+            if conversations[index].title != updatedTitle {
+                conversations[index].title = updatedTitle
+                changed = true
+            }
+        }
+        if memberHandles[userID] != nil, memberHandles[userID] != handle {
+            memberHandles[userID] = handle
+        }
+        if changed { persistLocalState() }
+    }
+
     func startConversation(with contact: LinksMacOSContact) {
         if let index = conversations.firstIndex(where: {
             $0.peerUserID == contact.userID
@@ -1629,6 +1652,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     peerUserID: contact.userID,
                     messages: conversations[index].messages,
                     unreadCount: conversations[index].unreadCount)
+            } else {
+                conversations[index].title = "@\(contact.handle)"
             }
             selectedConversationID = conversations[index].id
             markConversationRead(conversations[index].id)
@@ -1636,6 +1661,30 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         _ = createConversation(title: "@\(contact.handle)", recipientUserID: contact.userID)
+    }
+
+    func openSavedContact(userID: String) async {
+        guard let contact = contacts.first(where: { $0.userID == userID }) else { return }
+        guard let authClient, let client, client.isAuthenticated,
+              let token = try? client.accessToken() else {
+            startConversation(with: contact)
+            return
+        }
+        do {
+            let directory = try await authClient.lookup(userID: userID, accessToken: token)
+            guard directory.userID == userID else {
+                startConversation(with: contact)
+                return
+            }
+            refreshCachedRecipientHandle(userID: userID, handle: directory.handle)
+            let refreshedContact = LinksMacOSContact(
+                handle: directory.handle,
+                userID: directory.userID,
+                deviceCount: directory.devices.count)
+            startConversation(with: refreshedContact)
+        } catch {
+            startConversation(with: contact)
+        }
     }
 
     /// Claim and verify recipient pre-keys, then stage the first two-user MLS
@@ -2138,12 +2187,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         let keyPackageProvider = IOSHTTPMLSKeyPackageProvider(api: preKeyAPI)
         let directory = MacOSDirectoryChatAdapter(
             directoryClient: authClient,
-            keyPackageProvider: keyPackageProvider) { [weak self] in
-                guard let self else { return [:] }
-                return Dictionary(uniqueKeysWithValues: self.contacts.map {
-                    ($0.userID, $0.handle)
-                })
-            }
+            keyPackageProvider: keyPackageProvider,
+            onDirectoryResolved: { [weak self] userID, handle in
+                Task { @MainActor [weak self] in
+                    self?.refreshCachedRecipientHandle(userID: userID, handle: handle)
+                }
+            })
         do {
             try installMessaging(factory: factory, endpoint: endpoint, directory: directory)
         } catch {
