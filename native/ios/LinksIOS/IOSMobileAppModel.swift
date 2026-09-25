@@ -706,7 +706,7 @@ final class IOSMobileAppModel: ObservableObject {
         } catch IOSUsernameAuthError.serverRejected(let statusCode) where statusCode == 401 {
             error = "Your sign-in expired. Sign in again, then change your username."
         } catch {
-            error = "Could not change your username. Check the connection and try again."
+            self.error = "Could not change your username. Check the connection and try again."
         }
         return false
     }
@@ -919,14 +919,14 @@ final class IOSMobileAppModel: ObservableObject {
             let updated = IOSMobileConversation(
                 id: existing.id,
                 handle: directory.handle,
-                displayName: directory.displayName,
                 recipientUserID: directory.userID,
                 deviceCount: directory.devices.count,
                 createdAt: existing.createdAt,
                 messages: existing.messages,
                 isSecureReady: existing.isSecureReady,
                 unreadCount: existing.unreadCount,
-                deliveryConversationID: existing.deliveryConversationID)
+                deliveryConversationID: existing.deliveryConversationID,
+                displayName: directory.displayName)
             conversations.insert(updated, at: 0)
             conversationCreationStatus = "Opened @\(directory.handle)."
             persistLocalState()
@@ -936,10 +936,10 @@ final class IOSMobileAppModel: ObservableObject {
         let conversation = IOSMobileConversation(
             id: UUID().uuidString.lowercased(),
             handle: directory.handle,
-            displayName: directory.displayName,
             recipientUserID: directory.userID,
             deviceCount: directory.devices.count,
-            createdAt: Date())
+            createdAt: Date(),
+            displayName: directory.displayName)
         conversations.insert(conversation, at: 0)
         conversationCreationStatus = "Conversation with @\(directory.handle) is ready."
         persistLocalState()
