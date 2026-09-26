@@ -2012,6 +2012,15 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         actionError = nil
     }
 
+    func pasteComposerImageFromClipboard() {
+        guard canComposeSelectedConversation, !isSendingComposerImage else { return }
+        guard let image = NSImage(pasteboard: .general) else {
+            actionError = "Clipboard has no image."
+            return
+        }
+        setComposerImage(image)
+    }
+
     func clearComposerImage() {
         composerImageData = nil
         composerImagePreview = nil

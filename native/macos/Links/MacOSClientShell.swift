@@ -1570,11 +1570,14 @@ private struct ComposerView: View {
                             model.sendMessage()
                         }
                     }
-                    .onPasteCommand(of: [.image]) { providers in
-                        guard model.canComposeSelectedConversation,
-                              !model.isSendingComposerImage,
-                              let provider = providers.first,
-                              provider.canLoadObject(ofClass: NSImage.self) else { return }
+                    .onPasteCommand(of: [.image, .png, .tiff, .jpeg]) { providers in
+                        if let image = NSImage(pasteboard: .general) {
+                            model.setComposerImage(image)
+                            return
+                        }
+                        guard let provider = providers.first(where: {
+                            $0.canLoadObject(ofClass: NSImage.self)
+                        }) else { return }
                         provider.loadObject(ofClass: NSImage.self) { object, _ in
                             guard let image = object as? NSImage else { return }
                             Task { @MainActor in model.setComposerImage(image) }
@@ -1586,6 +1589,15 @@ private struct ComposerView: View {
                     .padding(.vertical, 9)
                     .background(Color.primary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                Button {
+                    model.pasteComposerImageFromClipboard()
+                } label: {
+                    Image(systemName: "photo.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .help("Paste image from clipboard")
+                .disabled(!model.canComposeSelectedConversation
+                          || model.isSendingComposerImage)
                 Button {
                     if model.composerImageData != nil {
                         model.sendComposerImage()
