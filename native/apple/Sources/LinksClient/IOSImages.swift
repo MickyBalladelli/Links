@@ -244,7 +244,7 @@ public final class IOSImageSession {
         try renderer.render(image, blurHash: metadata.blurHash)
     }
 
-    private static func rgbPixels(for data: Data) throws -> (data: Data, width: Int, height: Int) {
+    public static func rgbPixels(for data: Data) throws -> (data: Data, width: Int, height: Int) {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw IOSImageError.unableToReadImage

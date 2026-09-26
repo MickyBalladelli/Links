@@ -37,6 +37,8 @@ struct IOSMobileMessage: Identifiable, Equatable, Codable {
     let senderDeviceID: String?
     /// Shown above incoming group messages.
     var senderUserID: String? = nil
+    /// Encrypted image metadata. The pixels are downloaded after the message arrives.
+    var imageMetadataProtobuf: Data? = nil
 }
 
 /// One row of the open group's member list.
@@ -189,6 +191,8 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var preKeyStatus = "Waiting for sign in"
     @Published private(set) var profilePictureJPEG: Data?
     @Published private(set) var contactPictures: [String: Data] = [:]
+    @Published private(set) var messageImages: [String: UIImage] = [:]
+    @Published private(set) var isSendingImage = false
     @Published private(set) var preparingConversationIDs = Set<String>()
     @Published private(set) var groupMembers: [String: [IOSMobileGroupMember]] = [:]
     @Published private(set) var groupStatus = ""
@@ -1030,6 +1034,108 @@ final class IOSMobileAppModel: ObservableObject {
         }
     }
 
+    func sendImage(_ image: UIImage, caption: String, conversationID: String) {
+        let caption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isSendingImage,
+              let data = image.jpegData(compressionQuality: 0.9),
+              !data.isEmpty,
+              caption.utf8.count <= IOSDirectMessaging.maximumTextBytes,
+              let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              conversations[index].isSecureReady || (conversations[index].isGroup && conversations[index].groupActive),
+              let messaging, messagingState == .ready,
+              let client, let usernameAuthClient else {
+            error = "Open a ready conversation before sending an image."
+            return
+        }
+        let conversation = conversations[index]
+        isSendingImage = true
+        error = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let normalized = try IOSImageResizer.resize(data)
+                var pixels = try IOSImageSession.rgbPixels(for: normalized.data)
+                defer { pixels.data.resetBytes(in: 0..<pixels.data.count) }
+                let blurHash = try messaging.encodeImageBlurHash(
+                    rgbPixels: pixels.data, width: pixels.width, height: pixels.height)
+                let encrypted = try messaging.encryptImage(
+                    normalized.data,
+                    attachmentID: UUID().uuidString.lowercased(),
+                    mimeType: normalized.mimeType,
+                    width: normalized.width,
+                    height: normalized.height,
+                    blurHash: blurHash)
+                let token = try client.accessToken()
+                let receipt = try await usernameAuthClient.uploadEncryptedAttachment(
+                    attachmentID: encrypted.metadata.attachmentID,
+                    ciphertext: encrypted.ciphertext,
+                    accessToken: token)
+                guard receipt.matches(encrypted.metadata) else {
+                    throw IOSImageError.invalidUploadReceipt
+                }
+                if conversation.isGroup {
+                    guard let (liveMessaging, directory, preKeyAPI, _, _) = self.groupPrerequisites else {
+                        throw IOSMessagingError.notConnected
+                    }
+                    try await liveMessaging.sendGroupImage(
+                        conversationID: conversation.mlsConversationID,
+                        metadata: encrypted.metadata,
+                        receipt: receipt,
+                        directory: directory,
+                        preKeyAPI: preKeyAPI)
+                } else {
+                    try messaging.sendImage(
+                        conversationID: conversation.mlsConversationID,
+                        recipientUserID: conversation.recipientUserID,
+                        metadata: encrypted.metadata,
+                        receipt: receipt)
+                }
+                guard let currentIndex = self.conversations.firstIndex(where: { $0.id == conversationID }) else {
+                    throw IOSMessagingError.invalidMessage
+                }
+                let messageID = UUID().uuidString.lowercased()
+                self.conversations[currentIndex].messages.append(IOSMobileMessage(
+                    id: messageID,
+                    text: "Image",
+                    isOutgoing: true,
+                    sentAt: Date(),
+                    senderDeviceID: nil,
+                    imageMetadataProtobuf: encrypted.metadata.protobuf()))
+                self.messageImages[messageID] = image
+                if !caption.isEmpty {
+                    if conversation.isGroup {
+                        guard let (liveMessaging, directory, preKeyAPI, _, _) = self.groupPrerequisites else {
+                            throw IOSMessagingError.notConnected
+                        }
+                        try await liveMessaging.sendGroupText(
+                            conversationID: conversation.mlsConversationID,
+                            text: caption,
+                            directory: directory,
+                            preKeyAPI: preKeyAPI)
+                    } else {
+                        try messaging.sendText(
+                            conversationID: conversation.mlsConversationID,
+                            recipientUserID: conversation.recipientUserID,
+                            text: caption)
+                    }
+                    if let textIndex = self.conversations.firstIndex(where: { $0.id == conversationID }) {
+                        self.conversations[textIndex].messages.append(IOSMobileMessage(
+                            id: UUID().uuidString.lowercased(),
+                            text: caption,
+                            isOutgoing: true,
+                            sentAt: Date(),
+                            senderDeviceID: nil))
+                    }
+                }
+                self.error = nil
+                self.persistLocalState()
+            } catch {
+                self.error = "Image not sent. Check the connection and try again."
+            }
+            self.isSendingImage = false
+        }
+    }
+
     func conversation(withID conversationID: String) -> IOSMobileConversation? {
         conversations.first { $0.id == conversationID }
     }
@@ -1430,6 +1536,7 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
             case .ready:
                 self.messagingStatus = messaging.pendingOutboxCount > 0
                     ? "Delivering queued messages" : "End-to-end encrypted"
+                self.loadSavedImages(using: messaging)
             case .reconnecting:
                 self.messagingStatus = "Reconnecting"
             case .staleCursor:

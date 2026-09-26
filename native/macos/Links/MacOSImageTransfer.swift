@@ -97,7 +97,9 @@ enum MacOSImageTransfer {
         }
 
         // The right-click menu is still closing. A sheet presented during that
-        // tracking loop is discarded, so wait until the menu is gone.
+        // tracking loop is discarded, so wait until the menu is gone, then
+        // open the dialog beside the menu.
+        let anchor = NSEvent.mouseLocation
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
             let panel = NSSavePanel()
@@ -105,7 +107,28 @@ enum MacOSImageTransfer {
             panel.nameFieldStringValue = "Image.png"
             panel.canCreateDirectories = true
             panel.isExtensionHidden = false
+            var placed = false
+            let place = {
+                guard panel.frame.width > 1, panel.frame.height > 1 else { return }
+                guard !placed else { return }
+                placed = true
+                placeSavePanel(panel, near: anchor)
+            }
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: panel,
+                queue: .main
+            ) { _ in
+                if let token {
+                    NotificationCenter.default.removeObserver(token)
+                }
+                place()
+            }
             panel.begin { response in
+                if let token {
+                    NotificationCenter.default.removeObserver(token)
+                }
                 guard response == .OK, let url = panel.url else { return }
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer {
@@ -119,6 +142,37 @@ enum MacOSImageTransfer {
                     }
                 }
             }
+            DispatchQueue.main.async {
+                place()
+                // AppKit centers the panel when it becomes key. Move it again
+                // after that layout so it stays beside the menu.
+                DispatchQueue.main.async {
+                    placed = false
+                    place()
+                }
+            }
         }
     }
+}
+
+private func placeSavePanel(_ panel: NSSavePanel, near anchor: NSPoint) {
+    let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
+    let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    var frame = panel.frame
+    guard frame.width > 1, frame.height > 1 else { return }
+    frame.origin.x = anchor.x + 12
+    frame.origin.y = anchor.y - frame.height + 12
+    if frame.maxX > visible.maxX {
+        frame.origin.x = max(visible.minX + 8, anchor.x - frame.width - 12)
+    }
+    if frame.minX < visible.minX {
+        frame.origin.x = visible.minX + 8
+    }
+    if frame.minY < visible.minY {
+        frame.origin.y = visible.minY + 8
+    }
+    if frame.maxY > visible.maxY {
+        frame.origin.y = visible.maxY - frame.height - 8
+    }
+    panel.setFrame(frame, display: true)
 }
