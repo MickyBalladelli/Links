@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import ImageIO
+import UniformTypeIdentifiers
 
 enum MacOSImageTransferError: Error {
     case unreadableImage
@@ -58,5 +59,32 @@ enum MacOSImageTransfer {
 
     static func nsImage(from imageData: Data) -> NSImage? {
         NSImage(data: imageData)
+    }
+
+    static func copyToClipboard(_ image: NSImage) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+    }
+
+    static func save(_ image: NSImage) {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "Image.png"
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try pngData.write(to: url, options: .atomic)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
     }
 }

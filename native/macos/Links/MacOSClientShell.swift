@@ -1508,6 +1508,18 @@ private struct MessageBubble: View {
                             .aspectRatio(contentMode: .fit)
                             .frame(width: fitted.width, height: fitted.height)
                             .clipShape(RoundedRectangle(cornerRadius: 13))
+                            .contextMenu {
+                                Button {
+                                    MacOSImageTransfer.copyToClipboard(image)
+                                } label: {
+                                    Label("Copy Image", systemImage: "doc.on.doc")
+                                }
+                                Button {
+                                    MacOSImageTransfer.save(image)
+                                } label: {
+                                    Label("Save Image As…", systemImage: "square.and.arrow.down")
+                                }
+                            }
                     } else {
                         Label("Loading image…", systemImage: "photo")
                             .font(.body)
