@@ -658,7 +658,16 @@ private struct LinksSidebar: View {
                     .interpolation(.high)
                     .antialiased(true)
                     .scaledToFit()
-                    .frame(width: 32, height: 32)
+                    .scaleEffect(1.22)
+                    .frame(width: 34, height: 34)
+                    .background(Color.accentColor.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Links")
                         .font(.headline)
@@ -1605,6 +1614,7 @@ private struct MessageBubble: View {
 private struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     var isEnabled: Bool
+    var onSend: () -> Void
     var onPasteImage: (NSImage) -> Void
     var onPasteFile: (URL) -> Void
 
@@ -1692,6 +1702,14 @@ private struct ComposerTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
+            let modifiers = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+            if modifiers.contains(.shift) { return false }
+            parent.onSend()
+            return true
         }
     }
 }
@@ -1845,6 +1863,7 @@ private struct ComposerView: View {
                         text: $model.composerText,
                         isEnabled: model.canComposeSelectedConversation
                             && !model.isSendingComposerImage,
+                        onSend: model.sendComposerContent,
                         onPasteImage: model.setComposerImage,
                         onPasteFile: model.setComposerFile)
                         .frame(maxWidth: .infinity)
@@ -1860,13 +1879,7 @@ private struct ComposerView: View {
                 .background(Color.primary.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 Button {
-                    if model.composerImageData != nil {
-                        model.sendComposerImage()
-                    } else if model.composerFileData != nil {
-                        model.sendComposerFile()
-                    } else {
-                        model.sendMessage()
-                    }
+                    model.sendComposerContent()
                 } label: {
                     if model.isSendingComposerImage {
                         ProgressView()
@@ -1884,9 +1897,7 @@ private struct ComposerView: View {
                           || model.isSendingComposerImage
                           || (model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                               && model.composerImageData == nil
-                              && model.composerFileData == nil)
-                          || (model.composerImageData != nil && !model.canSendComposerImage)
-                          || (model.composerFileData != nil && !model.canSendComposerFile))
+                              && model.composerFileData == nil))
             }
         }
         .padding(.horizontal, 18)

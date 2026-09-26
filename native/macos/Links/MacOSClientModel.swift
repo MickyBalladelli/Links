@@ -2074,9 +2074,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         publishProfileStatus()
         if sendAfterSetupConversationID == conversationID {
             sendAfterSetupConversationID = nil
-            if !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                sendMessage()
-            }
+            sendComposerContent()
         }
     }
 
@@ -2162,6 +2160,37 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         composerFileMIMEType = nil
     }
 
+    func sendComposerContent() {
+        guard !isSendingComposerImage,
+              composerImageData != nil || composerFileData != nil
+                || !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        if composerImageData != nil {
+            sendComposerImage()
+        } else if composerFileData != nil {
+            sendComposerFile()
+        } else {
+            sendMessage()
+        }
+    }
+
+    private func prepareConversationForPendingSend(_ conversation: LinksMacOSConversation) -> Bool {
+        if conversation.isGroup {
+            return conversation.groupActive
+        }
+        if initializedConversationIDs.contains(conversation.id) {
+            return true
+        }
+        sendAfterSetupConversationID = conversation.id
+        conversationSetupStatus = "Starting secure chat. Your message will send when it is ready."
+        if !initializingConversationIDs.contains(conversation.id) {
+            forgetUnavailableRecipientForSelectedConversation()
+            initializeSelectedConversation(reset: false, userInitiated: false)
+        }
+        return false
+    }
+
     func sendComposerFile() {
         guard !isSendingComposerImage,
               let source = composerFileData,
@@ -2173,9 +2202,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         let conversation = conversations[index]
-        let conversationReady = conversation.isGroup
-            ? conversation.groupActive : initializedConversationIDs.contains(conversation.id)
-        guard conversationReady, let messaging, messaging.state == .ready,
+        guard prepareConversationForPendingSend(conversation) else { return }
+        guard let messaging, messaging.state == .ready,
               messaging.isConnected, let client, let authClient else {
             actionError = "Open a ready conversation before sending a file."
             return
@@ -2241,11 +2269,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         let conversation = conversations[index]
-        let conversationReady = conversation.isGroup
-            ? conversation.groupActive
-            : initializedConversationIDs.contains(conversation.id)
-        guard conversationReady,
-              let messaging,
+        guard prepareConversationForPendingSend(conversation) else { return }
+        guard let messaging,
               messaging.state == .ready,
               messaging.isConnected,
               let client,
