@@ -293,6 +293,20 @@ button, input, textarea { font: inherit; }
 .links-dialog .prism-popup-close:hover { color: var(--links-text); background: var(--links-accent-soft); border-color: var(--links-border-strong); transform: none; }
 .links-dialog .prism-popup-body { color: var(--links-text); background: var(--links-surface); }
 .links-dialog .prism-popup-footer { background: var(--links-surface-soft); border-top-color: var(--links-border); }
+.links-dialog .prism-alert {
+  color: var(--links-text);
+  background: var(--links-surface-soft);
+  border-color: var(--links-border-strong);
+}
+.links-dialog .prism-alert-description { color: var(--links-muted); }
+.links-dialog .prism-alert-error {
+  background: color-mix(in srgb, #ff6b6b 11%, var(--links-surface));
+  border-color: color-mix(in srgb, #ff6b6b 54%, var(--links-border));
+}
+.links-dialog .prism-alert-success {
+  background: color-mix(in srgb, var(--links-green) 11%, var(--links-surface));
+  border-color: color-mix(in srgb, var(--links-green) 54%, var(--links-border));
+}
 .links-dialog .text-field { color: var(--links-text); background: var(--links-surface-soft); border-color: var(--links-border-strong); }
 .links-dialog .text-field:hover:not(:disabled) { background: var(--links-surface); border-color: var(--links-muted); }
 .links-dialog .text-field:focus-visible { border-color: var(--links-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--links-accent) 16%, transparent); }

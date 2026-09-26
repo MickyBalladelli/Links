@@ -15,6 +15,7 @@ import {
   SendIcon,
   SettingsIcon,
   TextField,
+  UploadIcon,
   UserPlusIcon,
   prismTheme
 } from '@mickyballadelli/prism'
@@ -1294,14 +1295,6 @@ function FileIcon() {
   )
 }
 
-function PaperclipIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5" />
-    </svg>
-  )
-}
-
 function Sidebar() {
   return (
     <aside class={computed(() => `sidebar ${mobileSidebarOpen.value ? 'is-open' : ''}`)}>
@@ -1460,7 +1453,7 @@ function ConversationDetail() {
             </div>
           ) : null)}
           <label class="attach-button" aria-label="Attach image or file" title="Attach image or file">
-            <PaperclipIcon />
+            <UploadIcon size="18" />
             <input type="file" onChange={event => { handleComposerFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
           </label>
           <textarea

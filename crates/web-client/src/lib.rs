@@ -17,6 +17,9 @@ use links_client_core::{
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
+mod messaging;
+pub use messaging::WebMessagingCore;
+
 pub use links_client_core::decentralized::{
     DecentralizedClient, DecentralizedClientPlan, DecentralizedChunkStorage,
     DecentralizedMediaRelay, DecentralizedMediaRoute, DecentralizedTransportAdapter,
