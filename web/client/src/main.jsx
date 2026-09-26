@@ -147,6 +147,33 @@ const connectionState = signal('preview')
 const wasmAvailability = signal(null)
 const selectedConversationID = signal('karine')
 const composerText = signal('')
+const messageScrollPositions = new Map()
+let messageScrollRestoreFrame = 0
+
+function rememberMessageScroll(event) {
+  const element = event.currentTarget
+  if (!(element instanceof HTMLElement)) return
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+  messageScrollPositions.set(selectedConversationID.value, {
+    top: element.scrollTop,
+    atBottom: maxScrollTop - element.scrollTop <= 24
+  })
+}
+
+function scheduleMessageScrollRestore() {
+  if (messageScrollRestoreFrame) cancelAnimationFrame(messageScrollRestoreFrame)
+  const conversationID = selectedConversationID.value
+  messageScrollRestoreFrame = requestAnimationFrame(() => {
+    messageScrollRestoreFrame = 0
+    const element = document.querySelector('.message-list')
+    const position = messageScrollPositions.get(conversationID)
+    if (!element || !position) return
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    element.scrollTop = position.atBottom
+      ? maxScrollTop
+      : Math.min(position.top, maxScrollTop)
+  })
+}
 const contactQuery = signal('')
 const searchQuery = signal('')
 const notice = signal('')
@@ -1785,6 +1812,7 @@ function ConversationDetail() {
   return computed(() => {
     const conversation = selectedConversation.value
     const pictures = contactPictures.value
+    scheduleMessageScrollRestore()
     if (!conversation) {
       return (
         <main class="empty-detail">
@@ -1832,7 +1860,7 @@ function ConversationDetail() {
                   : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
             </>)}
 
-        <section class="message-list" aria-live="polite"><Messages /></section>
+        <section class="message-list" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
 
         <form
           class={computed(() => `composer ${composerDragActive.value ? 'is-dragging' : ''}`)}
