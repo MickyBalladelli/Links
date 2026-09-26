@@ -198,7 +198,7 @@ button, input, textarea { font: inherit; }
   height: 100vh;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  background: color-mix(in srgb, var(--links-surface-soft) 58%, transparent);
+  background: color-mix(in srgb, var(--links-surface-soft) 72%, transparent);
   backdrop-filter: blur(16px);
 }
 
@@ -255,7 +255,7 @@ button, input, textarea { font: inherit; }
 .composer-attachment > button:hover { color: var(--links-text); background: var(--links-accent-soft); }
 .drop-hint { position: absolute; inset: 0; display: none; place-items: center; z-index: 4; color: var(--links-accent); background: color-mix(in srgb, var(--links-surface) 92%, transparent); font-size: .82rem; font-weight: 700; pointer-events: none; }
 .composer.is-dragging .drop-hint { display: grid; }
-.empty-detail { min-width: 0; height: 100vh; display: grid; place-items: center; background: color-mix(in srgb, var(--links-surface-soft) 58%, transparent); backdrop-filter: blur(16px); }
+.empty-detail { min-width: 0; height: 100vh; display: grid; place-items: center; background: color-mix(in srgb, var(--links-surface-soft) 72%, transparent); backdrop-filter: blur(16px); }
 .empty-detail .prism-empty-state { color: var(--links-muted); }
 .empty-detail .prism-empty-state h3 { color: var(--links-text); }
 
