@@ -1836,15 +1836,8 @@ function ConversationDetail() {
         </header>
 
         {computed(() => connectionState.value === 'ready'
-          ? <div class="delivery-banner is-connected">
-              <LiveStatusIcon size="1rem" />
-              <div>
-                <strong>Encrypted sync connected</strong>
-                <span>Messages use the shared Rust/WASM core.</span>
-              </div>
-              <Badge value="Connected" tone="success" />
-            </div>
-          : <>
+          ? <div class="conversation-notices" aria-hidden="true"></div>
+          : <div class="conversation-notices">
               <div class="delivery-banner">
                 <LiveStatusIcon size="1rem" />
                 <div>
@@ -1858,7 +1851,7 @@ function ConversationDetail() {
                 : accessToken.value
                   ? 'Encrypted sync is reconnecting to the server.'
                   : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
-            </>)}
+            </div>)}
 
         <section class="message-list" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
 
