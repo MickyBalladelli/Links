@@ -364,7 +364,10 @@ button, input, textarea { font: inherit; }
 .group-contact-option small, .group-owner-row small { margin-top: 2px; color: var(--links-muted); font-size: .66rem; }
 .group-owner-row { grid-template-columns: auto minmax(0, 1fr); cursor: default; }
 .privacy-copy { margin-top: 5px; padding: 10px; display: flex; align-items: flex-start; gap: 8px; color: var(--links-muted); background: color-mix(in srgb, var(--links-text) 4%, transparent); border-radius: 9px; font-size: .7rem; line-height: 1.4; }
-.toast { position: fixed; right: 18px; bottom: 18px; z-index: 30; max-width: min(420px, calc(100vw - 36px)); padding: 10px 13px; color: var(--links-text); background: var(--links-surface); border: 1px solid var(--links-border-strong); border-radius: 10px; box-shadow: var(--links-shadow); font-size: .75rem; }
+.toast { position: fixed; right: 18px; bottom: 18px; z-index: 30; max-width: min(420px, calc(100vw - 36px)); padding: 8px 9px 8px 13px; display: flex; align-items: center; gap: 10px; color: var(--links-text); background: var(--links-surface); border: 1px solid var(--links-border-strong); border-radius: 10px; box-shadow: var(--links-shadow); font-size: .75rem; }
+.toast > span { min-width: 0; }
+.toast > button { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 7px; color: var(--links-muted); background: transparent; cursor: pointer; }
+.toast > button:hover { color: var(--links-text); background: var(--links-accent-soft); }
 .mobile-scrim { display: none; }
 
 @media (max-width: 760px) {

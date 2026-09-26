@@ -1911,7 +1911,12 @@ function App() {
       <LogoutPopup />
       <AuthenticationPopup />
       {computed(() => notice.value && !newConversationOpen.value && !addContactOpen.value && !authDialogOpen.value ? (
-        <div class="toast" role="status">{notice}</div>
+        <div class="toast" role="status">
+          <span>{notice}</span>
+          <button type="button" aria-label="Dismiss notice" title="Dismiss notice" onClick={() => { notice.value = '' }}>
+            <CloseIcon size="0.9rem" />
+          </button>
+        </div>
       ) : null)}
     </div>
   )
