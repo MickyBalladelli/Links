@@ -609,6 +609,13 @@ private struct LinksMessagingView: View {
     @State private var showingAddContact = false
     @State private var showingPairing = false
     @State private var showingNewGroup = false
+    private func prepareImageExport(_ image: NSImage) {
+        DispatchQueue.main.async {
+            MacOSImageTransfer.save(image) { error in
+                model.actionError = "Could not save image: \(error)"
+            }
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -618,7 +625,7 @@ private struct LinksMessagingView: View {
                          showingPairing: $showingPairing,
                          showingNewGroup: $showingNewGroup)
         } detail: {
-            LinksConversationDetail(model: model)
+            LinksConversationDetail(model: model, onSaveImage: prepareImageExport)
         }
         .sheet(isPresented: $showingNewConversation) {
             NewConversationView(model: model)
@@ -1212,6 +1219,7 @@ private func linksStatusColor(_ value: String) -> Color {
 
 private struct LinksConversationDetail: View {
     @ObservedObject var model: LinksMacOSAppModel
+    let onSaveImage: (NSImage) -> Void
     @State private var repairConfirmationPresented = false
     @State private var removeConnectionConfirmationPresented = false
     @State private var showingGroupMembers = false
@@ -1309,7 +1317,8 @@ private struct LinksConversationDetail: View {
                     MessageList(messages: conversation.messages,
                                 conversationID: conversation.id,
                                 messageImages: model.messageImages,
-                                senderLabel: { model.senderLabel(for: $0) })
+                                senderLabel: { model.senderLabel(for: $0) },
+                                onSaveImage: onSaveImage)
                         .frame(minHeight: 0, maxHeight: .infinity)
                     Divider()
                     ComposerView(model: model)
@@ -1431,6 +1440,7 @@ private struct MessageList: View {
     let conversationID: String
     let messageImages: [UUID: NSImage]
     var senderLabel: (LinksMacOSMessage) -> String? = { _ in nil }
+    var onSaveImage: (NSImage) -> Void = { _ in }
 
     private let messageListBottomID = "message-list-bottom"
 
@@ -1456,7 +1466,8 @@ private struct MessageList: View {
                             MessageBubble(
                                 message: message,
                                 senderLabel: senderLabel(message),
-                                image: messageImages[message.id])
+                                image: messageImages[message.id],
+                                onSaveImage: onSaveImage)
                                 .id(message.id)
                         }
                     }
@@ -1489,6 +1500,7 @@ private struct MessageBubble: View {
     let message: LinksMacOSMessage
     var senderLabel: String? = nil
     var image: NSImage? = nil
+    var onSaveImage: (NSImage) -> Void = { _ in }
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -1515,7 +1527,7 @@ private struct MessageBubble: View {
                                     Label("Copy Image", systemImage: "doc.on.doc")
                                 }
                                 Button {
-                                    MacOSImageTransfer.save(image)
+                                    onSaveImage(image)
                                 } label: {
                                     Label("Save Image As…", systemImage: "square.and.arrow.down")
                                 }

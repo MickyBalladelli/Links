@@ -62,28 +62,62 @@ enum MacOSImageTransfer {
     }
 
     static func copyToClipboard(_ image: NSImage) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([image])
-    }
-
-    static func save(_ image: NSImage) {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+        guard let pngData = pngData(from: image) else {
+            showError(title: "Could not copy image", message: "Links could not convert this image.")
             return
         }
 
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png]
-        panel.nameFieldStringValue = "Image.png"
-        panel.canCreateDirectories = true
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                try pngData.write(to: url, options: .atomic)
-            } catch {
-                NSAlert(error: error).runModal()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setData(pngData, forType: .png) else {
+            showError(title: "Could not copy image", message: "The clipboard rejected the image.")
+            return
+        }
+    }
+
+    private static func pngData(from image: NSImage) -> Data? {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let data = bitmap.representation(using: .png, properties: [:]) else { return nil }
+        return data
+    }
+
+    private static func showError(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    static func save(_ image: NSImage, onFailure: @escaping (String) -> Void) {
+        guard let pngData = pngData(from: image) else {
+            onFailure("Links could not convert this image.")
+            return
+        }
+
+        // The right-click menu is still closing. A sheet presented during that
+        // tracking loop is discarded, so wait until the menu is gone.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.png]
+            panel.nameFieldStringValue = "Image.png"
+            panel.canCreateDirectories = true
+            panel.isExtensionHidden = false
+            panel.begin { response in
+                guard response == .OK, let url = panel.url else { return }
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessed { url.stopAccessingSecurityScopedResource() }
+                }
+                do {
+                    try pngData.write(to: url, options: .atomic)
+                } catch {
+                    DispatchQueue.main.async {
+                        onFailure(error.localizedDescription)
+                    }
+                }
             }
         }
     }
