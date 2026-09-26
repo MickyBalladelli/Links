@@ -599,6 +599,14 @@ async function startWebMessaging(identity) {
   }
 }
 
+async function renewBrowserSession() {
+  const handle = normalizeHandle(profileHandle.value)
+  if (!validHandle(handle)) throw new Error('Sign in again before sending attachments.')
+  const identity = await loadBrowserIdentity(handle)
+  if (!identity) throw new Error('The saved browser identity is unavailable.')
+  await establishUsernameSession(handle, 'login', identity)
+}
+
 async function publishProfilePictureBytes(dataUrl) {
   const token = accessToken.value.trim()
   if (!token || !dataUrl) return
@@ -1522,13 +1530,42 @@ async function sendPreviewMessage(event) {
   let sentOverNetwork = false
   let sendError = ''
   const networkConversationID = selected?.mlsConversationID || selected?.id
-  if (text && !attachment && webMessagingSession?.isConnected && selected?.recipientUserID && isCanonicalUUID(networkConversationID)) {
+  const canSendFile = attachment?.kind === 'file'
+  const canSendText = text && !attachment
+  if ((canSendFile || canSendText) && webMessagingSession?.isConnected &&
+      selected?.recipientUserID && isCanonicalUUID(networkConversationID)) {
+    const sendNetworkPayload = async () => {
+      const session = webMessagingSession
+      if (!session?.isConnected) throw new Error('connection unavailable.')
+      await session.refreshRecipient?.(selected.recipientUserID)
+      if (attachment && attachment.kind === 'file') {
+        await session.sendFile(networkConversationID, selected.recipientUserID, {
+          blob: attachment.blob,
+          name: attachment.name,
+          mimeType: attachment.mimeType
+        })
+        if (text) session.sendText(networkConversationID, selected.recipientUserID, text)
+      } else if (text && !attachment) {
+        session.sendText(networkConversationID, selected.recipientUserID, text)
+      } else {
+        throw new Error('This attachment type is not supported by encrypted browser sync yet.')
+      }
+    }
     try {
-      await webMessagingSession.refreshRecipient?.(selected.recipientUserID)
-      webMessagingSession.sendText(networkConversationID, selected.recipientUserID, text)
+      await sendNetworkPayload()
       sentOverNetwork = true
     } catch (error) {
-      sendError = `Encrypted send failed: ${error.message || 'connection unavailable.'}`
+      if (error?.status === 401) {
+        try {
+          await renewBrowserSession()
+          await sendNetworkPayload()
+          sentOverNetwork = true
+        } catch (renewError) {
+          sendError = `Encrypted send failed: ${renewError.message || 'sign-in expired.'}`
+        }
+      } else {
+        sendError = `Encrypted send failed: ${error.message || 'connection unavailable.'}`
+      }
     }
   }
   notice.value = sendError || (sentOverNetwork

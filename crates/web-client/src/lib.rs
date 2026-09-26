@@ -5,14 +5,17 @@
 //! delegates pairing format and MLS credential validation to client-core.
 
 use links_client_core::{
-    attachments::{decrypt_large_file_chunk, LargeFileEncryptor},
+    attachments::{
+        decrypt_large_file_chunk, encrypt_file as encrypt_file_bytes, LargeFileEncryptor,
+    },
     identity::IdentitySeed,
     pairing::{PairingPayload, PairingRegistrationResponse},
-    protocol, CoreError,
+    protocol,
     webrtc::{
         decode_server_signal, encode_client_signal, is_server_signal, WebRtcSignal,
         WebRtcSignalKind,
     },
+    CoreError,
 };
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -21,7 +24,7 @@ mod messaging;
 pub use messaging::WebMessagingCore;
 
 pub use links_client_core::decentralized::{
-    DecentralizedClient, DecentralizedClientPlan, DecentralizedChunkStorage,
+    DecentralizedChunkStorage, DecentralizedClient, DecentralizedClientPlan,
     DecentralizedMediaRelay, DecentralizedMediaRoute, DecentralizedTransportAdapter,
 };
 
@@ -43,6 +46,72 @@ pub struct WebLargeFileMetadata {
     width: u32,
     height: u32,
     duration_ms: String,
+}
+
+/// One-shot encrypted document attachment for files up to the regular file
+/// limit. The ciphertext is uploaded separately; only this private metadata
+/// is sent through the encrypted message.
+#[wasm_bindgen]
+pub struct WebFileEncryption {
+    metadata: links_client_core::protocol::v1::MediaMetadata,
+    ciphertext: Vec<u8>,
+}
+
+#[wasm_bindgen]
+impl WebFileEncryption {
+    pub fn attachment_id(&self) -> String {
+        self.metadata.attachment_id.clone()
+    }
+
+    pub fn mime_type(&self) -> String {
+        self.metadata.mime_type.clone()
+    }
+
+    pub fn file_name(&self) -> String {
+        self.metadata.file_name.clone().unwrap_or_default()
+    }
+
+    pub fn ciphertext_size_bytes(&self) -> String {
+        self.metadata.ciphertext_size_bytes.to_string()
+    }
+
+    pub fn content_key(&self) -> Vec<u8> {
+        self.metadata.content_key.clone()
+    }
+
+    pub fn nonce(&self) -> Vec<u8> {
+        self.metadata.nonce.clone()
+    }
+
+    pub fn ciphertext_sha256(&self) -> Vec<u8> {
+        self.metadata.ciphertext_sha256.clone()
+    }
+
+    pub fn ciphertext(&self) -> Vec<u8> {
+        self.ciphertext.clone()
+    }
+}
+
+/// Encrypt one regular document attachment with the same Rust core used by
+/// native clients. The original bytes never leave the browser unencrypted.
+#[wasm_bindgen]
+pub fn encrypt_file(
+    attachment_id: &str,
+    plaintext: &[u8],
+    mime_type: &str,
+    file_name: &str,
+) -> Result<WebFileEncryption, JsValue> {
+    let encrypted = encrypt_file_bytes(
+        attachment_id.to_owned(),
+        plaintext,
+        mime_type.to_owned(),
+        file_name.to_owned(),
+    )
+    .map_err(js_error)?;
+    Ok(WebFileEncryption {
+        metadata: encrypted.media,
+        ciphertext: encrypted.ciphertext,
+    })
 }
 
 #[wasm_bindgen]

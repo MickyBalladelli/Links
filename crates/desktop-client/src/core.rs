@@ -53,6 +53,15 @@ where
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError>;
 
+    fn send_file(
+        &mut self,
+        core: &mut ClientCore<C, M>,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        metadata: &v1::MediaMetadata,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError>;
+
     /// Send text to another device on the same account. Browser companions
     /// use this for cross-device self-chat; normal desktop sends still reject
     /// the local account as a recipient.
@@ -222,6 +231,28 @@ where
             conversation_id,
             recipient_user_id,
             text,
+            transport,
+        )
+    }
+
+    fn send_file(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        metadata: &v1::MediaMetadata,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        protocol::validate_id(conversation_id)?;
+        protocol::validate_id(recipient_user_id)?;
+        links_client_core::attachments::validate_file_metadata(metadata)?;
+        if recipient_user_id == self.core.user_id() {
+            return Err(CoreError::Authentication);
+        }
+        self.host.send_file(
+            &mut self.core,
+            conversation_id,
+            recipient_user_id,
+            metadata,
             transport,
         )
     }

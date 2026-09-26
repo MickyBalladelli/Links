@@ -236,6 +236,127 @@ export class WebClientIdentity {
 if (Symbol.dispose) WebClientIdentity.prototype[Symbol.dispose] = WebClientIdentity.prototype.free;
 
 /**
+ * One-shot encrypted document attachment for files up to the regular file
+ * limit. The ciphertext is uploaded separately; only this private metadata
+ * is sent through the encrypted message.
+ */
+export class WebFileEncryption {
+    static __wrap(ptr) {
+        const obj = Object.create(WebFileEncryption.prototype);
+        obj.__wbg_ptr = ptr;
+        WebFileEncryptionFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WebFileEncryptionFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_webfileencryption_free(ptr, 0);
+    }
+    /**
+     * @returns {string}
+     */
+    attachment_id() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.webfileencryption_attachment_id(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    ciphertext() {
+        const ret = wasm.webfileencryption_ciphertext(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    ciphertext_sha256() {
+        const ret = wasm.webfileencryption_ciphertext_sha256(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    ciphertext_size_bytes() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.webfileencryption_ciphertext_size_bytes(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    content_key() {
+        const ret = wasm.webfileencryption_content_key(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    file_name() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.webfileencryption_file_name(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    mime_type() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.webfileencryption_mime_type(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    nonce() {
+        const ret = wasm.webfileencryption_nonce(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+if (Symbol.dispose) WebFileEncryption.prototype[Symbol.dispose] = WebFileEncryption.prototype.free;
+
+/**
  * WASM handle for chunk decryption after private MLS metadata arrives.
  */
 export class WebLargeFileDecryptor {
@@ -683,6 +804,41 @@ export class WebMessagingCore {
     /**
      * @param {string} conversation_id
      * @param {string} recipient_user_id
+     * @param {string} attachment_id
+     * @param {string} mime_type
+     * @param {string} file_name
+     * @param {string} ciphertext_size_bytes
+     * @param {Uint8Array} content_key
+     * @param {Uint8Array} nonce
+     * @param {Uint8Array} ciphertext_sha256
+     */
+    send_file(conversation_id, recipient_user_id, attachment_id, mime_type, file_name, ciphertext_size_bytes, content_key, nonce, ciphertext_sha256) {
+        const ptr0 = passStringToWasm0(conversation_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(recipient_user_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(attachment_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(mime_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passStringToWasm0(file_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ptr5 = passStringToWasm0(ciphertext_size_bytes, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len5 = WASM_VECTOR_LEN;
+        const ptr6 = passArray8ToWasm0(content_key, wasm.__wbindgen_malloc);
+        const len6 = WASM_VECTOR_LEN;
+        const ptr7 = passArray8ToWasm0(nonce, wasm.__wbindgen_malloc);
+        const len7 = WASM_VECTOR_LEN;
+        const ptr8 = passArray8ToWasm0(ciphertext_sha256, wasm.__wbindgen_malloc);
+        const len8 = WASM_VECTOR_LEN;
+        const ret = wasm.webmessagingcore_send_file(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {string} conversation_id
+     * @param {string} recipient_user_id
      * @param {string} text
      */
     send_text(conversation_id, recipient_user_id, text) {
@@ -1085,6 +1241,31 @@ export class WebSelfSovereignIdentity {
     }
 }
 if (Symbol.dispose) WebSelfSovereignIdentity.prototype[Symbol.dispose] = WebSelfSovereignIdentity.prototype.free;
+
+/**
+ * Encrypt one regular document attachment with the same Rust core used by
+ * native clients. The original bytes never leave the browser unencrypted.
+ * @param {string} attachment_id
+ * @param {Uint8Array} plaintext
+ * @param {string} mime_type
+ * @param {string} file_name
+ * @returns {WebFileEncryption}
+ */
+export function encrypt_file(attachment_id, plaintext, mime_type, file_name) {
+    const ptr0 = passStringToWasm0(attachment_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(mime_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passStringToWasm0(file_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.encrypt_file(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return WebFileEncryption.__wrap(ret[0]);
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -1228,6 +1409,9 @@ function __wbg_get_imports() {
 const WebClientIdentityFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_webclientidentity_free(ptr, 1));
+const WebFileEncryptionFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_webfileencryption_free(ptr, 1));
 const WebLargeFileDecryptorFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_weblargefiledecryptor_free(ptr, 1));

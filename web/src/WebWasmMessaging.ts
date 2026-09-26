@@ -1,5 +1,7 @@
 import type {
   WebCoreTransport,
+  WebFileMetadata,
+  WebFileUploadReceipt,
   WebMessagingCore,
   WebReceivedTextMessage
 } from './WebTextMessaging'
@@ -12,6 +14,17 @@ export interface WebWasmMessagingHandle {
   handle_server_frame(frame: Uint8Array): void
   send_text(conversationID: string, recipientUserID: string, text: string): void
   send_text_to_self(conversationID: string, recipientUserID: string, text: string): void
+  send_file(
+    conversationID: string,
+    recipientUserID: string,
+    attachmentID: string,
+    mimeType: string,
+    fileName: string,
+    ciphertextSizeBytes: string,
+    contentKey: Uint8Array,
+    nonce: Uint8Array,
+    ciphertextSHA256: Uint8Array
+  ): void
   take_outgoing(): ArrayLike<Uint8Array>
   take_messages(): string
   set_recipient(
@@ -77,6 +90,27 @@ export class WebWasmMessagingCore implements WebMessagingCore {
     } else {
       this.inner.send_text(conversationID, recipientUserID, text)
     }
+    this.flush(transport)
+  }
+
+  sendFile(
+    conversationID: string,
+    recipientUserID: string,
+    metadata: WebFileMetadata,
+    _receipt: WebFileUploadReceipt,
+    transport: WebCoreTransport
+  ): void {
+    this.inner.send_file(
+      conversationID,
+      recipientUserID,
+      metadata.attachmentID,
+      metadata.mimeType,
+      metadata.fileName,
+      metadata.ciphertextSizeBytes.toString(),
+      metadata.contentKey,
+      metadata.nonce,
+      metadata.ciphertextSHA256
+    )
     this.flush(transport)
   }
 

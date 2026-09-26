@@ -7,8 +7,7 @@ use links_client_core::{
 use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
-    fs,
-    fmt,
+    fmt, fs,
     io::{Read, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -638,6 +637,15 @@ pub trait DesktopMessagingCore: Send {
     ) -> Result<(), CoreError> {
         Err(CoreError::Provider)
     }
+    fn send_file(
+        &mut self,
+        _conversation_id: &str,
+        _recipient_user_id: &str,
+        _metadata: &protocol::v1::MediaMetadata,
+        _transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::Provider)
+    }
     fn send_large_file(
         &mut self,
         _conversation_id: &str,
@@ -1095,7 +1103,12 @@ fn validate_endpoint(endpoint: String) -> Result<String, CoreError> {
     let (scheme, rest) = if let Some(rest) = endpoint.strip_prefix("wss://") {
         ("wss", rest)
     } else if cfg!(debug_assertions) {
-        ("ws", endpoint.strip_prefix("ws://").ok_or(CoreError::Authentication)?)
+        (
+            "ws",
+            endpoint
+                .strip_prefix("ws://")
+                .ok_or(CoreError::Authentication)?,
+        )
     } else {
         return Err(CoreError::Authentication);
     };

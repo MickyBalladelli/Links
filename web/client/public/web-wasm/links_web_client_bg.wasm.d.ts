@@ -2,12 +2,14 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_webclientidentity_free: (a: number, b: number) => void;
+export const __wbg_webfileencryption_free: (a: number, b: number) => void;
 export const __wbg_weblargefiledecryptor_free: (a: number, b: number) => void;
 export const __wbg_weblargefileencryptor_free: (a: number, b: number) => void;
 export const __wbg_weblargefilemetadata_free: (a: number, b: number) => void;
 export const __wbg_webmessagingcore_free: (a: number, b: number) => void;
 export const __wbg_webrtcsignaldelivery_free: (a: number, b: number) => void;
 export const __wbg_webselfsovereignidentity_free: (a: number, b: number) => void;
+export const encrypt_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
 export const webclientidentity_complete_registration: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
 export const webclientidentity_create_messaging_core: (a: number) => [number, number, number];
 export const webclientidentity_decode_webrtc_signal: (a: number, b: number, c: number) => [number, number, number];
@@ -21,6 +23,14 @@ export const webclientidentity_new: (a: number, b: number, c: number, d: number,
 export const webclientidentity_pairing_uri: (a: number) => [number, number, number, number];
 export const webclientidentity_public_key: (a: number) => [number, number];
 export const webclientidentity_user_id: (a: number) => [number, number];
+export const webfileencryption_attachment_id: (a: number) => [number, number];
+export const webfileencryption_ciphertext: (a: number) => [number, number];
+export const webfileencryption_ciphertext_sha256: (a: number) => [number, number];
+export const webfileencryption_ciphertext_size_bytes: (a: number) => [number, number];
+export const webfileencryption_content_key: (a: number) => [number, number];
+export const webfileencryption_file_name: (a: number) => [number, number];
+export const webfileencryption_mime_type: (a: number) => [number, number];
+export const webfileencryption_nonce: (a: number) => [number, number];
 export const weblargefiledecryptor_decrypt_chunk: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const weblargefiledecryptor_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number, number];
 export const weblargefileencryptor_encrypt_chunk: (a: number, b: number, c: number) => [number, number, number, number];
@@ -47,6 +57,7 @@ export const webmessagingcore_pending_outgoing_count: (a: number) => number;
 export const webmessagingcore_prekey_upload: (a: number, b: number, c: number) => [number, number, number, number];
 export const webmessagingcore_profile_upload: (a: number) => [number, number];
 export const webmessagingcore_public_key: (a: number) => [number, number];
+export const webmessagingcore_send_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];
 export const webmessagingcore_send_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const webmessagingcore_send_text_to_self: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const webmessagingcore_set_recipient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number];

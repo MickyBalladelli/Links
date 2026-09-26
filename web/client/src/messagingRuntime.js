@@ -1,5 +1,6 @@
 import { WebTextMessaging } from '../../src/WebTextMessaging.ts'
 import { WebWasmMessagingCore } from '../../src/WebWasmMessaging.ts'
+import { WebFileSession } from '../../src/WebFiles.ts'
 
 let wasmModulePromise
 
@@ -70,6 +71,7 @@ export async function createWebMessagingSession({
     throw new Error(`WASM identity: ${error instanceof Error ? error.message : String(error || '')}`)
   }
   const core = new WebWasmMessagingCore(rustCore)
+  const files = new WebFileSession(wasm)
   const token = () => accessToken()
   try {
     await publishLocalKeys(rustCore, token)
@@ -91,6 +93,15 @@ export async function createWebMessagingSession({
     stop: () => session.stop(),
     shutdown: () => session.shutdown(),
     sendText: (conversationID, recipientUserID, text) => session.sendText(conversationID, recipientUserID, text),
+    sendFile: async (conversationID, recipientUserID, file) => {
+      const encrypted = await files.encrypt(file.blob, file.name, file.mimeType)
+      try {
+        const receipt = await files.upload(accessToken(), encrypted)
+        session.sendFile(conversationID, recipientUserID, encrypted.metadata, receipt)
+      } finally {
+        encrypted.ciphertext.fill(0)
+      }
+    },
     refreshRecipient: async recipientUserID => {
       if (loadedRecipientIDs.has(recipientUserID)) return
       await loadRecipient(core, { userID: recipientUserID }, token, deviceID)

@@ -10,7 +10,10 @@ use links_client_core::{
     envelopes::ClientCore,
     identity::{IdentitySeed, LocalIdentity},
     mls::{MlsCredentialVerifier, MlsEngine, OpenMlsEngine, RustCryptoProvider},
-    prekeys::{generate_profile, generate_upload, LocalPreKeyProfile, PreKeySecretStore, PreKeySigner, SecretKind},
+    prekeys::{
+        generate_profile, generate_upload, LocalPreKeyProfile, PreKeySecretStore, PreKeySigner,
+        SecretKind,
+    },
     protocol::{self, v1},
     send::RecipientDevice,
     sequences::ConversationSequence,
@@ -210,7 +213,10 @@ impl WebServices {
     }
 
     fn user_for_device(&self, device_id: &str) -> String {
-        self.device_users.get(device_id).cloned().unwrap_or_default()
+        self.device_users
+            .get(device_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -244,7 +250,10 @@ impl DesktopCoreServices for WebServices {
         if records.is_empty() || records.len() > MAX_RECIPIENTS {
             return Err(CoreError::Authentication);
         }
-        Ok(records.into_iter().map(|record| record.device.clone()).collect())
+        Ok(records
+            .into_iter()
+            .map(|record| record.device.clone())
+            .collect())
     }
 
     fn load_conversation_sequence(
@@ -290,8 +299,8 @@ impl DesktopCoreServices for WebServices {
             .iter()
             .filter(|record| record.device.device_id != self.local_device_id)
         {
-            let frame = encode_client_frame(v1::client_frame::Body::MlsBootstrap(
-                v1::MlsBootstrap {
+            let frame =
+                encode_client_frame(v1::client_frame::Body::MlsBootstrap(v1::MlsBootstrap {
                     conversation_id: conversation_id.to_owned(),
                     recipient_device_id: record.device.device_id.clone(),
                     commit: pending.commit.clone(),
@@ -299,8 +308,7 @@ impl DesktopCoreServices for WebServices {
                     sender_mls_credential: self.mls_credential.clone(),
                     sender_identity_public_key: self.identity_public_key.to_vec(),
                     reset_group: false,
-                },
-            ))?;
+                }))?;
             self.bootstrap_outbox.push(frame.clone());
             transport.send(&frame)?;
         }
@@ -375,7 +383,8 @@ impl DesktopFrameTransport for WebTransport {
 
 type WebCrypto = SealedSenderCrypto<WebResolver>;
 type WebMls = OpenMlsEngine<RustCryptoProvider<MemoryStorage>, WebSigner, WebVerifier>;
-type WebBoundCore = RustDesktopMessagingCore<WebCrypto, WebMls, DesktopCoreHostAdapter<WebServices>>;
+type WebBoundCore =
+    RustDesktopMessagingCore<WebCrypto, WebMls, DesktopCoreHostAdapter<WebServices>>;
 
 #[wasm_bindgen]
 pub struct WebMessagingCore {
@@ -425,7 +434,8 @@ impl WebMessagingCore {
         identity: IdentitySeed,
         mls_credential: &[u8],
     ) -> Result<WebMessagingCore, JsValue> {
-        let local = LocalIdentity::new(user_id.to_owned(), device_id.to_owned()).map_err(js_error)?;
+        let local =
+            LocalIdentity::new(user_id.to_owned(), device_id.to_owned()).map_err(js_error)?;
         let signer = WebSigner {
             identity: Arc::new(identity),
         };
@@ -441,13 +451,15 @@ impl WebMessagingCore {
             .max(1);
         let profile = generate_profile(device_id.to_owned(), profile_revision, &signer, &mut vault)
             .map_err(|error| js_error(format!("browser pre-key profile: {error}")))?;
-        let local_private = vault
-            .identity_private(profile.revision)
-            .map_err(js_error)?;
+        let local_private = vault.identity_private(profile.revision).map_err(js_error)?;
         // The account service stores the full TLS BasicCredential. Pull out
         // its application identity before checking the browser signer.
-        let credential = Credential::tls_deserialize_exact(mls_credential)
-            .map_err(|_| js_error(format!("invalid MLS credential ({} bytes)", mls_credential.len())))?;
+        let credential = Credential::tls_deserialize_exact(mls_credential).map_err(|_| {
+            js_error(format!(
+                "invalid MLS credential ({} bytes)",
+                mls_credential.len()
+            ))
+        })?;
         let basic = BasicCredential::try_from(credential)
             .map_err(|_| js_error("invalid MLS basic credential"))?;
         let binding = links_identity::parse_mls_basic_identity(basic.identity())
@@ -502,10 +514,7 @@ impl WebMessagingCore {
     }
 
     pub fn durable_cursor(&self) -> String {
-        self.core
-            .durable_cursor()
-            .unwrap_or_default()
-            .to_string()
+        self.core.durable_cursor().unwrap_or_default().to_string()
     }
 
     pub fn create_hello(&mut self, access_token: &str) -> Result<Vec<u8>, JsValue> {
@@ -539,9 +548,7 @@ impl WebMessagingCore {
         self.core
             .host_mut()
             .services_mut()
-            .set_recipient(WebRecipient {
-                device,
-            });
+            .set_recipient(WebRecipient { device });
         Ok(())
     }
 
@@ -573,11 +580,55 @@ impl WebMessagingCore {
         Ok(())
     }
 
+    pub fn send_file(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        attachment_id: &str,
+        mime_type: &str,
+        file_name: &str,
+        ciphertext_size_bytes: &str,
+        content_key: &[u8],
+        nonce: &[u8],
+        ciphertext_sha256: &[u8],
+    ) -> Result<(), JsValue> {
+        let ciphertext_size_bytes = ciphertext_size_bytes.parse::<u64>().map_err(js_error)?;
+        let metadata = v1::MediaMetadata {
+            attachment_id: attachment_id.to_owned(),
+            mime_type: mime_type.to_owned(),
+            ciphertext_size_bytes,
+            content_key: content_key.to_vec(),
+            nonce: nonce.to_vec(),
+            ciphertext_sha256: ciphertext_sha256.to_vec(),
+            width: None,
+            height: None,
+            duration_ms: None,
+            blur_hash: None,
+            opus: None,
+            original_size_bytes: None,
+            encryption_chunk_bytes: None,
+            chunk_cids: Vec::new(),
+            file_name: Some(file_name.to_owned()),
+        };
+        links_client_core::attachments::validate_file_metadata(&metadata).map_err(js_error)?;
+        let mut transport = WebTransport::new();
+        self.core
+            .send_file(
+                conversation_id,
+                recipient_user_id,
+                &metadata,
+                &mut transport,
+            )
+            .map_err(js_error)?;
+        self.outgoing.extend(transport.frames);
+        Ok(())
+    }
+
     pub fn handle_server_frame(&mut self, frame: &[u8]) -> Result<(), JsValue> {
         let mut transport = WebTransport::new();
         let mut received = Vec::new();
-        let server_frame = v1::ServerFrame::decode(frame)
-            .map_err(|_| js_error(CoreError::InvalidSync))?;
+        let server_frame =
+            v1::ServerFrame::decode(frame).map_err(|_| js_error(CoreError::InvalidSync))?;
         if let Some(v1::server_frame::Body::MlsBootstrap(bootstrap)) = server_frame.body {
             self.handle_bootstrap(bootstrap).map_err(js_error)?;
         } else {
@@ -608,7 +659,9 @@ impl WebMessagingCore {
             .as_slice()
             .try_into()
             .map_err(|_| CoreError::Authentication)?;
-        if binding.device_id.to_string() == self.device_id() || binding.public_key != sender_public_key {
+        if binding.device_id.to_string() == self.device_id()
+            || binding.public_key != sender_public_key
+        {
             return Err(CoreError::Authentication);
         }
         if bootstrap.reset_group {
@@ -665,9 +718,15 @@ impl WebMessagingCore {
     }
 
     pub fn prekey_upload(&mut self, curve_count: u32, kem_count: u32) -> Result<Vec<u8>, JsValue> {
-        generate_upload(&self.profile, curve_count, kem_count, &self.signer, &mut self.vault)
-            .map(|upload| upload.encode_to_vec())
-            .map_err(|error| js_error(format!("browser pre-key upload: {error}")))
+        generate_upload(
+            &self.profile,
+            curve_count,
+            kem_count,
+            &self.signer,
+            &mut self.vault,
+        )
+        .map(|upload| upload.encode_to_vec())
+        .map_err(|error| js_error(format!("browser pre-key upload: {error}")))
     }
 
     pub fn key_package(&self) -> Result<Vec<u8>, JsValue> {
@@ -693,18 +752,8 @@ impl WebMessagingCore {
 
     pub fn pending_outgoing_count(&self) -> usize {
         self.outgoing.len()
-            + self
-                .core
-                .host()
-                .services()
-                .outbox
-                .len()
-            + self
-                .core
-                .host()
-                .services()
-                .bootstrap_outbox
-                .len()
+            + self.core.host().services().outbox.len()
+            + self.core.host().services().bootstrap_outbox.len()
     }
 }
 

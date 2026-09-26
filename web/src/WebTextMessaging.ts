@@ -12,6 +12,22 @@ import type {
 import type { WebLargeFileMetadata, WebLargeFileUploadReceipt } from './WebLargeFiles'
 import { validateWebImageMetadata, validateWebImageUploadReceipt } from './WebImages'
 
+export interface WebFileMetadata {
+  attachmentID: string
+  mimeType: string
+  fileName: string
+  ciphertextSizeBytes: bigint
+  contentKey: Uint8Array
+  nonce: Uint8Array
+  ciphertextSHA256: Uint8Array
+}
+
+export interface WebFileUploadReceipt {
+  attachmentID: string
+  ciphertextSizeBytes: bigint
+  ciphertextSHA256: Uint8Array
+}
+
 export interface WebCoreTransport {
   send(frame: Uint8Array): boolean
 }
@@ -80,6 +96,13 @@ export interface WebMessagingCore extends WebCoreTransport {
     recipientUserID: string,
     metadata: WebLargeFileMetadata,
     receipt: WebLargeFileUploadReceipt,
+    transport: WebCoreTransport
+  ): void
+  sendFile?(
+    conversationID: string,
+    recipientUserID: string,
+    metadata: WebFileMetadata,
+    receipt: WebFileUploadReceipt,
     transport: WebCoreTransport
   ): void
 }
@@ -211,6 +234,28 @@ export class WebTextMessaging implements WebCoreTransport {
     this.core.sendImage(conversationID, recipientUserID, metadata, receipt, manager)
   }
 
+  /** Send private file metadata only after the exact ciphertext receipt. */
+  sendFile(
+    conversationID: string,
+    recipientUserID: string,
+    metadata: WebFileMetadata,
+    receipt: WebFileUploadReceipt
+  ): void {
+    requireCanonicalUUID(conversationID, 'conversation ID')
+    requireCanonicalUUID(recipientUserID, 'recipient user ID')
+    validateWebFileMetadata(metadata)
+    validateWebFileUploadReceipt(receipt)
+    if (!matchesFileReceipt(metadata, receipt)) {
+      throw new Error('Invalid file upload receipt')
+    }
+    const manager = this.manager
+    if (this.coreFailed || this.currentState !== 'ready' || manager === null ||
+        !manager.isConnected || this.core.sendFile === undefined) {
+      throw new Error('Web file session is not connected')
+    }
+    this.core.sendFile(conversationID, recipientUserID, metadata, receipt, manager)
+  }
+
   private createHello(): Uint8Array {
     const token = this.accessToken()
     if (typeof token !== 'string' || token.length === 0) {
@@ -269,4 +314,36 @@ export class WebTextMessaging implements WebCoreTransport {
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+const WEB_FILE_MAX_CIPHERTEXT_BYTES = 20 * 1024 * 1024 + 16
+
+export function validateWebFileMetadata(metadata: WebFileMetadata): void {
+  requireCanonicalUUID(metadata.attachmentID, 'attachment ID')
+  if (typeof metadata.mimeType !== 'string' || metadata.mimeType.length === 0 ||
+      typeof metadata.fileName !== 'string' || metadata.fileName.trim().length === 0 ||
+      metadata.ciphertextSizeBytes < 17n ||
+      metadata.ciphertextSizeBytes > BigInt(WEB_FILE_MAX_CIPHERTEXT_BYTES) ||
+      metadata.contentKey.length !== 32 || metadata.nonce.length !== 12 ||
+      metadata.ciphertextSHA256.length !== 32) {
+    throw new Error('Invalid Web file metadata')
+  }
+}
+
+export function validateWebFileUploadReceipt(receipt: WebFileUploadReceipt): void {
+  requireCanonicalUUID(receipt.attachmentID, 'attachment ID')
+  if (receipt.ciphertextSizeBytes < 17n ||
+      receipt.ciphertextSizeBytes > BigInt(WEB_FILE_MAX_CIPHERTEXT_BYTES) ||
+      receipt.ciphertextSHA256.length !== 32) {
+    throw new Error('Invalid Web file upload receipt')
+  }
+}
+
+function matchesFileReceipt(
+  metadata: WebFileMetadata,
+  receipt: WebFileUploadReceipt
+): boolean {
+  return receipt.attachmentID === metadata.attachmentID &&
+    receipt.ciphertextSizeBytes === metadata.ciphertextSizeBytes &&
+    sameBytes(receipt.ciphertextSHA256, metadata.ciphertextSHA256)
 }

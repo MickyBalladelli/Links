@@ -179,7 +179,34 @@ where
         text: &str,
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError> {
-        self.send_text_internal(core, conversation_id, recipient_user_id, text, transport, false)
+        self.send_text_internal(
+            core,
+            conversation_id,
+            recipient_user_id,
+            text,
+            transport,
+            false,
+        )
+    }
+
+    fn send_file(
+        &mut self,
+        core: &mut ClientCore<C, M>,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        metadata: &v1::MediaMetadata,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        protocol::validate_media_metadata(metadata)?;
+        links_client_core::attachments::validate_file_metadata(metadata)?;
+        self.send_content_internal(
+            core,
+            conversation_id,
+            recipient_user_id,
+            v1::message::Content::Media(metadata.clone()),
+            transport,
+            false,
+        )
     }
 
     fn send_text_to_self(
@@ -190,7 +217,14 @@ where
         text: &str,
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError> {
-        self.send_text_internal(core, conversation_id, recipient_user_id, text, transport, true)
+        self.send_text_internal(
+            core,
+            conversation_id,
+            recipient_user_id,
+            text,
+            transport,
+            true,
+        )
     }
 }
 
@@ -275,6 +309,98 @@ impl<S> DesktopCoreHostAdapter<S> {
             sent_at_ms: now_ms,
             sequence_id: 0,
             content: Some(v1::message::Content::Text(text.to_owned())),
+        };
+        let (message, envelopes) = core.seal_next_message_for_devices(
+            message,
+            &mut sequence,
+            &fanout,
+            expires_at_ms,
+            now_ms,
+        )?;
+        let frames = envelopes
+            .iter()
+            .map(encode_send_frame)
+            .collect::<Result<Vec<_>, _>>()?;
+        self.services
+            .persist_send(&message, &envelopes, &frames, sequence.last_sequence_id())?;
+        for frame in &frames {
+            transport.send(frame)?;
+        }
+        Ok(())
+    }
+
+    fn send_content_internal<C, M>(
+        &mut self,
+        core: &mut ClientCore<C, M>,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        content: v1::message::Content,
+        transport: &mut dyn DesktopFrameTransport,
+        allow_self: bool,
+    ) -> Result<(), CoreError>
+    where
+        C: EnvelopeCrypto + RecipientKeyDirectory + Send,
+        M: MlsEngine,
+        S: DesktopCoreServices,
+    {
+        protocol::validate_id(conversation_id)?;
+        protocol::validate_id(recipient_user_id)?;
+        if !allow_self && recipient_user_id == core.user_id() {
+            return Err(CoreError::Authentication);
+        }
+        let now_ms = self.services.now_ms()?;
+        let expires_at_ms = now_ms
+            .checked_add(protocol::MAX_RETENTION_MS)
+            .ok_or(CoreError::Provider)?;
+        let message_id = self.services.next_message_id()?;
+        protocol::validate_id(&message_id)?;
+        let mut sequence = self
+            .services
+            .load_conversation_sequence(conversation_id, core.device_id())?;
+        if sequence.conversation_id() != conversation_id
+            || sequence.sender_device_id() != core.device_id()
+        {
+            return Err(CoreError::Authentication);
+        }
+        let recipients = self
+            .services
+            .lookup_and_claim_recipient_devices(recipient_user_id)?;
+        if recipients.is_empty() || recipients.len() > protocol::MAX_FANOUT_DEVICES {
+            return Err(CoreError::Authentication);
+        }
+        let mut fanout = Vec::with_capacity(recipients.len());
+        let mut key_packages = Vec::with_capacity(recipients.len());
+        let mut device_ids = std::collections::HashSet::with_capacity(recipients.len());
+        for recipient in &recipients {
+            if recipient.user_id != recipient_user_id || !device_ids.insert(&recipient.device_id) {
+                return Err(CoreError::Authentication);
+            }
+            let sealed_sender_key = recipient.verify()?;
+            core.crypto_mut()
+                .install_recipient_public_key(&recipient.device_id, sealed_sender_key)?;
+            fanout.push(FanoutRecipient::new(recipient.device_id.clone())?);
+            key_packages.push(recipient.mls_key_package.as_slice());
+        }
+        if let Some(pending) = core
+            .mls_mut()
+            .ensure_direct_group(conversation_id, &key_packages)?
+        {
+            self.services
+                .persist_pending_commit(conversation_id, &pending)?;
+            self.services
+                .deliver_mls_bootstrap(conversation_id, &pending, transport)?;
+            core.mls_mut()
+                .merge_pending_direct_commit(conversation_id)?;
+            self.services
+                .mark_pending_commit_accepted(conversation_id)?;
+        }
+        let message = v1::Message {
+            message_id,
+            conversation_id: conversation_id.to_owned(),
+            sender_device_id: core.device_id().to_owned(),
+            sent_at_ms: now_ms,
+            sequence_id: 0,
+            content: Some(content),
         };
         let (message, envelopes) = core.seal_next_message_for_devices(
             message,
@@ -420,9 +546,7 @@ fn encode_client_frame(body: v1::client_frame::Body) -> Result<Vec<u8>, CoreErro
         }
         v1::client_frame::Body::Hello(_)
         | v1::client_frame::Body::WebRtcSignal(_)
-        | v1::client_frame::Body::MlsBootstrap(_) => {
-            return Err(CoreError::Provider)
-        }
+        | v1::client_frame::Body::MlsBootstrap(_) => return Err(CoreError::Provider),
         _ => {}
     }
     let mut bytes = Vec::with_capacity(frame.encoded_len());

@@ -57,6 +57,25 @@ export class WebClientIdentity {
 }
 
 /**
+ * One-shot encrypted document attachment for files up to the regular file
+ * limit. The ciphertext is uploaded separately; only this private metadata
+ * is sent through the encrypted message.
+ */
+export class WebFileEncryption {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    attachment_id(): string;
+    ciphertext(): Uint8Array;
+    ciphertext_sha256(): Uint8Array;
+    ciphertext_size_bytes(): string;
+    content_key(): Uint8Array;
+    file_name(): string;
+    mime_type(): string;
+    nonce(): Uint8Array;
+}
+
+/**
  * WASM handle for chunk decryption after private MLS metadata arrives.
  */
 export class WebLargeFileDecryptor {
@@ -116,6 +135,7 @@ export class WebMessagingCore {
     prekey_upload(curve_count: number, kem_count: number): Uint8Array;
     profile_upload(): Uint8Array;
     public_key(): Uint8Array;
+    send_file(conversation_id: string, recipient_user_id: string, attachment_id: string, mime_type: string, file_name: string, ciphertext_size_bytes: string, content_key: Uint8Array, nonce: Uint8Array, ciphertext_sha256: Uint8Array): void;
     send_text(conversation_id: string, recipient_user_id: string, text: string): void;
     send_text_to_self(conversation_id: string, recipient_user_id: string, text: string): void;
     set_recipient(user_id: string, device_id: string, identity_public_key: Uint8Array, prekey_bundle: Uint8Array, _mls_credential: Uint8Array, mls_key_package: Uint8Array): void;
@@ -178,17 +198,25 @@ export class WebSelfSovereignIdentity {
     username_registration_signature(challenge_id: string, handle: string, device_id: string, mls_node_id: string, challenge: Uint8Array, expires_at_ms: bigint): Uint8Array;
 }
 
+/**
+ * Encrypt one regular document attachment with the same Rust core used by
+ * native clients. The original bytes never leave the browser unencrypted.
+ */
+export function encrypt_file(attachment_id: string, plaintext: Uint8Array, mime_type: string, file_name: string): WebFileEncryption;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_webclientidentity_free: (a: number, b: number) => void;
+    readonly __wbg_webfileencryption_free: (a: number, b: number) => void;
     readonly __wbg_weblargefiledecryptor_free: (a: number, b: number) => void;
     readonly __wbg_weblargefileencryptor_free: (a: number, b: number) => void;
     readonly __wbg_weblargefilemetadata_free: (a: number, b: number) => void;
     readonly __wbg_webmessagingcore_free: (a: number, b: number) => void;
     readonly __wbg_webrtcsignaldelivery_free: (a: number, b: number) => void;
     readonly __wbg_webselfsovereignidentity_free: (a: number, b: number) => void;
+    readonly encrypt_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
     readonly webclientidentity_complete_registration: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
     readonly webclientidentity_create_messaging_core: (a: number) => [number, number, number];
     readonly webclientidentity_decode_webrtc_signal: (a: number, b: number, c: number) => [number, number, number];
@@ -202,6 +230,14 @@ export interface InitOutput {
     readonly webclientidentity_pairing_uri: (a: number) => [number, number, number, number];
     readonly webclientidentity_public_key: (a: number) => [number, number];
     readonly webclientidentity_user_id: (a: number) => [number, number];
+    readonly webfileencryption_attachment_id: (a: number) => [number, number];
+    readonly webfileencryption_ciphertext: (a: number) => [number, number];
+    readonly webfileencryption_ciphertext_sha256: (a: number) => [number, number];
+    readonly webfileencryption_ciphertext_size_bytes: (a: number) => [number, number];
+    readonly webfileencryption_content_key: (a: number) => [number, number];
+    readonly webfileencryption_file_name: (a: number) => [number, number];
+    readonly webfileencryption_mime_type: (a: number) => [number, number];
+    readonly webfileencryption_nonce: (a: number) => [number, number];
     readonly weblargefiledecryptor_decrypt_chunk: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly weblargefiledecryptor_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number, number];
     readonly weblargefileencryptor_encrypt_chunk: (a: number, b: number, c: number) => [number, number, number, number];
@@ -228,6 +264,7 @@ export interface InitOutput {
     readonly webmessagingcore_prekey_upload: (a: number, b: number, c: number) => [number, number, number, number];
     readonly webmessagingcore_profile_upload: (a: number) => [number, number];
     readonly webmessagingcore_public_key: (a: number) => [number, number];
+    readonly webmessagingcore_send_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];
     readonly webmessagingcore_send_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly webmessagingcore_send_text_to_self: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly webmessagingcore_set_recipient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number];
