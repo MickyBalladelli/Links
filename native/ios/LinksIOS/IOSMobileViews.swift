@@ -1470,13 +1470,23 @@ private struct IOSConversationView: View {
             ? "Establishing a secure conversation" : "Secure setup needs attention"
     }
 
-    private var showsConnectionStatusInConversation: Bool {
-        horizontalSizeClass != .regular
+    private var conversationStatusText: String? {
+        if horizontalSizeClass == .regular {
+            if conversation?.isGroup == true, conversation?.groupActive == false {
+                return "You are no longer a member of this group"
+            }
+            if model.messagingState == .ready,
+               conversation?.isSecureReady != true || model.preparingConversationIDs.contains(conversationID) {
+                return setupStatusText
+            }
+            return nil
+        }
+        return setupStatusText
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsConnectionStatusInConversation {
+            if let conversationStatusText {
                 HStack(spacing: 7) {
                     if model.preparingConversationIDs.contains(conversationID) {
                         ProgressView()
@@ -1486,7 +1496,7 @@ private struct IOSConversationView: View {
                               && model.messagingState == .ready
                               ? "lock.fill" : "arrow.triangle.2.circlepath")
                     }
-                    Text(setupStatusText)
+                    Text(conversationStatusText)
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(conversation?.isSecureReady == true
