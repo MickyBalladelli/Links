@@ -428,6 +428,7 @@ async function startWebMessaging(identity) {
       userID: identity.userID,
       deviceID: identity.deviceID,
       mlsCredential: identity.mlsCredential,
+      contacts: contacts.value,
       accessToken: () => accessToken.value,
       onState: state => { connectionState.value = state === 'stopped' ? 'preview' : state },
       onTextMessage: appendIncomingText,

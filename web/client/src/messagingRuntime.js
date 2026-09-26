@@ -31,6 +31,7 @@ export async function createWebMessagingSession({
   userID,
   deviceID,
   mlsCredential,
+  contacts = [],
   accessToken,
   onState,
   onTextMessage,
@@ -44,6 +45,9 @@ export async function createWebMessagingSession({
     decodeBase64URL(mlsCredential)
   )
   const core = new WebWasmMessagingCore(rustCore)
+  const token = () => accessToken()
+  await publishLocalKeys(rustCore, token)
+  await loadRecipients(core, contacts, token)
   const session = new WebTextMessaging({
     endpoint: websocketEndpoint(),
     core,
@@ -60,5 +64,62 @@ export async function createWebMessagingSession({
     sendText: (conversationID, recipientUserID, text) => session.sendText(conversationID, recipientUserID, text),
     get state() { return session.state },
     get isConnected() { return session.isConnected }
+  }
+}
+
+async function publishLocalKeys(rustCore, accessToken) {
+  const headers = {
+    Authorization: `Bearer ${accessToken()}`,
+    'Content-Type': 'application/x-protobuf'
+  }
+  const profile = await fetch('/links-api/v1/prekeys', {
+    method: 'PUT',
+    headers,
+    body: rustCore.profile_upload(),
+    cache: 'no-store'
+  })
+  if (!profile.ok) throw new Error('Could not publish browser pre-keys')
+  const keyPackage = await fetch('/links-api/v1/mls/key-package', {
+    method: 'PUT',
+    headers,
+    body: rustCore.key_package(),
+    cache: 'no-store'
+  })
+  if (!keyPackage.ok) throw new Error('Could not publish browser MLS key package')
+}
+
+async function loadRecipients(core, contacts, accessToken) {
+  const headers = { Authorization: `Bearer ${accessToken()}`, Accept: 'application/json' }
+  for (const contact of contacts) {
+    if (!contact?.userID) continue
+    try {
+      const directoryResponse = await fetch(`/links-api/v1/directory/users/${encodeURIComponent(contact.userID)}`, {
+        headers,
+        cache: 'no-store'
+      })
+      if (!directoryResponse.ok) continue
+      const directory = await directoryResponse.json()
+      for (const device of directory.devices || []) {
+        const [prekeyResponse, keyPackageResponse] = await Promise.all([
+          fetch(`/links-api/v1/prekeys/${encodeURIComponent(device.device_id)}/claim`, {
+            method: 'POST', headers: { ...headers, Accept: 'application/octet-stream' }, cache: 'no-store'
+          }),
+          fetch(`/links-api/v1/mls/key-package/${encodeURIComponent(device.device_id)}`, {
+            headers: { Authorization: headers.Authorization, Accept: 'application/octet-stream' }, cache: 'no-store'
+          })
+        ])
+        if (!prekeyResponse.ok || !keyPackageResponse.ok) continue
+        core.setRecipient(
+          directory.user_id,
+          device.device_id,
+          decodeBase64URL(device.identity_public_key),
+          new Uint8Array(await prekeyResponse.arrayBuffer()),
+          decodeBase64URL(device.mls_credential),
+          new Uint8Array(await keyPackageResponse.arrayBuffer())
+        )
+      }
+    } catch {
+      // A contact may not have a usable pre-key package yet.
+    }
   }
 }

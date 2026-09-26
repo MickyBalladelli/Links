@@ -13,6 +13,14 @@ export interface WebWasmMessagingHandle {
   send_text(conversationID: string, recipientUserID: string, text: string): void
   take_outgoing(): ArrayLike<Uint8Array>
   take_messages(): string
+  set_recipient(
+    userID: string,
+    deviceID: string,
+    identityPublicKey: Uint8Array,
+    prekeyBundle: Uint8Array,
+    mlsCredential: Uint8Array,
+    mlsKeyPackage: Uint8Array
+  ): void
 }
 
 /** Adapts the Rust/WASM core to the browser WebSocket host. */
@@ -64,6 +72,24 @@ export class WebWasmMessagingCore implements WebMessagingCore {
   ): void {
     this.inner.send_text(conversationID, recipientUserID, text)
     this.flush(transport)
+  }
+
+  setRecipient(
+    userID: string,
+    deviceID: string,
+    identityPublicKey: Uint8Array,
+    prekeyBundle: Uint8Array,
+    mlsCredential: Uint8Array,
+    mlsKeyPackage: Uint8Array
+  ): void {
+    this.inner.set_recipient(
+      userID,
+      deviceID,
+      identityPublicKey,
+      prekeyBundle,
+      mlsCredential,
+      mlsKeyPackage
+    )
   }
 
   private flush(transport: WebCoreTransport): void {
