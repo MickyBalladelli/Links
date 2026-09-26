@@ -20,6 +20,7 @@ import {
 } from '@mickyballadelli/prism'
 import './style.css'
 import { clearAttachments, readAttachment, saveAttachment } from './attachmentStore.js'
+import { createBrowserIdentity, loadBrowserIdentity, saveBrowserIdentity } from './authStore.js'
 
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
@@ -27,9 +28,15 @@ const accessToken = signal('')
 const profilePictureKey = 'links-web-client-profile-picture-v1'
 const profileHandleKey = 'links-web-client-profile-handle-v1'
 const profileDisplayNameKey = 'links-web-client-profile-display-name-v1'
+let activeAccountID = 'preview'
+
+function accountStorageKey(baseKey, accountID = activeAccountID) {
+  return accountID === 'preview' ? baseKey : `${baseKey}:${accountID}`
+}
+
 function loadProfileHandle() {
   try {
-    const saved = localStorage.getItem(profileHandleKey)
+    const saved = localStorage.getItem(accountStorageKey(profileHandleKey))
     if (validHandle(saved)) return saved
   } catch {
     // Keep the preview usable when browser storage is unavailable.
@@ -38,7 +45,7 @@ function loadProfileHandle() {
 }
 function loadProfileDisplayName() {
   try {
-    const saved = localStorage.getItem(profileDisplayNameKey)
+    const saved = localStorage.getItem(accountStorageKey(profileDisplayNameKey))
     if (validDisplayName(saved)) return saved.trim()
   } catch {
     // Keep the preview usable when browser storage is unavailable.
@@ -55,6 +62,11 @@ const profileUsernameError = signal('')
 const isSavingDisplayName = signal(false)
 const isLoggingOut = signal(false)
 const logoutConfirmOpen = signal(false)
+const authDialogOpen = signal(false)
+const authMode = signal('login')
+const authHandle = signal('')
+const authError = signal('')
+const isAuthenticating = signal(false)
 const profilePicture = signal('')
 const profilePictureSrc = signal('')
 const profilePictureError = signal('')
@@ -125,9 +137,11 @@ const seededState = {
   ]
 }
 
-function loadState() {
+const emptyState = { contacts: [], conversations: [] }
+
+function loadState(accountID = activeAccountID) {
   try {
-    const stored = JSON.parse(localStorage.getItem(storageKey) || 'null')
+    const stored = JSON.parse(localStorage.getItem(accountStorageKey(storageKey, accountID)) || 'null')
     if (Array.isArray(stored?.contacts) && Array.isArray(stored?.conversations)) {
       return {
         contacts: stored.contacts,
@@ -142,7 +156,7 @@ function loadState() {
   } catch {
     // Keep the preview usable when browser storage is unavailable.
   }
-  return seededState
+  return accountID === 'preview' ? seededState : emptyState
 }
 
 const initialState = loadState()
@@ -151,7 +165,7 @@ const conversations = signal(initialState.conversations)
 
 function persistState() {
   try {
-    localStorage.setItem(storageKey, JSON.stringify({
+    localStorage.setItem(accountStorageKey(storageKey), JSON.stringify({
       contacts: contacts.value,
       conversations: conversations.value
     }))
@@ -199,6 +213,58 @@ function hydrateStoredAttachments() {
   conversations.value.forEach(conversation => {
     conversation.messages.forEach(message => { hydrateAttachment(message.attachment) })
   })
+}
+
+function switchAccountState(userID, handle) {
+  uuidBytes(userID)
+  clearPendingAttachment()
+  Object.values(attachmentURLs.value).forEach(url => URL.revokeObjectURL(url))
+  Object.values(contactPictures.value).forEach(url => URL.revokeObjectURL(url))
+  attachmentURLs.value = {}
+  contactPictures.value = {}
+  activeAccountID = userID
+
+  const state = loadState(userID)
+  contacts.value = state.contacts
+  conversations.value = state.conversations
+  selectedConversationID.value = state.conversations[0]?.id || null
+  composerText.value = ''
+  contactQuery.value = ''
+  searchQuery.value = ''
+
+  profileHandle.value = handle
+  profileHandleDraft.value = handle
+  try { localStorage.setItem(accountStorageKey(profileHandleKey), handle) } catch { /* Keep the account name in memory. */ }
+  profileDisplayName.value = loadProfileDisplayName()
+  profileDisplayNameDraft.value = profileDisplayName.value
+  try {
+    rememberProfilePicture(localStorage.getItem(accountStorageKey(profilePictureKey)) || '')
+  } catch {
+    rememberProfilePicture('')
+  }
+  persistState()
+  hydrateStoredAttachments()
+  refreshContactPictures()
+}
+
+function clearVisibleAccountState() {
+  clearPendingAttachment()
+  Object.values(attachmentURLs.value).forEach(url => URL.revokeObjectURL(url))
+  Object.values(contactPictures.value).forEach(url => URL.revokeObjectURL(url))
+  attachmentURLs.value = {}
+  contactPictures.value = {}
+  contacts.value = []
+  conversations.value = []
+  selectedConversationID.value = null
+  composerText.value = ''
+  searchQuery.value = ''
+  profileDisplayName.value = ''
+  profileDisplayNameDraft.value = ''
+  if (profilePictureObjectURL) URL.revokeObjectURL(profilePictureObjectURL)
+  profilePictureObjectURL = ''
+  profilePicture.value = ''
+  profilePictureSrc.value = ''
+  activeAccountID = 'signed-out'
 }
 
 function clearPendingAttachment() {
@@ -263,13 +329,13 @@ function rememberProfilePicture(dataUrl) {
   profilePicture.value = dataUrl
   if (!dataUrl) {
     profilePictureSrc.value = ''
-    localStorage.removeItem(profilePictureKey)
+    localStorage.removeItem(accountStorageKey(profilePictureKey))
     return
   }
   profilePictureObjectURL = URL.createObjectURL(dataUrlToBlob(dataUrl))
   profilePictureSrc.value = profilePictureObjectURL
   try {
-    localStorage.setItem(profilePictureKey, dataUrl)
+    localStorage.setItem(accountStorageKey(profilePictureKey), dataUrl)
   } catch {
     profilePictureError.value = 'The picture could not be saved in this browser.'
   }
@@ -385,7 +451,7 @@ setInterval(() => { refreshContactPictures() }, 10000)
 refreshContactPictures()
 
 try {
-  rememberProfilePicture(localStorage.getItem(profilePictureKey) || '')
+  rememberProfilePicture(localStorage.getItem(accountStorageKey(profilePictureKey)) || '')
 } catch {
   profilePictureError.value = 'The saved profile picture could not be opened.'
   rememberProfilePicture('')
@@ -452,7 +518,7 @@ async function saveProfileDisplayName() {
     profileDisplayName.value = savedName
     profileDisplayNameDraft.value = savedName
     try {
-      localStorage.setItem(profileDisplayNameKey, cleanName)
+      localStorage.setItem(accountStorageKey(profileDisplayNameKey), cleanName)
     } catch {
       // Keep the account name in this tab when browser storage is unavailable.
     }
@@ -469,6 +535,136 @@ async function saveProfileDisplayName() {
 function authHeaders() {
   const token = accessToken.value.trim()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function encodeBase64URL(bytes) {
+  let binary = ''
+  new Uint8Array(bytes).forEach(byte => { binary += String.fromCharCode(byte) })
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function decodeBase64URL(value, expectedLength) {
+  if (!/^[A-Za-z0-9_-]+$/.test(value || '') || value.length % 4 === 1) throw new Error('The account service returned invalid key material.')
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const binary = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4))
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
+  if (expectedLength && bytes.length !== expectedLength) throw new Error('The account service returned invalid key material.')
+  return bytes
+}
+
+function uuidBytes(value) {
+  const hex = String(value || '').replaceAll('-', '')
+  if (!/^[0-9a-f]{32}$/.test(hex) || /^0+$/.test(hex)) throw new Error('The account service returned an invalid identifier.')
+  return Uint8Array.from(hex.match(/../g), pair => Number.parseInt(pair, 16))
+}
+
+function usernameAuthTranscript(purpose, challenge) {
+  const domain = new TextEncoder().encode(purpose === 'registration'
+    ? 'links/username-register/v2\0'
+    : 'links/username-login/v2\0')
+  const handle = new TextEncoder().encode(challenge.handle)
+  const publicKey = decodeBase64URL(challenge.public_key, 32)
+  const challengeBytes = decodeBase64URL(challenge.challenge, 32)
+  const expires = new Uint8Array(8)
+  new DataView(expires.buffer).setBigUint64(0, BigInt(challenge.expires_at_ms), false)
+  const parts = [
+    domain,
+    uuidBytes(challenge.challenge_id),
+    Uint8Array.of(handle.length),
+    handle,
+    uuidBytes(challenge.device_id),
+    uuidBytes(challenge.mls_node_id),
+    publicKey,
+    challengeBytes,
+    expires
+  ]
+  const length = parts.reduce((total, part) => total + part.length, 0)
+  const transcript = new Uint8Array(length)
+  let offset = 0
+  parts.forEach(part => { transcript.set(part, offset); offset += part.length })
+  return transcript
+}
+
+function openAuthenticationDialog(mode = 'login') {
+  authMode.value = mode
+  authHandle.value = normalizeHandle(profileHandle.value)
+  authError.value = ''
+  authDialogOpen.value = true
+}
+
+async function authenticateUsername(event) {
+  event?.preventDefault()
+  if (isAuthenticating.value) return
+  const handle = normalizeHandle(authHandle.value)
+  if (!validHandle(handle)) {
+    authError.value = 'Use 3–32 lowercase letters, numbers, or underscores.'
+    return
+  }
+
+  isAuthenticating.value = true
+  authError.value = ''
+  const purpose = authMode.value === 'registration' ? 'registration' : 'login'
+  try {
+    let identity = purpose === 'registration' ? await createBrowserIdentity() : await loadBrowserIdentity(handle)
+    if (!identity) throw new Error('No browser identity exists on this device. Create an account here or pair this browser first.')
+    const publicKey = new Uint8Array(identity.publicKey)
+    const publicKeyText = encodeBase64URL(publicKey)
+    const challengeResponse = await fetch(`${authBase()}/v1/auth/username/challenge`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        handle,
+        purpose,
+        device_id: identity.deviceID,
+        mls_node_id: identity.mlsNodeID,
+        public_key: publicKeyText
+      }),
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (challengeResponse.status === 404) throw new Error(`No Links account uses @${handle} with this browser identity.`)
+    if (challengeResponse.status === 409) throw new Error(purpose === 'registration' ? `@${handle} is already in use.` : 'This browser identity cannot open that account.')
+    if (challengeResponse.status === 429) throw new Error('Too many attempts. Wait a moment and try again.')
+    if (!challengeResponse.ok) throw new Error('The account service could not start authentication.')
+    const challenge = await challengeResponse.json()
+    if (challenge.handle !== handle || challenge.purpose !== purpose
+      || challenge.device_id !== identity.deviceID || challenge.mls_node_id !== identity.mlsNodeID
+      || challenge.public_key !== publicKeyText || Number(challenge.expires_at_ms) <= Date.now()) {
+      throw new Error('The account service returned an invalid authentication challenge.')
+    }
+    const transcript = usernameAuthTranscript(purpose, challenge)
+    const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', identity.privateKey, transcript))
+    const finishResponse = await fetch(`${authBase()}/v1/auth/username/${purpose === 'registration' ? 'register' : 'login'}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge_id: challenge.challenge_id, signature: encodeBase64URL(signature) }),
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (finishResponse.status === 401) throw new Error('The account service rejected this browser identity.')
+    if (finishResponse.status === 409) throw new Error(purpose === 'registration' ? `@${handle} is already in use.` : 'This browser session is already active elsewhere.')
+    if (!finishResponse.ok) throw new Error('The account service could not create a session.')
+    const result = await finishResponse.json()
+    const session = result.session
+    if (!session?.access_token || session.device_id !== identity.deviceID || result.handle !== handle) {
+      throw new Error('The account service returned an invalid session.')
+    }
+    uuidBytes(session.user_id)
+    identity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
+    await saveBrowserIdentity(identity)
+    accessToken.value = session.access_token
+    switchAccountState(session.user_id, handle)
+    authDialogOpen.value = false
+    notice.value = purpose === 'registration' ? `Created @${handle} and opened a browser session.` : `Logged in as @${handle}.`
+    refreshProfileDisplayName()
+    refreshSavedContactNames()
+  } catch (error) {
+    authError.value = error.message || 'Could not create an account session.'
+  } finally {
+    isAuthenticating.value = false
+  }
 }
 
 function openLogoutConfirmation() {
@@ -490,7 +686,9 @@ async function logoutAccount() {
     connectionState.value = 'preview'
     logoutConfirmOpen.value = false
     profileOpen.value = false
+    clearVisibleAccountState()
     notice.value = 'Logged out locally. No remote session token was available to revoke.'
+    requestAnimationFrame(() => { openAuthenticationDialog('login') })
     return
   }
 
@@ -513,10 +711,12 @@ async function logoutAccount() {
     isLoggingOut.value = false
     logoutConfirmOpen.value = false
     profileOpen.value = false
+    clearVisibleAccountState()
   }
   notice.value = remoteRevoked
     ? 'Logged out. Local conversations and attachments were kept.'
     : 'Logged out locally, but remote session revocation could not be confirmed.'
+  requestAnimationFrame(() => { openAuthenticationDialog('login') })
 }
 
 async function changeProfileUsername() {
@@ -559,7 +759,7 @@ async function changeProfileUsername() {
     profileHandle.value = result.handle
     profileHandleDraft.value = result.handle
     try {
-      localStorage.setItem(profileHandleKey, result.handle)
+      localStorage.setItem(accountStorageKey(profileHandleKey), result.handle)
     } catch {
       // Keep the updated username in this tab when browser storage is unavailable.
     }
@@ -590,7 +790,7 @@ async function refreshProfileUsername() {
     profileHandle.value = result.handle
     profileHandleDraft.value = result.handle
     try {
-      localStorage.setItem(profileHandleKey, result.handle)
+      localStorage.setItem(accountStorageKey(profileHandleKey), result.handle)
     } catch {
       // Keep the account name in this tab when browser storage is unavailable.
     }
@@ -616,8 +816,8 @@ async function refreshProfileDisplayName() {
       profileDisplayName.value = name
       profileDisplayNameDraft.value = name
       try {
-        if (name) localStorage.setItem(profileDisplayNameKey, name)
-        else localStorage.removeItem(profileDisplayNameKey)
+        if (name) localStorage.setItem(accountStorageKey(profileDisplayNameKey), name)
+        else localStorage.removeItem(accountStorageKey(profileDisplayNameKey))
       } catch {
         // Keep the account name in this tab when browser storage is unavailable.
       }
@@ -964,10 +1164,13 @@ async function resetPreview() {
   clearPendingAttachment()
   Object.values(attachmentURLs.value).forEach(url => URL.revokeObjectURL(url))
   attachmentURLs.value = {}
-  try { await clearAttachments() } catch { /* Keep reset available without IndexedDB. */ }
-  contacts.value = seededState.contacts
-  conversations.value = seededState.conversations
-  selectedConversationID.value = 'karine'
+  if (activeAccountID === 'preview') {
+    try { await clearAttachments() } catch { /* Keep reset available without IndexedDB. */ }
+  }
+  const resetState = activeAccountID === 'preview' ? seededState : emptyState
+  contacts.value = resetState.contacts
+  conversations.value = resetState.conversations
+  selectedConversationID.value = resetState.conversations[0]?.id || null
   persistState()
 }
 
@@ -1285,6 +1488,7 @@ function ConversationDetail() {
 function UsernamePopup({ open, title, description }) {
   return (
     <Popup
+      class="links-dialog"
       open={open}
       title={title}
       ariaDescription={description}
@@ -1310,6 +1514,7 @@ function UsernamePopup({ open, title, description }) {
 function RemoveContactPopup() {
   return (
     <Popup
+      class="links-dialog"
       open={removeContactOpen}
       title="Remove contact?"
       ariaDescription="This removes the saved contact. Existing conversations and messages stay."
@@ -1355,6 +1560,7 @@ function GroupContactPicker() {
 function CreateGroupPopup() {
   return (
     <Popup
+      class="links-dialog"
       open={createGroupOpen}
       title="New group"
       ariaDescription="Name the group and choose at least one contact."
@@ -1384,6 +1590,7 @@ function GroupInfoPopup() {
     if (!conversation?.isGroup) return null
     return (
       <Popup
+        class="links-dialog"
         open={groupInfoOpen}
         title="Group details"
         ariaDescription="Rename the group or change its members."
@@ -1419,6 +1626,7 @@ function GroupInfoPopup() {
 function LogoutPopup() {
   return (
     <Popup
+      class="links-dialog"
       open={logoutConfirmOpen}
       title="Log out?"
       ariaDescription="The current account session will be revoked. Local conversations and attachments will remain on this device."
@@ -1436,9 +1644,50 @@ function LogoutPopup() {
   )
 }
 
+function AuthenticationPopup() {
+  return (
+    <Popup
+      class="links-dialog"
+      open={authDialogOpen}
+      title="Sign in or create session"
+      ariaDescription="Use this browser identity to open an existing account or create a new username account."
+      size="small"
+      onClose={() => { if (!isAuthenticating.value) authDialogOpen.value = false }}
+      footer={() => (
+        <div class="popup-actions">
+          <Button label="Cancel" variant="secondary" disabled={isAuthenticating} onClick={() => { authDialogOpen.value = false }} />
+          <Button
+            label={computed(() => authMode.value === 'registration' ? 'Create account' : 'Log in')}
+            variant="primary"
+            loading={isAuthenticating}
+            disabled={isAuthenticating}
+            onClick={authenticateUsername}
+          />
+        </div>
+      )}
+    >
+      <form class="popup-form" onSubmit={authenticateUsername}>
+        <div class="auth-mode-switch" role="group" aria-label="Authentication mode">
+          <button type="button" class={computed(() => authMode.value === 'login' ? 'is-active' : '')} onClick={() => { authMode.value = 'login'; authError.value = '' }}>Log in</button>
+          <button type="button" class={computed(() => authMode.value === 'registration' ? 'is-active' : '')} onClick={() => { authMode.value = 'registration'; authError.value = '' }}>Create session</button>
+        </div>
+        <label for="auth-handle">Username</label>
+        <TextField id="auth-handle" value={authHandle} placeholder="alice" autocomplete="username" />
+        <label for="session-auth-base">Account service</label>
+        <TextField id="session-auth-base" value={authBaseURL} placeholder="/links-api" autocomplete="off" />
+        <p>{computed(() => authMode.value === 'registration'
+          ? 'Creates a username account and a browser-specific signing identity. The private key remains non-exportable in browser storage.'
+          : 'Login works for an account identity previously created in this browser. Other devices must be paired first.')}</p>
+        {computed(() => authError.value ? <Alert tone="error">{authError}</Alert> : null)}
+      </form>
+    </Popup>
+  )
+}
+
 function ProfilePopup() {
   return (
     <Popup
+      class="links-dialog"
       open={profileOpen}
       title="Web profile"
       ariaDescription="Change the shared display name, account username, and directory access."
@@ -1508,7 +1757,8 @@ function App() {
       <RemoveContactPopup />
       <ProfilePopup />
       <LogoutPopup />
-      {computed(() => notice.value && !newConversationOpen.value && !addContactOpen.value ? (
+      <AuthenticationPopup />
+      {computed(() => notice.value && !newConversationOpen.value && !addContactOpen.value && !authDialogOpen.value ? (
         <div class="toast" role="status">{notice}</div>
       ) : null)}
     </div>

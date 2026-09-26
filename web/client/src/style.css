@@ -227,12 +227,85 @@ button, input, textarea { font: inherit; }
 .composer.is-dragging .drop-hint { display: grid; }
 .empty-detail { min-width: 0; height: 100vh; display: grid; place-items: center; background: var(--links-surface-soft); }
 
+.prism-popup-layer:has(.links-dialog) .prism-popup-backdrop {
+  background: color-mix(in srgb, #070b12 58%, transparent);
+  backdrop-filter: blur(7px);
+}
+
+.prism-popup-panel.links-dialog {
+  --prism-color-ink: var(--links-text);
+  --prism-color-text: var(--links-text);
+  --prism-color-text-muted: var(--links-muted);
+  --prism-color-text-soft: var(--links-muted);
+  --prism-color-text-subtle: var(--links-muted);
+  --prism-color-placeholder: color-mix(in srgb, var(--links-muted) 72%, transparent);
+  --prism-color-surface: var(--links-surface);
+  --prism-color-surface-raised: var(--links-surface);
+  --prism-color-surface-hover: var(--links-surface-soft);
+  --prism-color-surface-tint: var(--links-surface-soft);
+  --prism-color-border: var(--links-border);
+  --prism-color-border-input: var(--links-border-strong);
+  --prism-color-border-strong: var(--links-border-strong);
+  --prism-color-border-faint: var(--links-border);
+  --prism-color-focus: var(--links-accent);
+  --prism-color-focus-glow: color-mix(in srgb, var(--links-accent) 16%, transparent);
+  --prism-color-lavender-surface: var(--links-accent-soft);
+  --prism-button-primary-text: #fff;
+  --prism-button-primary-border: transparent;
+  --prism-button-primary-background: var(--links-accent);
+  --prism-button-primary-background-hover: color-mix(in srgb, var(--links-accent) 88%, #000);
+  --prism-button-primary-background-active: color-mix(in srgb, var(--links-accent) 78%, #000);
+  --prism-button-primary-shadow: 0 4px 12px color-mix(in srgb, var(--links-accent) 24%, transparent);
+  --prism-button-primary-shadow-hover: 0 5px 15px color-mix(in srgb, var(--links-accent) 30%, transparent);
+  --prism-button-primary-shadow-active: 0 2px 6px color-mix(in srgb, var(--links-accent) 20%, transparent);
+  --prism-button-secondary-text: var(--links-text);
+  --prism-button-secondary-border: var(--links-border-strong);
+  --prism-button-secondary-background: var(--links-surface-soft);
+  --prism-button-secondary-background-hover: var(--links-accent-soft);
+  --prism-button-secondary-background-active: color-mix(in srgb, var(--links-accent-soft) 75%, var(--links-surface));
+  --prism-button-secondary-shadow: none;
+  --prism-button-secondary-shadow-hover: none;
+  --prism-button-secondary-shadow-active: none;
+  --prism-button-tertiary-text: var(--links-muted);
+  --prism-button-tertiary-border: transparent;
+  --prism-button-tertiary-background: transparent;
+  --prism-button-tertiary-background-hover: var(--links-accent-soft);
+  --prism-button-tertiary-background-active: color-mix(in srgb, var(--links-accent-soft) 75%, var(--links-surface));
+  --prism-button-tertiary-shadow: none;
+  --prism-button-tertiary-shadow-hover: none;
+  --prism-button-tertiary-shadow-active: none;
+  font-family: 'Avenir Next', 'Helvetica Neue', sans-serif;
+  color: var(--links-text);
+  background: var(--links-surface);
+  border-color: var(--links-border-strong);
+  border-radius: 14px;
+  box-shadow: var(--links-shadow);
+}
+
+.links-dialog .prism-popup-header {
+  padding: 16px 18px 14px;
+  background: var(--links-surface);
+  border-bottom-color: var(--links-border);
+}
+.links-dialog .prism-popup-title { color: var(--links-text); font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
+.links-dialog .prism-popup-description { color: var(--links-muted); }
+.links-dialog .prism-popup-close { color: var(--links-muted); background: var(--links-surface-soft); border-color: var(--links-border); }
+.links-dialog .prism-popup-close:hover { color: var(--links-text); background: var(--links-accent-soft); border-color: var(--links-border-strong); transform: none; }
+.links-dialog .prism-popup-body { color: var(--links-text); background: var(--links-surface); }
+.links-dialog .prism-popup-footer { background: var(--links-surface-soft); border-top-color: var(--links-border); }
+.links-dialog .text-field { color: var(--links-text); background: var(--links-surface-soft); border-color: var(--links-border-strong); }
+.links-dialog .text-field:hover:not(:disabled) { background: var(--links-surface); border-color: var(--links-muted); }
+.links-dialog .text-field:focus-visible { border-color: var(--links-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--links-accent) 16%, transparent); }
+
 .popup-form, .profile-form { display: grid; gap: 9px; }
 .popup-form label, .profile-form label { margin-top: 4px; color: var(--links-text); font-size: .75rem; font-weight: 700; }
 .popup-form p { margin: 2px 0 3px; color: var(--links-muted); font-size: .72rem; line-height: 1.45; }
 .popup-actions { width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .popup-actions.is-split { justify-content: space-between; }
 .popup-actions.is-split > .popup-actions { width: auto; }
+.auth-mode-switch { padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: color-mix(in srgb, var(--links-text) 6%, var(--links-surface)); border: 1px solid var(--links-border); border-radius: 10px; }
+.auth-mode-switch button { min-height: 34px; border: 0; border-radius: 7px; color: var(--links-muted); background: transparent; cursor: pointer; font-size: .75rem; font-weight: 650; }
+.auth-mode-switch button.is-active { color: var(--links-text); background: var(--links-surface); box-shadow: 0 1px 3px color-mix(in srgb, var(--links-text) 12%, transparent); }
 .group-contact-picker { max-height: 250px; overflow-y: auto; display: grid; gap: 4px; }
 .group-contact-option, .group-owner-row { min-width: 0; padding: 7px 8px; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 9px; border-radius: 9px; color: var(--links-text); background: color-mix(in srgb, var(--links-text) 3%, transparent); cursor: pointer; }
 .group-contact-option:hover { background: var(--links-accent-soft); }

@@ -19,6 +19,6 @@ LINKS_AUTH_TARGET=https://links.example.test npm run dev
 
 ## Current integration boundary
 
-This app is an interactive client UI preview. It persists conversations, contacts, group membership, image messages, and file messages locally. Images and files can be selected, pasted, or dropped into the composer; attachment bytes are kept in IndexedDB while conversation metadata stays in local storage. A bearer token enables username resolution and profile updates through the authenticated account API.
+This app is an interactive client UI preview. It persists conversations, contacts, group membership, image messages, and file messages locally. Authenticated state is isolated by account user ID, so a newly created account starts empty and returning to an existing account restores only that account's local conversations and contacts. Images and files can be selected, pasted, or dropped into the composer; attachment bytes are kept in IndexedDB while conversation metadata stays in local storage. A bearer token enables username resolution and profile updates through the authenticated account API.
 
 The app does not claim to send encrypted network messages yet: the shared browser WASM messaging core, durable encrypted stores, pairing/session restoration, pre-key setup, group MLS operations, attachment upload/download adapters, and `WebTextMessaging` transport still need to be composed into this host. The connection banner and profile status keep that boundary visible in the interface.
