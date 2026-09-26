@@ -10,6 +10,7 @@ private final class MacOSRustCoreCallbackBox: @unchecked Sendable {
     var transport: (any IOSCoreTransport)?
     var onText: ((IOSReceivedTextMessage) -> Void)?
     var onImage: ((IOSReceivedImageMessage) -> Void)?
+    var onFile: ((IOSReceivedFileMessage) -> Void)?
     var onGroup: ((IOSGroupEvent) -> Void)?
 
     init(signer: any SharedCoreIdentitySigner,
@@ -252,6 +253,43 @@ private func macOSRustImage(
     }
 }
 
+private func macOSRustFile(
+    _ context: UnsafeMutableRawPointer?,
+    _ conversation: UnsafePointer<UInt8>?,
+    _ conversationLength: Int,
+    _ senderUser: UnsafePointer<UInt8>?,
+    _ senderUserLength: Int,
+    _ sender: UnsafePointer<UInt8>?,
+    _ senderLength: Int,
+    _ metadata: UnsafePointer<UInt8>?,
+    _ metadataLength: Int,
+    _ sequenceID: UInt64,
+    _ sentAtMs: UInt64) -> Int32 {
+    guard let box = callbackBox(context),
+          let conversation = callbackData(conversation, conversationLength),
+          let senderUser = callbackData(senderUser, senderUserLength),
+          let sender = callbackData(sender, senderLength),
+          let metadata = callbackData(metadata, metadataLength),
+          let conversationID = String(data: conversation, encoding: .utf8),
+          let senderUserID = String(data: senderUser, encoding: .utf8),
+          let senderDeviceID = String(data: sender, encoding: .utf8) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        let file = try IOSReceivedFileMessage(
+            conversationID: conversationID,
+            senderUserID: senderUserID,
+            senderDeviceID: senderDeviceID,
+            metadataProtobuf: metadata,
+            sequenceID: sequenceID,
+            sentAtMs: sentAtMs)
+        box.onFile?(file)
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+}
+
 private func macOSRustGroup(
     _ context: UnsafeMutableRawPointer?,
     _ conversation: UnsafePointer<UInt8>?,
@@ -334,7 +372,8 @@ private final class MacOSRustSharedCore: SharedClientCore {
             on_text: macOSRustText,
             identity_public_key: publicKeyTuple,
             on_group: macOSRustGroup,
-            on_image: macOSRustImage)
+            on_image: macOSRustImage,
+            on_file: macOSRustFile)
         var created: OpaquePointer?
         let status = credential.withUnsafeBytes { credentialBytes in
             identity.userID.withCString { userBytes in
@@ -437,6 +476,41 @@ private final class MacOSRustSharedCore: SharedClientCore {
         try handleServerFrame(
             frame, transport: transport, fullSync: fullSync,
             onTextMessage: onTextMessage, onImageMessage: { _ in })
+    }
+
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           fullSync: Bool,
+                           onTextMessage: (IOSReceivedTextMessage) -> Void,
+                           onImageMessage: (IOSReceivedImageMessage) -> Void,
+                           onFileMessage: (IOSReceivedFileMessage) -> Void)
+        throws -> IOSCoreFrameResult {
+        try withoutActuallyEscaping(onFileMessage) { fileHandler in
+            try withoutActuallyEscaping(onTextMessage) { textHandler in
+                try withoutActuallyEscaping(onImageMessage) { imageHandler in
+                    lock.lock()
+                    callbacks.transport = transport
+                    callbacks.onText = textHandler
+                    callbacks.onImage = imageHandler
+                    callbacks.onFile = fileHandler
+                    let status = frame.withUnsafeBytes { bytes in
+                        links_desktop_core_handle_server_frame(
+                            pointer, bytes.bindMemory(to: UInt8.self).baseAddress!, frame.count)
+                    }
+                    callbacks.transport = nil
+                    callbacks.onText = nil
+                    callbacks.onImage = nil
+                    callbacks.onFile = nil
+                    if status != Int32(LINKS_DESKTOP_OK) {
+                        currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
+                            ? .staleCursor : status == Int32(LINKS_DESKTOP_AUTHENTICATION)
+                                ? .authenticationExpired : .dependencyOutage
+                    }
+                    lock.unlock()
+                    guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+                    return fullSync ? .recoveryComplete : .pending
+                }
+            }
+        }
     }
 
     func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
@@ -916,6 +990,96 @@ private final class MacOSRustSharedCore: SharedClientCore {
                     conversationID.utf8.count,
                     metadataBytes.bindMemory(to: UInt8.self).baseAddress,
                     encodedMetadata.count)
+            }
+        }
+        callbacks.transport = nil
+        if status != Int32(LINKS_DESKTOP_OK) { currentIssue = .sendFailed }
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+    }
+
+    func encryptFile(_ file: Data, attachmentID: String, mimeType: String,
+                     fileName: String) throws -> (metadata: Data, ciphertext: Data) {
+        guard !file.isEmpty, file.count <= 20 * 1024 * 1024 else {
+            throw IOSImageError.invalidMetadata
+        }
+        var metadata = Data(count: 1024)
+        var metadataLength = 0
+        var ciphertext = Data(count: file.count + 16)
+        var ciphertextLength = 0
+        let status = file.withUnsafeBytes { fileBytes in
+            attachmentID.withCString { attachmentBytes in
+                mimeType.withCString { mimeBytes in
+                    fileName.withCString { nameBytes in
+                        metadata.withUnsafeMutableBytes { metadataOutput in
+                            ciphertext.withUnsafeMutableBytes { ciphertextOutput in
+                                links_desktop_core_encrypt_file(
+                                    fileBytes.bindMemory(to: UInt8.self).baseAddress, file.count,
+                                    UnsafeRawPointer(attachmentBytes).assumingMemoryBound(to: UInt8.self), attachmentID.utf8.count,
+                                    UnsafeRawPointer(mimeBytes).assumingMemoryBound(to: UInt8.self), mimeType.utf8.count,
+                                    UnsafeRawPointer(nameBytes).assumingMemoryBound(to: UInt8.self), fileName.utf8.count,
+                                    metadataOutput.bindMemory(to: UInt8.self).baseAddress, metadata.count, &metadataLength,
+                                    ciphertextOutput.bindMemory(to: UInt8.self).baseAddress, ciphertext.count, &ciphertextLength)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        metadata.removeSubrange(metadataLength..<metadata.count)
+        ciphertext.removeSubrange(ciphertextLength..<ciphertext.count)
+        return (metadata, ciphertext)
+    }
+
+    func decryptFile(metadata: Data, ciphertext: Data) throws -> Data {
+        var metadata = metadata
+        var plaintext = Data(count: 20 * 1024 * 1024)
+        var plaintextLength = 0
+        let status = metadata.withUnsafeBytes { metadataBytes in
+            ciphertext.withUnsafeBytes { ciphertextBytes in
+                plaintext.withUnsafeMutableBytes { output in
+                    links_desktop_core_decrypt_file(
+                        metadataBytes.bindMemory(to: UInt8.self).baseAddress, metadata.count,
+                        ciphertextBytes.bindMemory(to: UInt8.self).baseAddress, ciphertext.count,
+                        output.bindMemory(to: UInt8.self).baseAddress, plaintext.count, &plaintextLength)
+                }
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        plaintext.removeSubrange(plaintextLength..<plaintext.count)
+        return plaintext
+    }
+
+    func sendFile(conversationID: String, recipientUserID: String, metadata: Data,
+                  transport: any IOSCoreTransport) throws {
+        try sendFileMetadata(conversationID: conversationID, recipientUserID: recipientUserID,
+                             metadata: metadata, transport: transport, group: false)
+    }
+
+    func sendGroupFile(conversationID: String, metadata: Data,
+                       transport: any IOSCoreTransport) throws {
+        try sendFileMetadata(conversationID: conversationID, recipientUserID: nil,
+                             metadata: metadata, transport: transport, group: true)
+    }
+
+    private func sendFileMetadata(conversationID: String, recipientUserID: String?, metadata: Data,
+                                  transport: any IOSCoreTransport, group: Bool) throws {
+        lock.lock()
+        callbacks.transport = transport
+        let status = conversationID.withCString { conversation in
+            metadata.withUnsafeBytes { metadataBytes in
+                if group {
+                    return links_desktop_core_send_group_file(
+                        pointer, UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self), conversationID.utf8.count,
+                        metadataBytes.bindMemory(to: UInt8.self).baseAddress, metadata.count)
+                }
+                return recipientUserID!.withCString { recipient in
+                    links_desktop_core_send_file(
+                        pointer, UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self), conversationID.utf8.count,
+                        UnsafeRawPointer(recipient).assumingMemoryBound(to: UInt8.self), recipientUserID!.utf8.count,
+                        metadataBytes.bindMemory(to: UInt8.self).baseAddress, metadata.count)
+                }
             }
         }
         callbacks.transport = nil

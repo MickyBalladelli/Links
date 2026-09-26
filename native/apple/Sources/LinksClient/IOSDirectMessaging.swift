@@ -659,12 +659,19 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
     }
 
     public func sendGroupFile(conversationID: String, metadata: Data,
-                              receipt: IOSImageUploadReceipt) async throws {
+                              receipt: IOSImageUploadReceipt,
+                              directory: any IOSDirectChatDirectory,
+                              preKeyAPI: any IOSPreKeyAPI) async throws {
         let parsed = try IOSFileMetadata(protobuf: metadata)
         guard receipt.matches(parsed) else { throw IOSImageError.invalidUploadReceipt }
         let (sharedCore, manager) = try readyCore()
         try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
-                                         directory: directoryPlaceholder(), preKeyAPI: preKeyPlaceholder())
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.sendGroupFile(conversationID: conversationID,
+                                         metadata: metadata, transport: manager)
+        }
+        scheduleRetry(for: manager)
     }
 
     /// Encode PCM with links-client-core's Opus profile. The shared core

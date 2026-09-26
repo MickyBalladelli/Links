@@ -2251,11 +2251,6 @@ pub unsafe extern "C" fn links_desktop_core_send_group_image(
     }
 }
 
-            core.send_group_image(&conversation, metadata)
-        })
-    }
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn links_desktop_core_encrypt_file(
     file: *const u8,

@@ -1317,8 +1317,10 @@ private struct LinksConversationDetail: View {
                     MessageList(messages: conversation.messages,
                                 conversationID: conversation.id,
                                 messageImages: model.messageImages,
+                                messageFiles: model.messageFiles,
                                 senderLabel: { model.senderLabel(for: $0) },
-                                onSaveImage: onSaveImage)
+                                onSaveImage: onSaveImage,
+                                onOpenFile: model.openReceivedFile)
                         .frame(minHeight: 0, maxHeight: .infinity)
                     Divider()
                     ComposerView(model: model)
@@ -1439,8 +1441,10 @@ private struct MessageList: View {
     let messages: [LinksMacOSMessage]
     let conversationID: String
     let messageImages: [UUID: NSImage]
+    let messageFiles: [UUID: URL]
     var senderLabel: (LinksMacOSMessage) -> String? = { _ in nil }
     var onSaveImage: (NSImage) -> Void = { _ in }
+    var onOpenFile: (URL) -> Void = { _ in }
 
     private let messageListBottomID = "message-list-bottom"
 
@@ -1467,7 +1471,9 @@ private struct MessageList: View {
                                 message: message,
                                 senderLabel: senderLabel(message),
                                 image: messageImages[message.id],
-                                onSaveImage: onSaveImage)
+                                fileURL: messageFiles[message.id],
+                                onSaveImage: onSaveImage,
+                                onOpenFile: onOpenFile)
                                 .id(message.id)
                         }
                     }
@@ -1500,7 +1506,9 @@ private struct MessageBubble: View {
     let message: LinksMacOSMessage
     var senderLabel: String? = nil
     var image: NSImage? = nil
+    var fileURL: URL? = nil
     var onSaveImage: (NSImage) -> Void = { _ in }
+    var onOpenFile: (URL) -> Void = { _ in }
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -1534,6 +1542,28 @@ private struct MessageBubble: View {
                             }
                     } else {
                         Label("Loading image…", systemImage: "photo")
+                            .font(.body)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .background(Color.primary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                    }
+                } else if message.fileMetadataProtobuf != nil {
+                    if let fileURL {
+                        Button { onOpenFile(fileURL) } label: {
+                            Label(message.text, systemImage: "doc")
+                                .lineLimit(1)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 9)
+                        }
+                        .buttonStyle(.plain)
+                        .background(message.isOutgoing
+                                    ? Color.accentColor : Color.primary.opacity(0.08))
+                        .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 13))
+                        .help("Open file")
+                    } else {
+                        Label("Loading \(message.text)…", systemImage: "doc")
                             .font(.body)
                             .padding(.horizontal, 13)
                             .padding(.vertical, 9)
@@ -1578,6 +1608,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     var isEnabled: Bool
     var onPasteImage: (NSImage) -> Void
+    var onPasteFile: (URL) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -1648,6 +1679,9 @@ private struct ComposerTextEditor: NSViewRepresentable {
         textView.onPasteImage = { [weak coordinator] image in
             coordinator?.parent.onPasteImage(image)
         }
+        textView.onPasteFile = { [weak coordinator] url in
+            coordinator?.parent.onPasteFile(url)
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -1666,6 +1700,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
 
 private final class ImagePastingTextView: NSTextView {
     var onPasteImage: ((NSImage) -> Void)?
+    var onPasteFile: ((URL) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
@@ -1673,7 +1708,7 @@ private final class ImagePastingTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
-        if consumePastedImage() { return }
+        if consumePastedImage() || consumePastedFile() { return }
         super.paste(sender)
     }
 
@@ -1689,15 +1724,20 @@ private final class ImagePastingTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        image(from: sender.draggingPasteboard) == nil ? super.draggingEntered(sender) : .copy
+        image(from: sender.draggingPasteboard) != nil || fileURL(from: sender.draggingPasteboard) != nil
+            ? .copy : super.draggingEntered(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let image = image(from: sender.draggingPasteboard) else {
-            return super.performDragOperation(sender)
+        if let image = image(from: sender.draggingPasteboard) {
+            onPasteImage?(image)
+            return true
         }
-        onPasteImage?(image)
-        return true
+        if let url = fileURL(from: sender.draggingPasteboard) {
+            onPasteFile?(url)
+            return true
+        }
+        return super.performDragOperation(sender)
     }
 
     /// Attach a real image from the pasteboard. A text paste stays in the field.
@@ -1707,6 +1747,19 @@ private final class ImagePastingTextView: NSTextView {
         }
         onPasteImage?(image)
         return true
+    }
+
+    private func consumePastedFile() -> Bool {
+        guard let url = fileURL(from: NSPasteboard.general) else { return false }
+        onPasteFile?(url)
+        return true
+    }
+
+    private func fileURL(from pasteboard: NSPasteboard) -> URL? {
+        guard let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                                 options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              let url = urls.first, !url.hasDirectoryPath else { return nil }
+        return url
     }
 
     private func image(from pasteboard: NSPasteboard) -> NSImage? {
@@ -1772,13 +1825,30 @@ private struct ComposerView: View {
                 .padding(.top, 6)
                 .padding(.leading, 4)
             }
+            if let fileName = model.composerFileName {
+                HStack(spacing: 8) {
+                    Label(fileName, systemImage: "doc")
+                        .lineLimit(1)
+                    Button {
+                        model.clearComposerFile()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.isSendingComposerImage)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 6)
+                .padding(.leading, 4)
+            }
             HStack(alignment: .bottom, spacing: 10) {
                 ZStack(alignment: .leading) {
                     ComposerTextEditor(
                         text: $model.composerText,
                         isEnabled: model.canComposeSelectedConversation
                             && !model.isSendingComposerImage,
-                        onPasteImage: model.setComposerImage)
+                        onPasteImage: model.setComposerImage,
+                        onPasteFile: model.setComposerFile)
                         .frame(maxWidth: .infinity)
                         .frame(height: textEditorHeight)
                     if model.composerText.isEmpty {
@@ -1794,6 +1864,8 @@ private struct ComposerView: View {
                 Button {
                     if model.composerImageData != nil {
                         model.sendComposerImage()
+                    } else if model.composerFileData != nil {
+                        model.sendComposerFile()
                     } else {
                         model.sendMessage()
                     }
@@ -1809,12 +1881,14 @@ private struct ComposerView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.return, modifiers: [.command])
-                .help("Send message or image")
+                .help("Send message or attachment")
                 .disabled(!model.canComposeSelectedConversation
                           || model.isSendingComposerImage
                           || (model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                              && model.composerImageData == nil)
-                          || (model.composerImageData != nil && !model.canSendComposerImage))
+                              && model.composerImageData == nil
+                              && model.composerFileData == nil)
+                          || (model.composerImageData != nil && !model.canSendComposerImage)
+                          || (model.composerFileData != nil && !model.canSendComposerFile))
             }
         }
         .padding(.horizontal, 18)

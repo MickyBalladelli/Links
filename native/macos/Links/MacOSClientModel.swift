@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import LinksClient
 import LinksKeyStore
 
@@ -12,6 +13,7 @@ struct LinksMacOSMessage: Identifiable, Equatable, Codable {
     let sentAt: Date
     let senderDeviceID: String?
     var imageMetadataProtobuf: Data? = nil
+    var fileMetadataProtobuf: Data? = nil
     /// Shown above incoming group messages; direct chats have one sender.
     var senderUserID: String? = nil
 }
@@ -220,7 +222,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var composerImageData: Data?
     @Published private(set) var composerImagePreview: NSImage?
     @Published private(set) var isSendingComposerImage = false
+    @Published private(set) var composerFileData: Data?
+    @Published private(set) var composerFileName: String?
+    @Published private(set) var composerFileMIMEType: String?
     @Published private(set) var messageImages: [UUID: NSImage] = [:]
+    @Published private(set) var messageFiles: [UUID: URL] = [:]
     @Published private(set) var groupMembers: [LinksMacOSGroupMember] = []
     @Published private(set) var groupStatus = ""
     @Published private(set) var isUpdatingGroup = false
@@ -573,6 +579,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             && messaging?.state == .ready
             && messaging?.isConnected == true
     }
+
+    var canSendComposerFile: Bool { canSendComposerImage }
 
     var canSendSelectedConversation: Bool {
         guard let conversation = selectedConversation,
@@ -2009,12 +2017,106 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
         composerImageData = data
         composerImagePreview = image
+        clearComposerFile()
         actionError = nil
     }
 
     func clearComposerImage() {
         composerImageData = nil
         composerImagePreview = nil
+    }
+
+    func setComposerFile(_ url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard !url.hasDirectoryPath,
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              !data.isEmpty, data.count <= 20 * 1024 * 1024 else {
+            actionError = "Could not read that file. Files must be under 20 MB."
+            return
+        }
+        composerFileData = data
+        composerFileName = url.lastPathComponent
+        composerFileMIMEType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+            ?? "application/octet-stream"
+        clearComposerImage()
+        actionError = nil
+    }
+
+    func clearComposerFile() {
+        composerFileData = nil
+        composerFileName = nil
+        composerFileMIMEType = nil
+    }
+
+    func sendComposerFile() {
+        guard !isSendingComposerImage,
+              let source = composerFileData,
+              let fileName = composerFileName,
+              let mimeType = composerFileMIMEType,
+              let selectedConversationID,
+              let index = conversations.firstIndex(where: { $0.id == selectedConversationID }) else {
+            actionError = "Select a conversation and drop a file first."
+            return
+        }
+        let conversation = conversations[index]
+        let conversationReady = conversation.isGroup
+            ? conversation.groupActive : initializedConversationIDs.contains(conversation.id)
+        guard conversationReady, let messaging, messaging.state == .ready,
+              messaging.isConnected, let client, let authClient else {
+            actionError = "Open a ready conversation before sending a file."
+            return
+        }
+        let targetConversationID = conversation.id
+        let caption = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        isSendingComposerImage = true
+        composerText = ""
+        actionError = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let encrypted = try messaging.encryptFile(
+                    source, attachmentID: UUID().uuidString.lowercased(), mimeType: mimeType,
+                    fileName: fileName)
+                let metadata = try IOSFileMetadata(protobuf: encrypted.metadata)
+                let token = try client.accessToken()
+                let receipt = try await authClient.uploadEncryptedAttachment(
+                    attachmentID: metadata.attachmentID, ciphertext: encrypted.ciphertext,
+                    accessToken: token)
+                guard receipt.matches(metadata) else { throw IOSImageError.invalidUploadReceipt }
+                if conversation.isGroup {
+                    guard let (_, directory, preKeyAPI, _, _) = self.groupPrerequisites else {
+                        throw IOSMessagingError.notConnected
+                    }
+                    try await messaging.sendGroupFile(
+                        conversationID: conversation.mlsConversationID,
+                        metadata: encrypted.metadata, receipt: receipt,
+                        directory: directory, preKeyAPI: preKeyAPI)
+                } else {
+                    try messaging.sendFile(conversationID: conversation.mlsConversationID,
+                                           recipientUserID: conversation.recipientUserID,
+                                           metadata: encrypted.metadata, receipt: receipt)
+                }
+                guard let currentIndex = self.conversations.firstIndex(where: {
+                    $0.id == targetConversationID
+                }) else { throw IOSMessagingError.invalidMessage }
+                let message = LinksMacOSMessage(id: UUID(), text: fileName, isOutgoing: true,
+                                                sentAt: Date(), senderDeviceID: nil,
+                                                fileMetadataProtobuf: encrypted.metadata)
+                self.conversations[currentIndex].messages.append(message)
+                self.clearComposerFile()
+                self.persistLocalState()
+                if !caption.isEmpty {
+                    try await self.sendCaption(caption, conversationID: targetConversationID)
+                    self.persistLocalState()
+                }
+                self.pendingOutboxCount = messaging.pendingOutboxCount
+            } catch {
+                if self.composerText.isEmpty { self.composerText = caption }
+                self.actionError = "File not sent. Check the connection and try again."
+            }
+            self.isSendingComposerImage = false
+        }
     }
 
     func sendComposerImage() {
@@ -2261,6 +2363,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 ? .offlineOutboxRetry(count: pendingOutboxCount) : .ready
             if pendingOutboxCount == 0 { actionError = nil }
             loadSavedImages(using: messaging)
+            loadSavedFiles(using: messaging)
         case .reconnecting:
             deliveryState = pendingOutboxCount > 0
                 ? .offlineOutboxRetry(count: pendingOutboxCount) : .reconnecting
@@ -2303,6 +2406,14 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         Task { @MainActor [weak self] in
             guard let self, self.messaging === messaging else { return }
             self.renderReceivedImage(image, messaging: messaging)
+        }
+    }
+
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                    didReceive file: IOSReceivedFileMessage) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            self.renderReceivedFile(file, messaging: messaging)
         }
     }
 
@@ -2406,6 +2517,84 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 protobuf: metadata,
                 messaging: messaging)
         }
+    }
+
+    private func loadSavedFiles(using messaging: IOSDirectMessaging) {
+        for message in conversations.flatMap(\.messages)
+        where message.fileMetadataProtobuf != nil && messageFiles[message.id] == nil {
+            guard let metadata = message.fileMetadataProtobuf else { continue }
+            loadReceivedFile(messageID: message.id, protobuf: metadata, messaging: messaging)
+        }
+    }
+
+    private func renderReceivedFile(_ file: IOSReceivedFileMessage, messaging: IOSDirectMessaging) {
+        let messageID = UUID()
+        let received = LinksMacOSMessage(
+            id: messageID, text: file.fileName, isOutgoing: false,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(file.sentAtMs) / 1000),
+            senderDeviceID: file.senderDeviceID, fileMetadataProtobuf: file.metadataProtobuf,
+            senderUserID: file.senderUserID)
+        if let index = conversations.firstIndex(where: { $0.isGroup && $0.id == file.conversationID }) {
+            conversations[index].messages.append(received)
+            if selectedConversationID != conversations[index].id || lifecycleStatus != "Active" {
+                conversations[index].unreadCount += 1
+            }
+        } else if let index = conversations.firstIndex(where: {
+            $0.id == file.conversationID || $0.peerUserID == file.senderUserID
+                || (!$0.isIncoming && $0.recipientUserID == file.senderUserID)
+        }) {
+            conversations[index].recipientUserID = file.senderUserID
+            conversations[index].peerUserID = file.senderUserID
+            if conversations[index].mlsConversationID != file.conversationID {
+                conversations[index].deliveryConversationID = file.conversationID
+            }
+            conversations[index].messages.append(received)
+            if selectedConversationID != conversations[index].id || lifecycleStatus != "Active" {
+                conversations[index].unreadCount += 1
+            }
+        } else {
+            let knownContact = contacts.first(where: { $0.userID == file.senderUserID })
+            conversations.append(LinksMacOSConversation(
+                id: file.conversationID,
+                title: knownContact.map { "@\($0.handle)" } ?? "Incoming conversation",
+                recipientUserID: file.senderUserID, peerUserID: file.senderUserID,
+                messages: [received], unreadCount: 1, displayName: knownContact?.displayName))
+            resolveIncomingUsername(conversationID: file.conversationID, senderUserID: file.senderUserID)
+        }
+        initializedConversationIDs.insert(file.conversationID)
+        actionError = nil
+        persistLocalState()
+        loadReceivedFile(messageID: messageID, protobuf: file.metadataProtobuf, messaging: messaging)
+    }
+
+    private func loadReceivedFile(messageID: UUID, protobuf: Data, messaging: IOSDirectMessaging) {
+        guard let client, let authClient,
+              let metadata = try? IOSFileMetadata(protobuf: protobuf),
+              let token = try? client.accessToken() else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let ciphertext = try await authClient.downloadEncryptedAttachment(
+                    attachmentID: metadata.attachmentID, accessToken: token,
+                    expectedSize: metadata.ciphertextSizeBytes,
+                    expectedSHA256: metadata.ciphertextSHA256)
+                var plaintext = try messaging.decryptFile(metadata: protobuf, ciphertext: ciphertext)
+                defer { plaintext.resetBytes(in: 0..<plaintext.count) }
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("Links Attachments", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let safeName = metadata.fileName.replacingOccurrences(of: "/", with: "-")
+                let url = directory.appendingPathComponent("\(metadata.attachmentID)-\(safeName)")
+                try plaintext.write(to: url, options: .atomic)
+                self.messageFiles[messageID] = url
+            } catch {
+                self.actionError = "Could not load the received file."
+            }
+        }
+    }
+
+    func openReceivedFile(_ url: URL) {
+        NSWorkspace.shared.open(url)
     }
 
     private func renderReceivedMessage(_ message: IOSReceivedTextMessage) {
