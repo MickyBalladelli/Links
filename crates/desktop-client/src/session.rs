@@ -320,6 +320,7 @@ pub enum DesktopFrameResult {
 pub struct DesktopReceivedTextMessage {
     pub conversation_id: String,
     pub sender_device_id: String,
+    pub sender_user_id: String,
     pub text: String,
     pub sequence_id: u64,
     pub sent_at_ms: u64,

@@ -19,6 +19,6 @@ LINKS_AUTH_TARGET=https://links.example.test npm run dev
 
 ## Current integration boundary
 
-This app keeps the local conversation shell and attachment cache in the browser, then starts the shared Rust/WASM messaging core after account authentication. The core publishes browser pre-keys, primes recipient devices, creates encrypted MLS/Sealed Sender frames, and reconnects through the binary `/v1/connect` WebSocket. Build `web/pkg` first with `npm run build:wasm` from `web`; if the WASM bundle is missing, the UI stays in explicit local-preview mode.
+This app keeps the local conversation shell and attachment cache in the browser, then starts the shared Rust/WASM messaging core after account authentication. The core publishes browser pre-keys, primes recipient devices, creates encrypted MLS/Sealed Sender frames, and reconnects through the binary `/v1/connect` WebSocket. Build the WASM bundle first with `npm run build:wasm` from `web`; if the bundle is missing, the UI stays in explicit local-preview mode.
 
 The browser core keeps MLS and sealed-sender state in WASM. The host owns browser metadata, WebSocket reconnect, directory/pre-key HTTP adapters, and rendering. Group/media transport and a reviewed durable WASM state provider remain separate follow-up work; missing core assets never fall back silently to a fake connected state.

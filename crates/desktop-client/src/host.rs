@@ -305,6 +305,7 @@ impl<S> DesktopCoreHostAdapter<S> {
                         rendered.push(DesktopReceivedTextMessage {
                             conversation_id: message.conversation_id.clone(),
                             sender_device_id: message.sender_device_id.clone(),
+                            sender_user_id: String::new(),
                             text: text.clone(),
                             sequence_id: message.sequence_id,
                             sent_at_ms: message.sent_at_ms,

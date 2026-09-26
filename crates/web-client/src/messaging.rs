@@ -167,6 +167,7 @@ struct WebServices {
     cursor: u64,
     sequences: HashMap<String, u64>,
     recipients: HashMap<String, Vec<WebRecipient>>,
+    device_users: HashMap<String, String>,
     active_recipient_user: Option<String>,
     outbox: Vec<Vec<u8>>,
     bootstrap_outbox: Vec<Vec<u8>>,
@@ -180,6 +181,7 @@ impl WebServices {
             cursor: 0,
             sequences: HashMap::new(),
             recipients: HashMap::new(),
+            device_users: HashMap::new(),
             active_recipient_user: None,
             outbox: Vec::new(),
             bootstrap_outbox: Vec::new(),
@@ -188,11 +190,20 @@ impl WebServices {
 
     fn set_recipient(&mut self, recipient: WebRecipient) {
         let user_id = recipient.device.user_id.clone();
+        self.device_users
+            .insert(recipient.device.device_id.clone(), user_id.clone());
         let records = self.recipients.entry(user_id).or_default();
         records.retain(|item| item.device.device_id != recipient.device.device_id);
         records.push(recipient);
     }
 
+    fn set_device_user(&mut self, device_id: String, user_id: String) {
+        self.device_users.insert(device_id, user_id);
+    }
+
+    fn user_for_device(&self, device_id: &str) -> String {
+        self.device_users.get(device_id).cloned().unwrap_or_default()
+    }
 }
 
 impl DesktopCoreServices for WebServices {
@@ -365,6 +376,26 @@ impl WebMessagingCore {
         Self::from_identity_parts(user_id, device_id, identity, mls_credential)
     }
 
+    /// Build the messaging core from the browser account's Ed25519 seed.
+    /// The seed is consumed immediately into the Rust signer and never
+    /// returned to JavaScript.
+    pub fn from_identity_seed(
+        user_id: &str,
+        device_id: &str,
+        mls_credential: &[u8],
+        seed: &[u8],
+    ) -> Result<WebMessagingCore, JsValue> {
+        let seed: [u8; 32] = seed
+            .try_into()
+            .map_err(|_| js_error(CoreError::Authentication))?;
+        Self::from_identity_parts(
+            user_id,
+            device_id,
+            IdentitySeed::from_vault(Zeroizing::new(seed)),
+            mls_credential,
+        )
+    }
+
     pub(crate) fn from_identity_parts(
         user_id: &str,
         device_id: &str,
@@ -462,7 +493,7 @@ impl WebMessagingCore {
             mls_key_package.to_vec(),
         )
         .map_err(js_error)?;
-            self.core
+        self.core
             .host_mut()
             .services_mut()
             .set_recipient(WebRecipient {
@@ -534,6 +565,10 @@ impl WebMessagingCore {
                 .mls_mut()
                 .join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
         }
+        self.core
+            .host_mut()
+            .services_mut()
+            .set_device_user(binding.device_id.to_string(), binding.user_id.to_string());
         Ok(())
     }
 
@@ -553,9 +588,15 @@ impl WebMessagingCore {
             &messages
                 .into_iter()
                 .map(|message| {
+                    let sender_user_id = self
+                        .core
+                        .host()
+                        .services()
+                        .user_for_device(&message.sender_device_id);
                     serde_json::json!({
                         "conversationID": message.conversation_id,
                         "senderDeviceID": message.sender_device_id,
+                        "senderUserID": sender_user_id,
                         "text": message.text,
                         "sequenceID": message.sequence_id.to_string(),
                         "sentAtMs": message.sent_at_ms.to_string()

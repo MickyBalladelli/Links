@@ -56,6 +56,7 @@ export class WebWasmMessagingCore implements WebMessagingCore {
       onTextMessage({
         conversationID: String(message.conversationID),
         senderDeviceID: String(message.senderDeviceID),
+        senderUserID: String(message.senderUserID || ''),
         text: String(message.text),
         sequenceID: BigInt(message.sequenceID),
         sentAtMs: BigInt(message.sentAtMs)

@@ -17,7 +17,10 @@ function websocketEndpoint() {
 
 async function loadWasmModule() {
   if (!wasmModulePromise) {
-    wasmModulePromise = import(/* @vite-ignore */ '/web-wasm/links_web_client.js')
+    // Keep this optional asset outside Vite's module graph. The client must
+    // still boot in local-preview mode before `npm run build:wasm` is run.
+    const wasmURL = new URL('/web-wasm/links_web_client.js', window.location.origin).href
+    wasmModulePromise = import(/* @vite-ignore */ wasmURL)
       .then(async module => {
         if (typeof module.default === 'function') await module.default()
         return module
@@ -31,6 +34,7 @@ export async function createWebMessagingSession({
   userID,
   deviceID,
   mlsCredential,
+  identitySeed,
   contacts = [],
   accessToken,
   onState,
@@ -38,11 +42,15 @@ export async function createWebMessagingSession({
   onFailure
 }) {
   const wasm = await loadWasmModule()
-  if (typeof wasm.WebMessagingCore !== 'function') throw new Error('Web messaging WASM is unavailable')
-  const rustCore = new wasm.WebMessagingCore(
+  if (typeof wasm.WebMessagingCore !== 'function' ||
+      typeof wasm.WebMessagingCore.from_identity_seed !== 'function') {
+    throw new Error('Web messaging WASM is unavailable')
+  }
+  const rustCore = wasm.WebMessagingCore.from_identity_seed(
     userID,
     deviceID,
-    decodeBase64URL(mlsCredential)
+    decodeBase64URL(mlsCredential),
+    new Uint8Array(identitySeed || [])
   )
   const core = new WebWasmMessagingCore(rustCore)
   const token = () => accessToken()
@@ -75,7 +83,9 @@ async function publishLocalKeys(rustCore, accessToken) {
   const profile = await fetch('/links-api/v1/prekeys', {
     method: 'PUT',
     headers,
-    body: rustCore.profile_upload(),
+    // Keep a small one-time pool so another device can start a session with
+    // this browser without waiting for a refill request.
+    body: rustCore.prekey_upload(16, 16),
     cache: 'no-store'
   })
   if (!profile.ok) throw new Error('Could not publish browser pre-keys')

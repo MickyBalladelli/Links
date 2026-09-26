@@ -21,6 +21,7 @@ export type WebCoreFrameResult = 'pending' | 'recoveryComplete'
 export interface WebReceivedTextMessage {
   conversationID: string
   senderDeviceID: string
+  senderUserID: string
   text: string
   sequenceID: bigint
   sentAtMs: bigint

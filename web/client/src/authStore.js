@@ -55,7 +55,9 @@ export async function createBrowserIdentity() {
   }
   let keyPair
   try {
-    keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])
+    // Keep the WebCrypto key for username auth. The seed is handed to WASM
+    // once so the Rust MLS signer uses this exact same account identity.
+    keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
   } catch {
     throw new Error('This browser does not support Ed25519 account keys.')
   }
@@ -66,10 +68,19 @@ export async function createBrowserIdentity() {
     throw new Error('The browser could not prepare the public account key.')
   }
   if (publicKey.length !== 32) throw new Error('The browser returned an invalid account key.')
+  let privateSeed
+  try {
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', keyPair.privateKey))
+    if (pkcs8.length < 32) throw new Error('short key')
+    privateSeed = pkcs8.slice(pkcs8.length - 32)
+  } catch {
+    throw new Error('The browser could not prepare the encrypted messaging identity.')
+  }
   return {
     deviceID: crypto.randomUUID(),
     mlsNodeID: crypto.randomUUID(),
     privateKey: keyPair.privateKey,
+    privateSeed,
     publicKey,
     handle: '',
     mlsCredential: ''

@@ -404,7 +404,20 @@ async function stopWebMessaging() {
 }
 
 function appendIncomingText(message) {
-  const conversation = conversations.value.find(item => item.id === message.conversationID || item.mlsConversationID === message.conversationID)
+  let conversation = conversations.value.find(item => item.id === message.conversationID || item.mlsConversationID === message.conversationID)
+  if (!conversation && isCanonicalUUID(message.senderUserID)) {
+    const contact = contacts.value.find(item => item.userID === message.senderUserID)
+    conversation = {
+      id: message.conversationID,
+      mlsConversationID: message.conversationID,
+      title: contact ? `@${contact.handle}` : 'New conversation',
+      displayName: contact?.displayName,
+      recipientUserID: message.senderUserID,
+      unreadCount: 0,
+      messages: []
+    }
+    conversations.value = [conversation, ...conversations.value]
+  }
   if (!conversation) return
   conversations.value = conversations.value.map(item => item === conversation
     ? {
@@ -422,12 +435,13 @@ function appendIncomingText(message) {
 
 async function startWebMessaging(identity) {
   await stopWebMessaging()
-  if (!identity?.userID || !identity?.deviceID || !identity?.mlsCredential) return
+  if (!identity?.userID || !identity?.deviceID || !identity?.mlsCredential || !identity?.privateSeed) return
   try {
     const session = await createWebMessagingSession({
       userID: identity.userID,
       deviceID: identity.deviceID,
       mlsCredential: identity.mlsCredential,
+      identitySeed: identity.privateSeed,
       contacts: contacts.value,
       accessToken: () => accessToken.value,
       onState: state => { connectionState.value = state === 'stopped' ? 'preview' : state },
@@ -1219,9 +1233,10 @@ async function sendPreviewMessage(event) {
   composerText.value = ''
   let sentOverNetwork = false
   let sendError = ''
-  if (text && !attachment && webMessagingSession?.isConnected && selected?.recipientUserID && isCanonicalUUID(selected.mlsConversationID)) {
+  const networkConversationID = selected?.mlsConversationID || selected?.id
+  if (text && !attachment && webMessagingSession?.isConnected && selected?.recipientUserID && isCanonicalUUID(networkConversationID)) {
     try {
-      webMessagingSession.sendText(selected.mlsConversationID, selected.recipientUserID, text)
+      webMessagingSession.sendText(networkConversationID, selected.recipientUserID, text)
       sentOverNetwork = true
     } catch (error) {
       sendError = `Encrypted send failed: ${error.message || 'connection unavailable.'}`
@@ -1495,16 +1510,26 @@ function ConversationDetail() {
           <div class="conversation-status"><StatusDot /><span>{statusLabel}</span></div>
         </header>
 
-        <div class="delivery-banner">
-          <LiveStatusIcon size="1rem" />
-          <div>
-            <strong>Local browser mode</strong>
-            <span>Messages and attachments are saved on this device.</span>
-          </div>
-          <Badge value="Local" tone="warning" />
-        </div>
-
-        <div class="secure-note"><LockIcon size="0.8rem" /><span>Encrypted sync is not enabled in this browser build.</span></div>
+        {computed(() => connectionState.value === 'ready'
+          ? <div class="delivery-banner is-connected">
+              <LiveStatusIcon size="1rem" />
+              <div>
+                <strong>Encrypted sync connected</strong>
+                <span>Messages use the shared Rust/WASM core.</span>
+              </div>
+              <Badge value="Connected" tone="success" />
+            </div>
+          : <>
+              <div class="delivery-banner">
+                <LiveStatusIcon size="1rem" />
+                <div>
+                  <strong>Local browser mode</strong>
+                  <span>Messages and attachments are saved on this device.</span>
+                </div>
+                <Badge value="Local" tone="warning" />
+              </div>
+              <div class="secure-note"><LockIcon size="0.8rem" /><span>Encrypted sync is not enabled in this browser build.</span></div>
+            </>)}
 
         <section class="message-list" aria-live="polite"><Messages /></section>
 
@@ -1742,7 +1767,7 @@ function AuthenticationPopup() {
         <label for="session-auth-base">Account service</label>
         <TextField id="session-auth-base" value={authBaseURL} placeholder="/links-api" autocomplete="off" />
         <p>{computed(() => authMode.value === 'registration'
-          ? 'Creates a username account and a browser-specific signing identity. The private key remains non-exportable in browser storage.'
+          ? 'Creates a username account and a browser-specific signing identity for encrypted chat.'
           : 'Login works for an account identity previously created in this browser. Other devices must be paired first.')}</p>
         {computed(() => authError.value ? <Alert tone="error">{authError}</Alert> : null)}
       </form>

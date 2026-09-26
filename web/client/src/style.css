@@ -183,6 +183,7 @@ button, input, textarea { font: inherit; }
 .mobile-menu { display: none !important; }
 
 .delivery-banner { min-height: 60px; padding: 10px clamp(16px, 2.5vw, 28px); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; color: var(--links-amber); background: color-mix(in srgb, var(--links-amber) 8%, var(--links-surface)); border-bottom: 1px solid color-mix(in srgb, var(--links-amber) 24%, var(--links-border)); }
+.delivery-banner.is-connected { color: var(--links-green); background: color-mix(in srgb, var(--links-green) 8%, var(--links-surface)); border-bottom-color: color-mix(in srgb, var(--links-green) 24%, var(--links-border)); }
 .delivery-banner > div { min-width: 0; display: flex; flex-direction: column; }
 .delivery-banner strong { color: var(--links-text); font-size: .78rem; }
 .delivery-banner span { margin-top: 2px; color: var(--links-muted); font-size: .7rem; }
