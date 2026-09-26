@@ -44,6 +44,8 @@ body { min-height: 100vh; overflow: hidden; background: var(--links-canvas); col
 button, input, textarea { font: inherit; }
 
 .app {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   min-height: 100vh;
   display: grid;
@@ -52,13 +54,37 @@ button, input, textarea { font: inherit; }
   color: var(--links-text);
 }
 
+.app-background {
+  position: fixed !important;
+  inset: 0;
+  z-index: 0;
+  min-height: 100vh !important;
+  height: 100vh !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  pointer-events: none;
+}
+
+.app-background .prism-background-content {
+  min-height: 100%;
+  padding: 0;
+}
+
+.app > .sidebar,
+.app > .conversation-detail,
+.app > .empty-detail {
+  position: relative;
+  z-index: 1;
+}
+
 .sidebar {
   min-width: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--links-sidebar) 96%, transparent);
+  background: color-mix(in srgb, var(--links-sidebar) 26%, transparent);
   border-right: 1px solid var(--links-border);
+  backdrop-filter: blur(18px);
 }
 
 .sidebar-brand {
@@ -175,7 +201,8 @@ button, input, textarea { font: inherit; }
   height: 100vh;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  background: var(--links-surface-soft);
+  background: color-mix(in srgb, var(--links-surface-soft) 58%, transparent);
+  backdrop-filter: blur(16px);
 }
 
 .conversation-header { min-height: 76px; padding: 12px clamp(16px, 2.5vw, 28px); display: flex; align-items: center; gap: 12px; background: color-mix(in srgb, var(--links-surface) 94%, transparent); border-bottom: 1px solid var(--links-border); backdrop-filter: blur(18px); }
@@ -231,7 +258,9 @@ button, input, textarea { font: inherit; }
 .composer-attachment > button:hover { color: var(--links-text); background: var(--links-accent-soft); }
 .drop-hint { position: absolute; inset: 0; display: none; place-items: center; z-index: 4; color: var(--links-accent); background: color-mix(in srgb, var(--links-surface) 92%, transparent); font-size: .82rem; font-weight: 700; pointer-events: none; }
 .composer.is-dragging .drop-hint { display: grid; }
-.empty-detail { min-width: 0; height: 100vh; display: grid; place-items: center; background: var(--links-surface-soft); }
+.empty-detail { min-width: 0; height: 100vh; display: grid; place-items: center; background: color-mix(in srgb, var(--links-surface-soft) 58%, transparent); backdrop-filter: blur(16px); }
+.empty-detail .prism-empty-state { color: var(--links-muted); }
+.empty-detail .prism-empty-state h3 { color: var(--links-text); }
 
 .prism-popup-layer:has(.links-dialog) .prism-popup-backdrop {
   background: color-mix(in srgb, #070b12 58%, transparent);

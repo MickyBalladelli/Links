@@ -2,6 +2,7 @@ import { computed, mount, signal } from '@mickyballadelli/matrix'
 import {
   Alert,
   Avatar,
+  Background,
   Badge,
   Button,
   ChatIcon,
@@ -927,15 +928,10 @@ async function lookupHandle(handle) {
   if (!validHandle(cleanHandle)) {
     throw new Error('Use 3–32 lowercase letters, numbers, or underscores.')
   }
-  if (!accessToken.value.trim()) {
-    const local = contacts.value.find(contact => contact.handle === cleanHandle)
-    if (local) return local
-    throw new Error('Add a bearer token in Profile to resolve a new username.')
-  }
 
   const base = authBaseURL.value.trim().replace(/\/$/, '')
   const response = await fetch(`${base}/v1/directory/${encodeURIComponent(cleanHandle)}`, {
-    headers: authHeaders(),
+    headers: { ...authHeaders(), Accept: 'application/json' },
     cache: 'no-store',
     credentials: 'omit',
     redirect: 'error'
@@ -1884,6 +1880,19 @@ function ProfilePopup() {
 function App() {
   return (
     <div class="app" use:style={prismTheme}>
+      <Background
+        class="app-background"
+        palette="aurora"
+        animation="veil"
+        speed={0.42}
+        intensity={0.72}
+        grain={0.01}
+        overlayOpacity={0.18}
+        minHeight="100vh"
+        height="100vh"
+        padding="0"
+        ariaLabel="Links ambient background"
+      />
       <div class="mobile-scrim" onClick={() => { mobileSidebarOpen.value = false }}></div>
       <Sidebar />
       <ConversationDetail />
