@@ -43,6 +43,10 @@ export function readAttachment(id) {
   return runTransaction('readonly', store => store.get(id)).then(value => value instanceof Blob ? value : null)
 }
 
+export function removeAttachment(id) {
+  return id ? runTransaction('readwrite', store => store.delete(id)) : Promise.resolve()
+}
+
 export function clearAttachments() {
   return runTransaction('readwrite', store => store.clear())
 }

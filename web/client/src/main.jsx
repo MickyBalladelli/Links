@@ -20,9 +20,10 @@ import {
   prismTheme
 } from '@mickyballadelli/prism'
 import './style.css'
-import { clearAttachments, readAttachment, saveAttachment } from './attachmentStore.js'
+import { clearAttachments, readAttachment, removeAttachment, saveAttachment } from './attachmentStore.js'
 import { createBrowserIdentity, loadBrowserIdentity, saveBrowserIdentity } from './authStore.js'
 import { createWebMessagingSession } from './messagingRuntime.js'
+import { RemoveConversationPopup } from './removeConversationPopup.jsx'
 
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
@@ -84,6 +85,8 @@ const newConversationOpen = signal(false)
 const addContactOpen = signal(false)
 const removeContactOpen = signal(false)
 const contactPendingRemoval = signal(null)
+const removeConversationOpen = signal(false)
+const conversationPendingRemoval = signal(null)
 const contactPictures = signal({})
 const profileOpen = signal(false)
 const mobileSidebarOpen = signal(false)
@@ -1301,23 +1304,30 @@ function ConversationAvatar({ conversation, size = 'medium' }) {
 
 function ConversationList() {
   return computed(() => filteredConversations.value.length ? filteredConversations.value.map(conversation => (
-    <button
-      type="button"
-      class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}
-      onClick={() => selectConversation(conversation.id)}
-    >
-      <ConversationAvatar conversation={conversation} />
-      <span class="conversation-copy">
-        <strong>{conversation.displayName || conversation.title}</strong>
-        {conversation.isGroup
-          ? <span>{conversationSummary(conversation)}</span>
-          : <>
-              <span>{conversation.displayName ? conversation.title : conversationSummary(conversation)}</span>
-              {conversation.displayName ? <span>{conversationSummary(conversation)}</span> : null}
-            </>}
-      </span>
-      {conversation.unreadCount > 0 ? <Badge value={conversation.unreadCount > 99 ? '99+' : conversation.unreadCount} tone="info" /> : null}
-    </button>
+    <div class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}>
+      <button type="button" class="conversation-open" onClick={() => selectConversation(conversation.id)}>
+        <ConversationAvatar conversation={conversation} />
+        <span class="conversation-copy">
+          <strong>{conversation.displayName || conversation.title}</strong>
+          {conversation.isGroup
+            ? <span>{conversationSummary(conversation)}</span>
+            : <>
+                <span>{conversation.displayName ? conversation.title : conversationSummary(conversation)}</span>
+                {conversation.displayName ? <span>{conversationSummary(conversation)}</span> : null}
+              </>}
+        </span>
+        {conversation.unreadCount > 0 ? <Badge value={conversation.unreadCount > 99 ? '99+' : conversation.unreadCount} tone="info" /> : null}
+      </button>
+      <button
+        type="button"
+        class="conversation-remove"
+        aria-label={`Remove ${conversation.title}`}
+        title="Remove conversation"
+        onClick={event => askRemoveConversation(event, conversation)}
+      >
+        <TrashIcon />
+      </button>
+    </div>
   )) : (
     <p class="sidebar-empty">No matching conversations.</p>
   ))
@@ -1335,8 +1345,50 @@ function confirmRemoveContact() {
   removeContactOpen.value = false
   contactPendingRemoval.value = null
   if (!contact) return
+  const pictureURL = contactPictures.value[contact.userID]
+  if (pictureURL) URL.revokeObjectURL(pictureURL)
   contacts.value = contacts.value.filter(item => item.userID !== contact.userID)
+  const nextPictures = { ...contactPictures.value }
+  delete nextPictures[contact.userID]
+  contactPictures.value = nextPictures
   persistState()
+  notice.value = `Removed @${contact.handle} from contacts.`
+}
+
+function askRemoveConversation(event, conversation) {
+  event.preventDefault()
+  event.stopPropagation()
+  conversationPendingRemoval.value = conversation
+  removeConversationOpen.value = true
+}
+
+async function confirmRemoveConversation() {
+  const conversation = conversationPendingRemoval.value
+  removeConversationOpen.value = false
+  conversationPendingRemoval.value = null
+  if (!conversation) return
+
+  const attachmentIDs = conversation.messages
+    .map(message => message.attachment?.id)
+    .filter(Boolean)
+  attachmentIDs.forEach(id => {
+    const url = attachmentURLs.value[id]
+    if (url) URL.revokeObjectURL(url)
+  })
+  try {
+    await Promise.all(attachmentIDs.map(id => removeAttachment(id)))
+  } catch {
+    // Keep conversation removal usable when browser storage is unavailable.
+  }
+  const nextURLs = { ...attachmentURLs.value }
+  attachmentIDs.forEach(id => { delete nextURLs[id] })
+  attachmentURLs.value = nextURLs
+  conversations.value = conversations.value.filter(item => item.id !== conversation.id)
+  if (selectedConversationID.value === conversation.id) {
+    selectedConversationID.value = conversations.value[0]?.id || null
+  }
+  persistState()
+  notice.value = `Removed ${conversation.title} from this browser.`
 }
 
 function ContactList() {
@@ -1365,13 +1417,7 @@ function ContactList() {
 }
 
 function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M4 7h16" />
-      <path d="M9 7V5h6v2" />
-      <path d="M8 7l1 12h6l1-12" />
-    </svg>
-  )
+  return <span class="trash-icon" aria-hidden="true"></span>
 }
 
 function FileIcon() {
@@ -1846,6 +1892,12 @@ function App() {
       <CreateGroupPopup />
       <GroupInfoPopup />
       <RemoveContactPopup />
+      <RemoveConversationPopup
+        open={removeConversationOpen}
+        pending={conversationPendingRemoval}
+        onCancel={() => { removeConversationOpen.value = false; conversationPendingRemoval.value = null }}
+        onConfirm={confirmRemoveConversation}
+      />
       <ProfilePopup />
       <LogoutPopup />
       <AuthenticationPopup />
