@@ -162,6 +162,7 @@ function rememberMessageScroll(event) {
 
 function scheduleMessageScrollRestore() {
   if (messageScrollRestoreFrame) cancelAnimationFrame(messageScrollRestoreFrame)
+  document.querySelector('.message-list')?.classList.add('is-scroll-pending')
   const conversationID = selectedConversationID.value
   messageScrollRestoreFrame = requestAnimationFrame(() => {
     messageScrollRestoreFrame = requestAnimationFrame(() => {
@@ -172,11 +173,13 @@ function scheduleMessageScrollRestore() {
       const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
       if (!position) {
         element.scrollTop = maxScrollTop
+        element.classList.remove('is-scroll-pending')
         return
       }
       element.scrollTop = position.atBottom
         ? maxScrollTop
         : Math.min(position.top, maxScrollTop)
+      element.classList.remove('is-scroll-pending')
     })
   })
 }
@@ -1903,7 +1906,7 @@ function ConversationDetail() {
                   : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
             </div>)}
 
-        <section class="message-list" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
+        <section class="message-list is-scroll-pending" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
 
         <form
           class={computed(() => `composer ${composerDragActive.value ? 'is-dragging' : ''}`)}
