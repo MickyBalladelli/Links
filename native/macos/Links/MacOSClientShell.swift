@@ -1590,12 +1590,12 @@ private struct ComposerTextEditor: NSViewRepresentable {
             return CGSize(width: width, height: 38)
         }
         textContainer.containerSize = NSSize(
-            width: max(1, width - 24),
+            width: max(1, width),
             height: .greatestFiniteMagnitude)
         layoutManager.ensureLayout(for: textContainer)
         let contentHeight = layoutManager.usedRect(for: textContainer).height
             + textView.textContainerInset.height * 2
-        return CGSize(width: width, height: min(110, max(38, ceil(contentHeight))))
+        return CGSize(width: width, height: min(108, max(36, ceil(contentHeight))))
     }
 
     private func configurePasteHandler(
@@ -1667,7 +1667,7 @@ private struct ComposerView: View {
                         isEnabled: model.canComposeSelectedConversation
                             && !model.isSendingComposerImage,
                         onPasteImage: model.setComposerImage)
-                        .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 110)
+                        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 108)
                     if model.composerText.isEmpty {
                         Text("Message · paste an image")
                             .foregroundStyle(.secondary)
@@ -1676,7 +1676,6 @@ private struct ComposerView: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 5)
                 .background(Color.primary.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 Button {
