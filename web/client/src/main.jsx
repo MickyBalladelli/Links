@@ -30,11 +30,37 @@ import { RemoveConversationPopup } from './removeConversationPopup.jsx'
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
 const accessToken = signal('')
+const autoRestoreDisabledKey = 'links-web-client-auto-restore-disabled-v1'
+const lastAccountHandleKey = 'links-web-client-last-account-handle-v1'
 const profilePictureKey = 'links-web-client-profile-picture-v1'
 const profileHandleKey = 'links-web-client-profile-handle-v1'
 const profileDisplayNameKey = 'links-web-client-profile-display-name-v1'
 let activeAccountID = 'preview'
 let webMessagingSession = null
+let isRestoringSession = false
+
+function setAutoRestoreDisabled(disabled) {
+  try {
+    if (disabled) {
+      localStorage.setItem(autoRestoreDisabledKey, '1')
+      localStorage.removeItem(lastAccountHandleKey)
+    } else localStorage.removeItem(autoRestoreDisabledKey)
+  } catch {
+    // Keep automatic connection available when browser storage is unavailable.
+  }
+}
+
+function rememberAutoRestoreHandle(handle) {
+  try { localStorage.setItem(lastAccountHandleKey, normalizeHandle(handle)) } catch { /* Keep it in memory. */ }
+}
+
+function autoRestoreIsDisabled() {
+  try {
+    return localStorage.getItem(autoRestoreDisabledKey) === '1'
+  } catch {
+    return false
+  }
+}
 
 function accountStorageKey(baseKey, accountID = activeAccountID) {
   return accountID === 'preview' ? baseKey : `${baseKey}:${accountID}`
@@ -42,6 +68,8 @@ function accountStorageKey(baseKey, accountID = activeAccountID) {
 
 function loadProfileHandle() {
   try {
+    const active = localStorage.getItem(lastAccountHandleKey)
+    if (validHandle(active)) return active
     const saved = localStorage.getItem(accountStorageKey(profileHandleKey))
     if (validHandle(saved)) return saved
   } catch {
@@ -669,9 +697,67 @@ function openAuthenticationDialog(mode = 'login') {
   authDialogOpen.value = true
 }
 
+async function establishUsernameSession(handle, purpose, identity) {
+  const publicKey = new Uint8Array(identity.publicKey)
+  const publicKeyText = encodeBase64URL(publicKey)
+  const challengeResponse = await fetch(`${authBase()}/v1/auth/username/challenge`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      handle,
+      purpose,
+      device_id: identity.deviceID,
+      mls_node_id: identity.mlsNodeID,
+      public_key: publicKeyText
+    }),
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+  if (challengeResponse.status === 404) throw new Error(`No Links account uses @${handle} with this browser identity.`)
+  if (challengeResponse.status === 409) throw new Error(purpose === 'registration' ? `@${handle} is already in use.` : 'This browser identity cannot open that account.')
+  if (challengeResponse.status === 429) throw new Error('Too many attempts. Wait a moment and try again.')
+  if (!challengeResponse.ok) throw new Error('The account service could not start authentication.')
+  const challenge = await challengeResponse.json()
+  if (challenge.handle !== handle || challenge.purpose !== purpose
+    || challenge.device_id !== identity.deviceID || challenge.mls_node_id !== identity.mlsNodeID
+    || challenge.public_key !== publicKeyText || Number(challenge.expires_at_ms) <= Date.now()) {
+    throw new Error('The account service returned an invalid authentication challenge.')
+  }
+  const transcript = usernameAuthTranscript(purpose, challenge)
+  const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', identity.privateKey, transcript))
+  const finishResponse = await fetch(`${authBase()}/v1/auth/username/${purpose === 'registration' ? 'register' : 'login'}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challenge_id: challenge.challenge_id, signature: encodeBase64URL(signature) }),
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+  if (finishResponse.status === 401) throw new Error('The account service rejected this browser identity.')
+  if (finishResponse.status === 409) throw new Error(purpose === 'registration' ? `@${handle} is already in use.` : 'This browser session is already active elsewhere.')
+  if (!finishResponse.ok) throw new Error('The account service could not create a session.')
+  const result = await finishResponse.json()
+  const session = result.session
+  if (!session?.access_token || session.device_id !== identity.deviceID || result.handle !== handle) {
+    throw new Error('The account service returned an invalid session.')
+  }
+  uuidBytes(session.user_id)
+  const nextIdentity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
+  await saveBrowserIdentity(nextIdentity)
+  setAutoRestoreDisabled(false)
+  rememberAutoRestoreHandle(handle)
+  accessToken.value = session.access_token
+  switchAccountState(session.user_id, handle)
+  await startWebMessaging(nextIdentity)
+  refreshProfileDisplayName()
+  refreshSavedContactNames()
+  return nextIdentity
+}
+
 async function authenticateUsername(event) {
   event?.preventDefault()
-  if (isAuthenticating.value) return
+  if (isAuthenticating.value || isRestoringSession) return
   const handle = normalizeHandle(authHandle.value)
   if (!validHandle(handle)) {
     authError.value = 'Use 3–32 lowercase letters, numbers, or underscores.'
@@ -682,66 +768,33 @@ async function authenticateUsername(event) {
   authError.value = ''
   const purpose = authMode.value === 'registration' ? 'registration' : 'login'
   try {
-    let identity = purpose === 'registration' ? await createBrowserIdentity() : await loadBrowserIdentity(handle)
+    const identity = purpose === 'registration' ? await createBrowserIdentity() : await loadBrowserIdentity(handle)
     if (!identity) throw new Error('No browser identity exists on this device. Create an account here or pair this browser first.')
-    const publicKey = new Uint8Array(identity.publicKey)
-    const publicKeyText = encodeBase64URL(publicKey)
-    const challengeResponse = await fetch(`${authBase()}/v1/auth/username/challenge`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        handle,
-        purpose,
-        device_id: identity.deviceID,
-        mls_node_id: identity.mlsNodeID,
-        public_key: publicKeyText
-      }),
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error'
-    })
-    if (challengeResponse.status === 404) throw new Error(`No Links account uses @${handle} with this browser identity.`)
-    if (challengeResponse.status === 409) throw new Error(purpose === 'registration' ? `@${handle} is already in use.` : 'This browser identity cannot open that account.')
-    if (challengeResponse.status === 429) throw new Error('Too many attempts. Wait a moment and try again.')
-    if (!challengeResponse.ok) throw new Error('The account service could not start authentication.')
-    const challenge = await challengeResponse.json()
-    if (challenge.handle !== handle || challenge.purpose !== purpose
-      || challenge.device_id !== identity.deviceID || challenge.mls_node_id !== identity.mlsNodeID
-      || challenge.public_key !== publicKeyText || Number(challenge.expires_at_ms) <= Date.now()) {
-      throw new Error('The account service returned an invalid authentication challenge.')
-    }
-    const transcript = usernameAuthTranscript(purpose, challenge)
-    const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', identity.privateKey, transcript))
-    const finishResponse = await fetch(`${authBase()}/v1/auth/username/${purpose === 'registration' ? 'register' : 'login'}`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ challenge_id: challenge.challenge_id, signature: encodeBase64URL(signature) }),
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error'
-    })
-    if (finishResponse.status === 401) throw new Error('The account service rejected this browser identity.')
-    if (finishResponse.status === 409) throw new Error(purpose === 'registration' ? `@${handle} is already in use.` : 'This browser session is already active elsewhere.')
-    if (!finishResponse.ok) throw new Error('The account service could not create a session.')
-    const result = await finishResponse.json()
-    const session = result.session
-    if (!session?.access_token || session.device_id !== identity.deviceID || result.handle !== handle) {
-      throw new Error('The account service returned an invalid session.')
-    }
-    uuidBytes(session.user_id)
-    identity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
-    await saveBrowserIdentity(identity)
-    accessToken.value = session.access_token
-    switchAccountState(session.user_id, handle)
-    await startWebMessaging(identity)
+    await establishUsernameSession(handle, purpose, identity)
     authDialogOpen.value = false
     notice.value = purpose === 'registration' ? `Created @${handle} and opened a browser session.` : `Logged in as @${handle}.`
-    refreshProfileDisplayName()
-    refreshSavedContactNames()
   } catch (error) {
     authError.value = error.message || 'Could not create an account session.'
   } finally {
     isAuthenticating.value = false
+  }
+}
+
+async function restoreSavedSession() {
+  if (isRestoringSession || isAuthenticating.value || accessToken.value || autoRestoreIsDisabled()) return
+  const handle = normalizeHandle(profileHandle.value)
+  if (!validHandle(handle)) return
+  isRestoringSession = true
+  try {
+    const identity = await loadBrowserIdentity(handle)
+    if (!identity?.privateKey || !identity.publicKey || !identity.deviceID || !identity.mlsNodeID) return
+    await establishUsernameSession(handle, 'login', identity)
+  } catch {
+    // Keep local preview usable when the account service is offline or the saved
+    // browser identity needs to be paired again.
+    connectionState.value = 'preview'
+  } finally {
+    isRestoringSession = false
   }
 }
 
@@ -762,6 +815,7 @@ async function logoutAccount() {
   if (!token) {
     await stopWebMessaging()
     accessToken.value = ''
+    setAutoRestoreDisabled(true)
     connectionState.value = 'preview'
     logoutConfirmOpen.value = false
     profileOpen.value = false
@@ -787,6 +841,7 @@ async function logoutAccount() {
   } finally {
     await stopWebMessaging()
     if (accessToken.value.trim() === token) accessToken.value = ''
+    setAutoRestoreDisabled(true)
     connectionState.value = 'preview'
     isLoggingOut.value = false
     logoutConfirmOpen.value = false
@@ -803,6 +858,7 @@ async function changeProfileUsername() {
   if (isChangingUsername.value) return
   profileUsernameError.value = ''
   const handle = normalizeHandle(profileHandleDraft.value)
+  const previousHandle = normalizeHandle(profileHandle.value)
   if (!validHandle(handle)) {
     profileUsernameError.value = 'Use 3–32 lowercase letters, numbers, or underscores.'
     return
@@ -838,6 +894,13 @@ async function changeProfileUsername() {
     }
     profileHandle.value = result.handle
     profileHandleDraft.value = result.handle
+    rememberAutoRestoreHandle(result.handle)
+    try {
+      const identity = await loadBrowserIdentity(previousHandle)
+      if (identity) await saveBrowserIdentity({ ...identity, handle: result.handle })
+    } catch {
+      // Username changes still succeed if browser identity storage is unavailable.
+    }
     try {
       localStorage.setItem(accountStorageKey(profileHandleKey), result.handle)
     } catch {
@@ -1274,7 +1337,12 @@ const filteredConversations = computed(() => {
     || normalizeHandle(conversation.title).includes(query))
 })
 
-const statusLabel = computed(() => connectionState.value === 'ready' ? 'Connected' : 'UI preview')
+const statusLabel = computed(() => {
+  if (connectionState.value === 'ready') return 'Connected'
+  if (connectionState.value === 'connecting') return 'Connecting…'
+  if (connectionState.value === 'failed') return 'Reconnecting…'
+  return 'UI preview'
+})
 
 function StatusDot() {
   return <span class={computed(() => `status-dot is-${connectionState.value}`)} aria-hidden="true"></span>
@@ -1292,42 +1360,45 @@ function GroupIcon({ size = 40 }) {
   )
 }
 
-function ConversationAvatar({ conversation, size = 'medium' }) {
+function ConversationAvatar({ conversation, pictures = {}, size = 'medium' }) {
   if (conversation.isGroup) return <GroupIcon size={size === 'large' ? 48 : size === 'small' ? 32 : 40} />
-  return contactPictures.value[conversation.recipientUserID]
-    ? <img class={`profile-picture is-${size}`} src={contactPictures.value[conversation.recipientUserID]} alt="" />
+  return pictures[conversation.recipientUserID]
+    ? <img class={`profile-picture is-${size}`} src={pictures[conversation.recipientUserID]} alt="" />
     : <Avatar name={avatarName(conversation.displayName || conversation.title)} size={size} />
 }
 
 function ConversationList() {
-  return computed(() => filteredConversations.value.length ? filteredConversations.value.map(conversation => (
-    <div class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}>
-      <button type="button" class="conversation-open" onClick={() => selectConversation(conversation.id)}>
-        <ConversationAvatar conversation={conversation} />
-        <span class="conversation-copy">
-          <strong>{conversation.displayName || conversation.title}</strong>
-          {conversation.isGroup
-            ? <span>{conversationSummary(conversation)}</span>
-            : <>
-                <span>{conversation.displayName ? conversation.title : conversationSummary(conversation)}</span>
-                {conversation.displayName ? <span>{conversationSummary(conversation)}</span> : null}
-              </>}
-        </span>
-        {conversation.unreadCount > 0 ? <Badge value={conversation.unreadCount > 99 ? '99+' : conversation.unreadCount} tone="info" /> : null}
-      </button>
-      <button
-        type="button"
-        class="conversation-remove"
-        aria-label={`Remove ${conversation.title}`}
-        title="Remove conversation"
-        onClick={event => askRemoveConversation(event, conversation)}
-      >
-        <TrashIcon size="1.25rem" />
-      </button>
-    </div>
-  )) : (
-    <p class="sidebar-empty">No matching conversations.</p>
-  ))
+  return computed(() => {
+    const pictures = contactPictures.value
+    return filteredConversations.value.length ? filteredConversations.value.map(conversation => (
+      <div class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}>
+        <button type="button" class="conversation-open" onClick={() => selectConversation(conversation.id)}>
+          <ConversationAvatar conversation={conversation} pictures={pictures} />
+          <span class="conversation-copy">
+            <strong>{conversation.displayName || conversation.title}</strong>
+            {conversation.isGroup
+              ? <span>{conversationSummary(conversation)}</span>
+              : <>
+                  <span>{conversation.displayName ? conversation.title : conversationSummary(conversation)}</span>
+                  {conversation.displayName ? <span>{conversationSummary(conversation)}</span> : null}
+                </>}
+          </span>
+          {conversation.unreadCount > 0 ? <Badge value={conversation.unreadCount > 99 ? '99+' : conversation.unreadCount} tone="info" /> : null}
+        </button>
+        <button
+          type="button"
+          class="conversation-remove"
+          aria-label={`Remove ${conversation.title}`}
+          title="Remove conversation"
+          onClick={event => askRemoveConversation(event, conversation)}
+        >
+          <TrashIcon size="1.25rem" />
+        </button>
+      </div>
+    )) : (
+      <p class="sidebar-empty">No matching conversations.</p>
+    )
+  })
 }
 
 function askRemoveContact(event, contact) {
@@ -1527,6 +1598,7 @@ function Messages() {
 function ConversationDetail() {
   return computed(() => {
     const conversation = selectedConversation.value
+    const pictures = contactPictures.value
     if (!conversation) {
       return (
         <main class="empty-detail">
@@ -1538,7 +1610,7 @@ function ConversationDetail() {
       <main class="conversation-detail">
         <header class="conversation-header">
           <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
-          <ConversationAvatar conversation={conversation} size="large" />
+          <ConversationAvatar conversation={conversation} pictures={pictures} size="large" />
           <div class="conversation-heading">
             <h1>{conversation.displayName || conversation.title}</h1>
             <p>{conversation.isGroup ? `${conversation.members?.length || 1} members` : conversation.title}</p>
@@ -1920,3 +1992,4 @@ function App() {
 }
 
 mount(<App />, document.querySelector('#app'))
+window.setTimeout(() => { restoreSavedSession() }, 0)
