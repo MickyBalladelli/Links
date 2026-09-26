@@ -471,6 +471,7 @@ private struct IOSChatsView: View {
     private var padChats: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
+                connectionStatusBar
                 padChatsHeader
 
                 Group {
@@ -521,26 +522,32 @@ private struct IOSChatsView: View {
         }
     }
 
+    private var connectionStatusBar: some View {
+        let ready = model.messagingState == .ready
+        return HStack(spacing: 7) {
+            if model.messagingState == .connecting || model.messagingState == .reconnecting {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: ready ? "lock.fill" : "arrow.triangle.2.circlepath")
+            }
+            Text(model.messagingStatus)
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(ready ? IOSLinksPalette.mint : IOSLinksPalette.violet)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background((ready ? IOSLinksPalette.mint : IOSLinksPalette.violet).opacity(0.09))
+    }
+
     private var padChatsHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Chats")
                     .font(.largeTitle.weight(.bold))
-
                 Spacer(minLength: 8)
-
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(IOSLinksPalette.mint)
-                        .frame(width: 8, height: 8)
-                    Text("Secure")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(IOSLinksPalette.mint)
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(IOSLinksPalette.mint.opacity(0.11))
-                .clipShape(Capsule())
             }
 
             HStack(spacing: 8) {
@@ -1438,6 +1445,7 @@ private struct IOSPairDeviceSheet: View {
 
 private struct IOSConversationView: View {
     @ObservedObject var model: IOSMobileAppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let conversationID: String
     @State private var composerText = ""
     @State private var composerImage: UIImage?
@@ -1462,27 +1470,33 @@ private struct IOSConversationView: View {
             ? "Establishing a secure conversation" : "Secure setup needs attention"
     }
 
+    private var showsConnectionStatusInConversation: Bool {
+        horizontalSizeClass != .regular
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 7) {
-                if model.preparingConversationIDs.contains(conversationID) {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: conversation?.isSecureReady == true
-                          && model.messagingState == .ready
-                          ? "lock.fill" : "arrow.triangle.2.circlepath")
+            if showsConnectionStatusInConversation {
+                HStack(spacing: 7) {
+                    if model.preparingConversationIDs.contains(conversationID) {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: conversation?.isSecureReady == true
+                              && model.messagingState == .ready
+                              ? "lock.fill" : "arrow.triangle.2.circlepath")
+                    }
+                    Text(setupStatusText)
                 }
-                Text(setupStatusText)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(conversation?.isSecureReady == true
+                                 ? IOSLinksPalette.mint : IOSLinksPalette.violet)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background((conversation?.isSecureReady == true
+                             ? IOSLinksPalette.mint : IOSLinksPalette.violet).opacity(0.09))
             }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(conversation?.isSecureReady == true
-                             ? IOSLinksPalette.mint : IOSLinksPalette.violet)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background((conversation?.isSecureReady == true
-                         ? IOSLinksPalette.mint : IOSLinksPalette.violet).opacity(0.09))
 
             if let conversation, conversation.messages.isEmpty {
                 Spacer()
