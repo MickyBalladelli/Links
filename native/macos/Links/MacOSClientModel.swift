@@ -3000,6 +3000,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         let directory = MacOSDirectoryChatAdapter(
             directoryClient: authClient,
             keyPackageProvider: keyPackageProvider,
+            cachedHandle: { [weak self] userID in
+                self?.contacts.first(where: { $0.userID == userID })?.handle
+                    ?? self?.conversations.first(where: {
+                        $0.recipientUserID == userID
+                    })?.title.replacingOccurrences(of: "^@", with: "", options: .regularExpression)
+            },
             onDirectoryResolved: { [weak self] userID, handle, displayName in
                 Task { @MainActor [weak self] in
                     self?.refreshCachedRecipientHandle(

@@ -1150,29 +1150,49 @@ enum MacOSDirectoryError: Error {
 final class MacOSDirectoryChatAdapter: IOSDirectChatDirectory {
     private let directoryClient: IOSUsernameAuthClient
     private let keyPackageProvider: IOSHTTPMLSKeyPackageProvider
+    private let cachedHandle: @MainActor (String) -> String?
     private let onDirectoryResolved: (String, String, String?) -> Void
 
     init(directoryClient: IOSUsernameAuthClient,
          keyPackageProvider: IOSHTTPMLSKeyPackageProvider,
+         cachedHandle: @escaping @MainActor (String) -> String? = { _ in nil },
          onDirectoryResolved: @escaping (String, String, String?) -> Void = { _, _, _ in }) {
         self.directoryClient = directoryClient
         self.keyPackageProvider = keyPackageProvider
+        self.cachedHandle = cachedHandle
         self.onDirectoryResolved = onDirectoryResolved
     }
 
     func queryRecipientDevices(accessToken: String, recipientUserID: String)
         async throws -> [IOSRecipientDeviceDescriptor] {
-        let directory: IOSUsernameDirectory
-        do {
-            directory = try await directoryClient.lookup(
-                userID: recipientUserID, accessToken: accessToken)
-        } catch let error as IOSUsernameAuthError {
-            if case .serverRejected(let statusCode) = error, statusCode == 404 {
-                throw MacOSDirectoryError.accountNotFound
+        let knownHandle = await MainActor.run { cachedHandle(recipientUserID) }
+        var directory: IOSUsernameDirectory?
+        if let knownHandle {
+            do {
+                let resolved = try await directoryClient.lookup(handle: knownHandle)
+                if resolved.userID == recipientUserID {
+                    directory = resolved
+                }
+            } catch let error as IOSUsernameAuthError {
+                if case .serverRejected(let statusCode) = error, statusCode == 404 {
+                    directory = nil
+                } else {
+                    throw error
+                }
             }
-            throw error
         }
-        guard directory.userID == recipientUserID else {
+        if directory == nil {
+            do {
+                directory = try await directoryClient.lookup(
+                    userID: recipientUserID, accessToken: accessToken)
+            } catch let error as IOSUsernameAuthError {
+                if case .serverRejected(let statusCode) = error, statusCode == 404 {
+                    throw MacOSDirectoryError.accountNotFound
+                }
+                throw error
+            }
+        }
+        guard let directory, directory.userID == recipientUserID else {
             throw MacOSDirectoryError.accountNotFound
         }
         onDirectoryResolved(directory.userID, directory.handle, directory.displayName)
