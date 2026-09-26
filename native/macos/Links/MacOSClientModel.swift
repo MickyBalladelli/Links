@@ -310,6 +310,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         label: "ai.links.macos.identity", qos: .userInitiated)
     private var connectionRequested = false
     private var reconnectAfterBackground = false
+    private var sessionRestoreRetryTask: Task<Void, Never>?
     private var preKeyMaintenanceTask: Task<Void, Never>?
     private var preKeyMaintenanceFollowUp = false
     private var isTerminating = false
@@ -468,6 +469,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         contactPictureRefreshTask = nil
         connectionRequested = false
         reconnectAfterBackground = false
+        sessionRestoreRetryTask?.cancel()
+        sessionRestoreRetryTask = nil
         messaging?.shutdown()
         messaging = nil
         directChatDirectory = nil
@@ -1039,7 +1042,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         }
     }
 
-    func restoreSavedSession(reconnectAfterRestore: Bool = false) {
+    func restoreSavedSession(reconnectAfterRestore: Bool = false, retryAttempt: Int = 0) {
+        sessionRestoreRetryTask?.cancel()
+        sessionRestoreRetryTask = nil
         guard !requiresManualSignIn,
               !isAuthenticating,
               let client,
@@ -1056,10 +1061,11 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         isRestoringSession = true
         onboardingError = nil
         isAuthenticating = true
-        Task { @MainActor [weak self] in
+        sessionRestoreRetryTask = Task { @MainActor [weak self] in
             do {
                 _ = try await client.loginUsername(using: authClient, handle: handle)
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
+                self.sessionRestoreRetryTask = nil
                 self.isAuthenticating = false
                 self.isRestoringSession = false
                 self.requiresManualSignIn = false
@@ -1072,6 +1078,30 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             } catch {
                 guard let self else { return }
                 self.isAuthenticating = false
+                if Task.isCancelled {
+                    self.sessionRestoreRetryTask = nil
+                    self.isRestoringSession = false
+                    return
+                }
+                if Self.isTransientSessionRestoreError(error),
+                   !self.requiresManualSignIn,
+                   !self.profileTornDown,
+                   !self.isTerminating {
+                    self.isRestoringSession = true
+                    self.onboardingError = nil
+                    let delaySeconds = min(1 << min(retryAttempt, 4), 15)
+                    self.sessionRestoreRetryTask = Task { @MainActor [weak self] in
+                        try? await Task.sleep(
+                            nanoseconds: UInt64(delaySeconds) * 1_000_000_000)
+                        guard !Task.isCancelled, let self else { return }
+                        self.sessionRestoreRetryTask = nil
+                        self.restoreSavedSession(
+                            reconnectAfterRestore: reconnectAfterRestore,
+                            retryAttempt: retryAttempt + 1)
+                    }
+                    return
+                }
+                self.sessionRestoreRetryTask = nil
                 self.isRestoringSession = false
                 self.onboardingError = Self.usernameAuthenticationErrorMessage(error)
                 self.refreshClientState()
@@ -1141,6 +1171,18 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return handle
         } catch {
             return nil
+        }
+    }
+
+    private static func isTransientSessionRestoreError(_ error: Error) -> Bool {
+        guard let authError = error as? IOSUsernameAuthError else { return false }
+        switch authError {
+        case .networkUnavailable, .cannotConnect, .timedOut, .serviceRejected:
+            return true
+        case .serverRejected(let statusCode):
+            return (500...599).contains(statusCode)
+        default:
+            return false
         }
     }
 
@@ -1520,6 +1562,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         let accessToken = signingOutClient.flatMap { try? $0.accessToken() }
         sessionDefaults?.set(true, forKey: Self.manualSignOutKey)
         requiresManualSignIn = true
+        sessionRestoreRetryTask?.cancel()
+        sessionRestoreRetryTask = nil
         isRestoringSession = false
         authMode = .login
         usernameInput = signingOutClient?.accountHandle ?? usernameInput
@@ -1614,6 +1658,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     func shutdownForTermination() {
         connectionRequested = false
         reconnectAfterBackground = false
+        sessionRestoreRetryTask?.cancel()
+        sessionRestoreRetryTask = nil
         isTerminating = true
         lifecycleStatus = "Stopping"
         profileLogger?.record(.stopping)
