@@ -351,6 +351,12 @@ public final class IOSClient: SharedCoreIdentitySigner {
         return authenticated.expiresAtMs > Self.nowMs()
     }
 
+    public var authenticatedSessionExpiresAtMs: UInt64? {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        return authenticated?.expiresAtMs
+    }
+
     /// Creates a fresh hardware-backed identity and commits only public
     /// metadata to UserDefaults. The seed remains inside HardwareSeedVault.
     @discardableResult

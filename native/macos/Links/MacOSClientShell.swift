@@ -11,9 +11,9 @@ struct LinksRootView: View {
             Group {
                 if model.requiresOnboarding {
                     LinksOnboardingView(model: model)
-                } else if model.shouldRestoreSavedSession || model.isRestoringSession {
+                } else if model.shouldRestoreSavedSession {
                     LinksSessionRestoreView(model: model)
-                } else if model.requiresAccountAuthentication {
+                } else if model.requiresManualSignIn {
                     LinksAccountOnboardingView(model: model)
                 } else {
                     LinksMessagingView(model: model)
@@ -55,12 +55,12 @@ private struct LinksSessionRestoreView: View {
                 .foregroundStyle(model.isRestoringSession ? .blue : .orange)
 
             Text(model.isRestoringSession
-                 ? "Restoring your account"
-                 : "Could not restore your account")
+                 ? "Account server unavailable"
+                 : "Could not reach the account server")
                 .font(.title2.weight(.semibold))
 
             Text(model.isRestoringSession
-                 ? "Your saved Mac identity is signing in securely."
+                 ? "Trying to reconnect automatically. Your chats are safe on this Mac."
                  : "Try again, or log out to enter another account.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
