@@ -1007,6 +1007,8 @@ private final class MacOSRustSharedCore: SharedClientCore {
         var metadataLength = 0
         var ciphertext = Data(count: file.count + 16)
         var ciphertextLength = 0
+        let metadataCapacity = metadata.count
+        let ciphertextCapacity = ciphertext.count
         let status = file.withUnsafeBytes { fileBytes in
             attachmentID.withCString { attachmentBytes in
                 mimeType.withCString { mimeBytes in
@@ -1018,8 +1020,8 @@ private final class MacOSRustSharedCore: SharedClientCore {
                                     UnsafeRawPointer(attachmentBytes).assumingMemoryBound(to: UInt8.self), attachmentID.utf8.count,
                                     UnsafeRawPointer(mimeBytes).assumingMemoryBound(to: UInt8.self), mimeType.utf8.count,
                                     UnsafeRawPointer(nameBytes).assumingMemoryBound(to: UInt8.self), fileName.utf8.count,
-                                    metadataOutput.bindMemory(to: UInt8.self).baseAddress, metadata.count, &metadataLength,
-                                    ciphertextOutput.bindMemory(to: UInt8.self).baseAddress, ciphertext.count, &ciphertextLength)
+                                    metadataOutput.bindMemory(to: UInt8.self).baseAddress, metadataCapacity, &metadataLength,
+                                    ciphertextOutput.bindMemory(to: UInt8.self).baseAddress, ciphertextCapacity, &ciphertextLength)
                             }
                         }
                     }
@@ -1033,16 +1035,19 @@ private final class MacOSRustSharedCore: SharedClientCore {
     }
 
     func decryptFile(metadata: Data, ciphertext: Data) throws -> Data {
-        var metadata = metadata
+        let metadata = metadata
         var plaintext = Data(count: 20 * 1024 * 1024)
         var plaintextLength = 0
+        let metadataLength = metadata.count
+        let ciphertextLength = ciphertext.count
+        let plaintextCapacity = plaintext.count
         let status = metadata.withUnsafeBytes { metadataBytes in
             ciphertext.withUnsafeBytes { ciphertextBytes in
                 plaintext.withUnsafeMutableBytes { output in
                     links_desktop_core_decrypt_file(
-                        metadataBytes.bindMemory(to: UInt8.self).baseAddress, metadata.count,
-                        ciphertextBytes.bindMemory(to: UInt8.self).baseAddress, ciphertext.count,
-                        output.bindMemory(to: UInt8.self).baseAddress, plaintext.count, &plaintextLength)
+                        metadataBytes.bindMemory(to: UInt8.self).baseAddress, metadataLength,
+                        ciphertextBytes.bindMemory(to: UInt8.self).baseAddress, ciphertextLength,
+                        output.bindMemory(to: UInt8.self).baseAddress, plaintextCapacity, &plaintextLength)
                 }
             }
         }

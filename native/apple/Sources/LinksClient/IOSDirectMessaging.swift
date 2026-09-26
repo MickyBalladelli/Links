@@ -623,6 +623,25 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         return try sharedCore.decryptImage(metadata, ciphertext: ciphertext)
     }
 
+    public func encryptFile(_ file: Data, attachmentID: String, mimeType: String,
+                            fileName: String) throws -> (metadata: Data, ciphertext: Data) {
+        lock.lock()
+        let sharedCore = core
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, ready else { throw IOSMessagingError.notConnected }
+        return try sharedCore.encryptFile(
+            file, attachmentID: attachmentID, mimeType: mimeType, fileName: fileName)
+    }
+
+    public func decryptFile(metadata: Data, ciphertext: Data) throws -> Data {
+        lock.lock()
+        let sharedCore = core
+        lock.unlock()
+        guard let sharedCore else { throw IOSMessagingError.notConnected }
+        return try sharedCore.decryptFile(metadata: metadata, ciphertext: ciphertext)
+    }
+
     /// Send private image metadata only after the exact ciphertext upload receipt.
     public func sendImage(conversationID: String, recipientUserID: String,
                           metadata: IOSImageMetadata,
