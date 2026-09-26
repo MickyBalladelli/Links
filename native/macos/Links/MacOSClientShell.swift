@@ -653,14 +653,12 @@ private struct LinksSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9)
-                        .fill(Color.accentColor.opacity(0.16))
-                    Image(systemName: "lock.shield.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.tint)
-                }
-                .frame(width: 32, height: 32)
+                Image("LinksLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFit()
+                    .frame(width: 32, height: 32)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Links")
                         .font(.headline)
