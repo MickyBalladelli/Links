@@ -179,9 +179,39 @@ where
         text: &str,
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError> {
+        self.send_text_internal(core, conversation_id, recipient_user_id, text, transport, false)
+    }
+
+    fn send_text_to_self(
+        &mut self,
+        core: &mut ClientCore<C, M>,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        text: &str,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        self.send_text_internal(core, conversation_id, recipient_user_id, text, transport, true)
+    }
+}
+
+impl<S> DesktopCoreHostAdapter<S> {
+    fn send_text_internal<C, M>(
+        &mut self,
+        core: &mut ClientCore<C, M>,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        text: &str,
+        transport: &mut dyn DesktopFrameTransport,
+        allow_self: bool,
+    ) -> Result<(), CoreError>
+    where
+        C: EnvelopeCrypto + RecipientKeyDirectory + Send,
+        M: MlsEngine,
+        S: DesktopCoreServices,
+    {
         protocol::validate_id(conversation_id)?;
         protocol::validate_id(recipient_user_id)?;
-        if recipient_user_id == core.user_id()
+        if (!allow_self && recipient_user_id == core.user_id())
             || text.is_empty()
             || text.len() > crate::session::DESKTOP_MAX_TEXT_BYTES
         {

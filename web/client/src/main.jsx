@@ -1484,6 +1484,7 @@ async function sendPreviewMessage(event) {
   const networkConversationID = selected?.mlsConversationID || selected?.id
   if (text && !attachment && webMessagingSession?.isConnected && selected?.recipientUserID && isCanonicalUUID(networkConversationID)) {
     try {
+      await webMessagingSession.refreshRecipient?.(selected.recipientUserID)
       webMessagingSession.sendText(networkConversationID, selected.recipientUserID, text)
       sentOverNetwork = true
     } catch (error) {

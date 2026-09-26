@@ -698,6 +698,23 @@ export class WebMessagingCore {
         }
     }
     /**
+     * @param {string} conversation_id
+     * @param {string} recipient_user_id
+     * @param {string} text
+     */
+    send_text_to_self(conversation_id, recipient_user_id, text) {
+        const ptr0 = passStringToWasm0(conversation_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(recipient_user_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.webmessagingcore_send_text_to_self(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {string} user_id
      * @param {string} device_id
      * @param {Uint8Array} identity_public_key

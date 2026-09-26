@@ -117,6 +117,7 @@ export class WebMessagingCore {
     profile_upload(): Uint8Array;
     public_key(): Uint8Array;
     send_text(conversation_id: string, recipient_user_id: string, text: string): void;
+    send_text_to_self(conversation_id: string, recipient_user_id: string, text: string): void;
     set_recipient(user_id: string, device_id: string, identity_public_key: Uint8Array, prekey_bundle: Uint8Array, _mls_credential: Uint8Array, mls_key_package: Uint8Array): void;
     take_messages(): string;
     take_outgoing(): Array<any>;
@@ -228,6 +229,7 @@ export interface InitOutput {
     readonly webmessagingcore_profile_upload: (a: number) => [number, number];
     readonly webmessagingcore_public_key: (a: number) => [number, number];
     readonly webmessagingcore_send_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly webmessagingcore_send_text_to_self: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly webmessagingcore_set_recipient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number];
     readonly webmessagingcore_take_messages: (a: number) => [number, number];
     readonly webmessagingcore_take_outgoing: (a: number) => any;

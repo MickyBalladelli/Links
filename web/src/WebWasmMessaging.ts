@@ -11,6 +11,7 @@ export interface WebWasmMessagingHandle {
   create_hello(accessToken: string): Uint8Array
   handle_server_frame(frame: Uint8Array): void
   send_text(conversationID: string, recipientUserID: string, text: string): void
+  send_text_to_self(conversationID: string, recipientUserID: string, text: string): void
   take_outgoing(): ArrayLike<Uint8Array>
   take_messages(): string
   set_recipient(
@@ -71,7 +72,11 @@ export class WebWasmMessagingCore implements WebMessagingCore {
     text: string,
     transport: WebCoreTransport
   ): void {
-    this.inner.send_text(conversationID, recipientUserID, text)
+    if (recipientUserID === this.userID) {
+      this.inner.send_text_to_self(conversationID, recipientUserID, text)
+    } else {
+      this.inner.send_text(conversationID, recipientUserID, text)
+    }
     this.flush(transport)
   }
 

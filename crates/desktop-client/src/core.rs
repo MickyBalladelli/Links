@@ -52,6 +52,20 @@ where
         text: &str,
         transport: &mut dyn DesktopFrameTransport,
     ) -> Result<(), CoreError>;
+
+    /// Send text to another device on the same account. Browser companions
+    /// use this for cross-device self-chat; normal desktop sends still reject
+    /// the local account as a recipient.
+    fn send_text_to_self(
+        &mut self,
+        core: &mut ClientCore<C, M>,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        text: &str,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError> {
+        self.send_text(core, conversation_id, recipient_user_id, text, transport)
+    }
 }
 
 /// Concrete desktop `DesktopMessagingCore` backed by `links-client-core`.
@@ -88,6 +102,36 @@ impl<C, M, H> RustDesktopMessagingCore<C, M, H> {
 
     pub fn into_parts(self) -> (ClientCore<C, M>, H) {
         (self.core, self.host)
+    }
+
+    /// Send text to a different device belonging to this account.
+    pub fn send_text_to_self(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        text: &str,
+        transport: &mut dyn DesktopFrameTransport,
+    ) -> Result<(), CoreError>
+    where
+        C: EnvelopeCrypto + Send,
+        M: MlsEngine,
+        H: DesktopCoreHost<C, M>,
+    {
+        protocol::validate_id(conversation_id)?;
+        protocol::validate_id(recipient_user_id)?;
+        if recipient_user_id != self.core.user_id()
+            || text.is_empty()
+            || text.len() > crate::session::DESKTOP_MAX_TEXT_BYTES
+        {
+            return Err(CoreError::Authentication);
+        }
+        self.host.send_text_to_self(
+            &mut self.core,
+            conversation_id,
+            recipient_user_id,
+            text,
+            transport,
+        )
     }
 }
 

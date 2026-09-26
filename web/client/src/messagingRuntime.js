@@ -76,7 +76,7 @@ export async function createWebMessagingSession({
   } catch (error) {
     throw new Error(`Browser keys: ${error instanceof Error ? error.message : String(error || '')}`)
   }
-  await loadRecipients(core, contacts, token)
+  const loadedRecipientIDs = await loadRecipients(core, contacts, token, deviceID)
   const session = new WebTextMessaging({
     endpoint: websocketEndpoint(),
     core,
@@ -91,6 +91,11 @@ export async function createWebMessagingSession({
     stop: () => session.stop(),
     shutdown: () => session.shutdown(),
     sendText: (conversationID, recipientUserID, text) => session.sendText(conversationID, recipientUserID, text),
+    refreshRecipient: async recipientUserID => {
+      if (loadedRecipientIDs.has(recipientUserID)) return
+      await loadRecipient(core, { userID: recipientUserID }, token, deviceID)
+      loadedRecipientIDs.add(recipientUserID)
+    },
     get state() { return session.state },
     get isConnected() { return session.isConnected }
   }
@@ -119,38 +124,49 @@ async function publishLocalKeys(rustCore, accessToken) {
   if (!keyPackage.ok) throw new Error(`Could not publish browser MLS key package (${keyPackage.status})`)
 }
 
-async function loadRecipients(core, contacts, accessToken) {
-  const headers = { Authorization: `Bearer ${accessToken()}`, Accept: 'application/json' }
+async function loadRecipients(core, contacts, accessToken, localDeviceID) {
+  const loadedRecipientIDs = new Set()
   for (const contact of contacts) {
     if (!contact?.userID) continue
     try {
-      const directoryResponse = await fetch(`/links-api/v1/directory/users/${encodeURIComponent(contact.userID)}`, {
-        headers,
-        cache: 'no-store'
-      })
-      if (!directoryResponse.ok) continue
-      const directory = await directoryResponse.json()
-      for (const device of directory.devices || []) {
-        const [prekeyResponse, keyPackageResponse] = await Promise.all([
-          fetch(`/links-api/v1/prekeys/${encodeURIComponent(device.device_id)}/claim`, {
-            method: 'POST', headers: { ...headers, Accept: 'application/octet-stream' }, cache: 'no-store'
-          }),
-          fetch(`/links-api/v1/mls/key-package/${encodeURIComponent(device.device_id)}`, {
-            headers: { Authorization: headers.Authorization, Accept: 'application/octet-stream' }, cache: 'no-store'
-          })
-        ])
-        if (!prekeyResponse.ok || !keyPackageResponse.ok) continue
-        core.setRecipient(
-          directory.user_id,
-          device.device_id,
-          decodeBase64URL(device.identity_public_key),
-          new Uint8Array(await prekeyResponse.arrayBuffer()),
-          decodeBase64URL(device.mls_credential),
-          new Uint8Array(await keyPackageResponse.arrayBuffer())
-        )
-      }
+      await loadRecipient(core, contact, accessToken, localDeviceID)
+      loadedRecipientIDs.add(contact.userID)
     } catch {
       // A contact may not have a usable pre-key package yet.
     }
   }
+  return loadedRecipientIDs
+}
+
+async function loadRecipient(core, contact, accessToken, localDeviceID) {
+  const headers = { Authorization: `Bearer ${accessToken()}`, Accept: 'application/json' }
+  const directoryResponse = await fetch(`/links-api/v1/directory/users/${encodeURIComponent(contact.userID)}`, {
+    headers,
+    cache: 'no-store'
+  })
+  if (!directoryResponse.ok) throw new Error(`Recipient directory lookup failed (${directoryResponse.status})`)
+  const directory = await directoryResponse.json()
+  let installed = 0
+  for (const device of directory.devices || []) {
+    if (!device?.device_id || device.device_id === localDeviceID) continue
+    const [prekeyResponse, keyPackageResponse] = await Promise.all([
+      fetch(`/links-api/v1/prekeys/${encodeURIComponent(device.device_id)}/claim`, {
+        method: 'POST', headers: { ...headers, Accept: 'application/octet-stream' }, cache: 'no-store'
+      }),
+      fetch(`/links-api/v1/mls/key-package/${encodeURIComponent(device.device_id)}`, {
+        headers: { Authorization: headers.Authorization, Accept: 'application/octet-stream' }, cache: 'no-store'
+      })
+    ])
+    if (!prekeyResponse.ok || !keyPackageResponse.ok) continue
+    core.setRecipient(
+      directory.user_id,
+      device.device_id,
+      decodeBase64URL(device.identity_public_key),
+      new Uint8Array(await prekeyResponse.arrayBuffer()),
+      decodeBase64URL(device.mls_credential),
+      new Uint8Array(await keyPackageResponse.arrayBuffer())
+    )
+    installed += 1
+  }
+  if (installed === 0) throw new Error('Recipient has no usable device keys')
 }

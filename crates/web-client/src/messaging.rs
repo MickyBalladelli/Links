@@ -164,6 +164,7 @@ struct WebRecipient {
 }
 
 struct WebServices {
+    local_device_id: String,
     identity_public_key: [u8; 32],
     mls_credential: Vec<u8>,
     cursor: u64,
@@ -176,8 +177,13 @@ struct WebServices {
 }
 
 impl WebServices {
-    fn new(identity_public_key: [u8; 32], mls_credential: Vec<u8>) -> Self {
+    fn new(
+        local_device_id: String,
+        identity_public_key: [u8; 32],
+        mls_credential: Vec<u8>,
+    ) -> Self {
         Self {
+            local_device_id,
             identity_public_key,
             mls_credential,
             cursor: 0,
@@ -223,10 +229,14 @@ impl DesktopCoreServices for WebServices {
             .recipients
             .get(recipient_user_id)
             .ok_or(CoreError::Authentication)?;
+        let records = records
+            .iter()
+            .filter(|record| record.device.device_id != self.local_device_id)
+            .collect::<Vec<_>>();
         if records.is_empty() || records.len() > MAX_RECIPIENTS {
             return Err(CoreError::Authentication);
         }
-        Ok(records.iter().map(|record| record.device.clone()).collect())
+        Ok(records.into_iter().map(|record| record.device.clone()).collect())
     }
 
     fn load_conversation_sequence(
@@ -268,7 +278,10 @@ impl DesktopCoreServices for WebServices {
             .recipients
             .get(recipient_user_id)
             .ok_or(CoreError::Authentication)?;
-        for record in records {
+        for record in records
+            .iter()
+            .filter(|record| record.device.device_id != self.local_device_id)
+        {
             let frame = encode_client_frame(v1::client_frame::Body::MlsBootstrap(
                 v1::MlsBootstrap {
                     conversation_id: conversation_id.to_owned(),
@@ -452,7 +465,11 @@ impl WebMessagingCore {
             WebCrypto::new(WebResolver::new(device_id.to_owned(), local_private)),
             mls,
         );
-        let services = WebServices::new(identity_public_key, mls_credential.to_vec());
+        let services = WebServices::new(
+            device_id.to_owned(),
+            identity_public_key,
+            mls_credential.to_vec(),
+        );
         let host = DesktopCoreHostAdapter::new(services);
         Ok(Self {
             core: RustDesktopMessagingCore::new(client, host),
@@ -529,6 +546,20 @@ impl WebMessagingCore {
         let mut transport = WebTransport::new();
         self.core
             .send_text(conversation_id, recipient_user_id, text, &mut transport)
+            .map_err(js_error)?;
+        self.outgoing.extend(transport.frames);
+        Ok(())
+    }
+
+    pub fn send_text_to_self(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        text: &str,
+    ) -> Result<(), JsValue> {
+        let mut transport = WebTransport::new();
+        self.core
+            .send_text_to_self(conversation_id, recipient_user_id, text, &mut transport)
             .map_err(js_error)?;
         self.outgoing.extend(transport.frames);
         Ok(())
