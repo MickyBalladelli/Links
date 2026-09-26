@@ -242,7 +242,7 @@ button, input, textarea { font: inherit; }
 .delivery-banner span { margin-top: 2px; color: var(--links-muted); font-size: .7rem; }
 .secure-note { min-height: 34px; padding: 7px clamp(16px, 2.5vw, 28px); display: flex; align-items: center; gap: 7px; color: var(--links-muted); background: var(--links-surface); border-bottom: 1px solid var(--links-border); font-size: .7rem; }
 
-.message-list { min-height: 0; overflow-y: auto; padding: 26px clamp(18px, 4vw, 48px); }
+.message-list { min-height: 0; overflow-y: auto; padding: 26px clamp(18px, 4vw, 48px); scroll-behavior: auto; }
 .message-list.is-scroll-pending { visibility: hidden; }
 .message-list > .prism-empty-state { min-height: 100%; display: grid; place-content: center; }
 .message-row { width: 100%; display: flex; margin: 0 0 13px; }

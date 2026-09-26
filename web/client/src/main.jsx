@@ -162,32 +162,26 @@ function rememberMessageScroll(event) {
 
 function scheduleMessageScrollRestore() {
   if (messageScrollRestoreFrame) cancelAnimationFrame(messageScrollRestoreFrame)
-  document.querySelector('.message-list')?.classList.add('is-scroll-pending')
   const conversationID = selectedConversationID.value
   messageScrollRestoreFrame = requestAnimationFrame(() => {
-    messageScrollRestoreFrame = requestAnimationFrame(() => {
-      messageScrollRestoreFrame = 0
-      const element = document.querySelector('.message-list')
-      const position = messageScrollPositions.get(conversationID)
-      if (!element) return
-      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
-      if (!position) {
-        element.scrollTop = maxScrollTop
-        element.classList.remove('is-scroll-pending')
-        return
-      }
+    messageScrollRestoreFrame = 0
+    const element = document.querySelector('.message-list')
+    const position = messageScrollPositions.get(conversationID)
+    if (!element) return
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    if (!position) {
+      element.scrollTop = maxScrollTop
+    } else {
       element.scrollTop = position.atBottom
         ? maxScrollTop
         : Math.min(position.top, maxScrollTop)
-      element.classList.remove('is-scroll-pending')
-    })
+    }
+    element.classList.remove('is-scroll-pending')
   })
 }
 
 function scheduleMessageScrollRestoreAfterLayout() {
   scheduleMessageScrollRestore()
-  window.setTimeout(scheduleMessageScrollRestore, 100)
-  window.setTimeout(scheduleMessageScrollRestore, 500)
 }
 const contactQuery = signal('')
 const searchQuery = signal('')
@@ -363,6 +357,7 @@ function switchAccountState(userID, handle) {
   persistState()
   hydrateStoredAttachments()
   refreshContactPictures()
+  scheduleMessageScrollRestore()
 }
 
 function clearVisibleAccountState() {
@@ -1336,6 +1331,7 @@ function selectConversation(id) {
   ))
   mobileSidebarOpen.value = false
   persistState()
+  scheduleMessageScrollRestore()
 }
 
 function openConversation(contact) {
@@ -1361,6 +1357,7 @@ function openConversation(contact) {
   conversations.value = [conversation, ...conversations.value]
   selectedConversationID.value = conversation.id
   persistState()
+  scheduleMessageScrollRestore()
 }
 
 function openCreateGroup() {
@@ -1407,6 +1404,7 @@ function createPreviewGroup(event) {
   createGroupOpen.value = false
   groupError.value = ''
   persistState()
+  scheduleMessageScrollRestore()
   notice.value = `Created ${name} in the local preview.`
 }
 
@@ -1460,6 +1458,7 @@ function disbandSelectedGroup() {
   selectedConversationID.value = conversations.value[0]?.id || null
   groupInfoOpen.value = false
   persistState()
+  scheduleMessageScrollRestore()
   notice.value = `Removed ${conversation.title} from the local preview.`
 }
 
@@ -1590,6 +1589,7 @@ async function resetPreview() {
   conversations.value = resetState.conversations
   selectedConversationID.value = resetState.conversations[0]?.id || null
   persistState()
+  scheduleMessageScrollRestore()
 }
 
 const selectedConversation = computed(() => (
@@ -1720,6 +1720,7 @@ async function confirmRemoveConversation() {
   conversations.value = conversations.value.filter(item => item.id !== conversation.id)
   if (selectedConversationID.value === conversation.id) {
     selectedConversationID.value = conversations.value[0]?.id || null
+    scheduleMessageScrollRestore()
   }
   persistState()
   notice.value = `Removed ${conversation.title} from this browser.`
@@ -1865,7 +1866,6 @@ function ConversationDetail() {
   return computed(() => {
     const conversation = selectedConversation.value
     const pictures = contactPictures.value
-    scheduleMessageScrollRestore()
     if (!conversation) {
       return (
         <main class="empty-detail">
@@ -2258,4 +2258,5 @@ function App() {
 }
 
 mount(<App />, document.querySelector('#app'))
+scheduleMessageScrollRestore()
 window.setTimeout(() => { restoreSavedSession() }, 0)
