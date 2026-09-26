@@ -164,15 +164,27 @@ function scheduleMessageScrollRestore() {
   if (messageScrollRestoreFrame) cancelAnimationFrame(messageScrollRestoreFrame)
   const conversationID = selectedConversationID.value
   messageScrollRestoreFrame = requestAnimationFrame(() => {
-    messageScrollRestoreFrame = 0
-    const element = document.querySelector('.message-list')
-    const position = messageScrollPositions.get(conversationID)
-    if (!element || !position) return
-    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
-    element.scrollTop = position.atBottom
-      ? maxScrollTop
-      : Math.min(position.top, maxScrollTop)
+    messageScrollRestoreFrame = requestAnimationFrame(() => {
+      messageScrollRestoreFrame = 0
+      const element = document.querySelector('.message-list')
+      const position = messageScrollPositions.get(conversationID)
+      if (!element) return
+      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+      if (!position) {
+        element.scrollTop = maxScrollTop
+        return
+      }
+      element.scrollTop = position.atBottom
+        ? maxScrollTop
+        : Math.min(position.top, maxScrollTop)
+    })
   })
+}
+
+function scheduleMessageScrollRestoreAfterLayout() {
+  scheduleMessageScrollRestore()
+  window.setTimeout(scheduleMessageScrollRestore, 100)
+  window.setTimeout(scheduleMessageScrollRestore, 500)
 }
 const contactQuery = signal('')
 const searchQuery = signal('')
@@ -299,6 +311,7 @@ function setAttachmentURL(id, url) {
   const previous = attachmentURLs.value[id]
   if (previous && previous !== url) URL.revokeObjectURL(previous)
   attachmentURLs.value = { ...attachmentURLs.value, [id]: url }
+  scheduleMessageScrollRestoreAfterLayout()
 }
 
 async function hydrateAttachment(attachment) {
@@ -1791,7 +1804,7 @@ function Messages() {
             {attachment?.kind === 'image'
               ? source
                 ? <a class="message-image-link" href={source} download={attachment.name} title="Save image">
-                    <img class="message-image" src={source} alt={attachment.name || 'Shared image'} />
+                    <img class="message-image" src={source} alt={attachment.name || 'Shared image'} onLoad={scheduleMessageScrollRestoreAfterLayout} />
                   </a>
                 : <div class="attachment-loading">Image unavailable</div>
               : attachment?.kind === 'file'
