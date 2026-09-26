@@ -1224,95 +1224,102 @@ private struct LinksConversationDetail: View {
 
     var body: some View {
         if let conversation = model.selectedConversation {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    ProfileAvatar(
-                        title: conversation.displayTitle,
-                        size: 38,
-                        imageJPEG: model.pictureJPEG(for: conversation))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(conversation.displayTitle)
-                            .font(.title2.weight(.semibold))
-                        Text(conversation.isGroup
-                             ? groupSubtitle(conversation)
-                             : conversation.title)
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        ProfileAvatar(
+                            title: conversation.displayTitle,
+                            size: 38,
+                            imageJPEG: model.pictureJPEG(for: conversation))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(conversation.displayTitle)
+                                .font(.title2.weight(.semibold))
+                            Text(conversation.isGroup
+                                 ? groupSubtitle(conversation)
+                                 : conversation.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 7) {
+                            HStack(spacing: 7) {
+                                if conversation.isGroup {
+                                    Button {
+                                        showingGroupMembers = true
+                                    } label: {
+                                        Label("Members", systemImage: "person.3")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Group members")
+                                } else {
+                                    if model.canInitializeSelectedConversation {
+                                        Button {
+                                            model.initializeSelectedConversation()
+                                        } label: {
+                                            Label("Start secure chat", systemImage: "lock.badge.plus")
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .controlSize(.small)
+                                    }
+                                    Button {
+                                        repairConfirmationPresented = true
+                                    } label: {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .disabled(!model.canInitializeSelectedConversation)
+                                    .help("Repair secure chat")
+                                    Button {
+                                        removeConnectionConfirmationPresented = true
+                                    } label: {
+                                        Image(systemName: "trash")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Remove this local connection")
+                                }
+                            }
+                            StatusPill(title: model.connectionStatus,
+                                       color: linksStatusColor(model.connectionStatus))
+                        }
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 14)
+
+                    if model.deliveryState != .ready {
+                        DeliveryStatusBanner(model: model)
+                    }
+
+                    HStack(spacing: 7) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(model.conversationSetupStatus)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
                     }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 7) {
-                        HStack(spacing: 7) {
-                            if conversation.isGroup {
-                                Button {
-                                    showingGroupMembers = true
-                                } label: {
-                                    Label("Members", systemImage: "person.3")
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .help("Group members")
-                            } else {
-                            if model.canInitializeSelectedConversation {
-                                Button {
-                                    model.initializeSelectedConversation()
-                                } label: {
-                                    Label("Start secure chat", systemImage: "lock.badge.plus")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                            }
-                            Button {
-                                repairConfirmationPresented = true
-                            } label: {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(!model.canInitializeSelectedConversation)
-                            .help("Repair secure chat")
-                            Button {
-                                removeConnectionConfirmationPresented = true
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help("Remove this local connection")
-                            }
-                        }
-                        StatusPill(title: model.connectionStatus,
-                                   color: linksStatusColor(model.connectionStatus))
-                    }
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 14)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 8)
 
-                if model.deliveryState != .ready {
-                    DeliveryStatusBanner(model: model)
+                    Divider()
+                    MessageList(messages: conversation.messages,
+                                conversationID: conversation.id,
+                                messageImages: model.messageImages,
+                                senderLabel: { model.senderLabel(for: $0) })
+                        .frame(minHeight: 0, maxHeight: .infinity)
+                    Divider()
+                    ComposerView(model: model)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                HStack(spacing: 7) {
-                    Image(systemName: "lock.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(model.conversationSetupStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 8)
-
-                Divider()
-                MessageList(messages: conversation.messages,
-                            conversationID: conversation.id,
-                            messageImages: model.messageImages,
-                            senderLabel: { model.senderLabel(for: $0) })
-                Divider()
-                ComposerView(model: model)
+                .frame(width: geometry.size.width,
+                       height: geometry.size.height,
+                       alignment: .topLeading)
+                .background(Color.primary.opacity(0.015))
             }
-            .background(Color.primary.opacity(0.015))
             .sheet(isPresented: $showingGroupMembers) {
                 GroupMembersView(model: model)
             }
@@ -1430,7 +1437,7 @@ private struct MessageList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
                     if messages.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "lock.message")
@@ -1454,28 +1461,26 @@ private struct MessageList: View {
                         }
                     }
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: 12)
                         .id(messageListBottomID)
                 }
                 .padding(24)
             }
-            .onAppear {
-                DispatchQueue.main.async {
-                    proxy.scrollTo(messageListBottomID, anchor: .bottom)
-                }
-            }
-            .onChange(of: conversationID) { _ in
-                DispatchQueue.main.async {
-                    proxy.scrollTo(messageListBottomID, anchor: .bottom)
-                }
-            }
-            .onChange(of: messages.count) { _ in
-                DispatchQueue.main.async {
-                    withAnimation {
-                        proxy.scrollTo(messageListBottomID, anchor: .bottom)
-                    }
-                }
-            }
+            .frame(minHeight: 0, maxHeight: .infinity)
+            .onAppear { scrollToBottom(proxy) }
+            .onChange(of: conversationID) { _ in scrollToBottom(proxy) }
+            .onChange(of: messages.count) { _ in scrollToBottom(proxy) }
+            .onChange(of: loadedImageIDs) { _ in scrollToBottom(proxy) }
+        }
+    }
+
+    private var loadedImageIDs: [UUID] {
+        messages.compactMap { messageImages[$0.id] == nil ? nil : $0.id }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            proxy.scrollTo(messageListBottomID, anchor: .bottom)
         }
     }
 }
@@ -1496,10 +1501,12 @@ private struct MessageBubble: View {
                 }
                 if message.imageMetadataProtobuf != nil {
                     if let image {
+                        let fitted = fittedImageSize(image)
                         Image(nsImage: image)
                             .resizable()
+                            .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 440, maxHeight: 440)
+                            .frame(width: fitted.width, height: fitted.height)
                             .clipShape(RoundedRectangle(cornerRadius: 13))
                     } else {
                         Label("Loading image…", systemImage: "photo")
@@ -1529,6 +1536,17 @@ private struct MessageBubble: View {
             if !message.isOutgoing { Spacer(minLength: 90) }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func fittedImageSize(_ image: NSImage) -> CGSize {
+        let maxSide: CGFloat = 440
+        let size = image.size
+        guard size.width > 0, size.height > 0 else {
+            return CGSize(width: maxSide, height: maxSide)
+        }
+        let scale = min(maxSide / size.width, maxSide / size.height, 1)
+        return CGSize(width: (size.width * scale).rounded(.down),
+                      height: (size.height * scale).rounded(.down))
     }
 }
 
@@ -1602,11 +1620,8 @@ private struct ComposerTextEditor: NSViewRepresentable {
         for textView: ImagePastingTextView,
         coordinator: Coordinator
     ) {
-        textView.onPasteImage = { [weak coordinator] in
-            guard let coordinator,
-                  let image = NSImage(pasteboard: .general) else { return false }
-            coordinator.parent.onPasteImage(image)
-            return true
+        textView.onPasteImage = { [weak coordinator] image in
+            coordinator?.parent.onPasteImage(image)
         }
     }
 
@@ -1625,40 +1640,83 @@ private struct ComposerTextEditor: NSViewRepresentable {
 }
 
 private final class ImagePastingTextView: NSTextView {
-    var onPasteImage: (() -> Bool)?
+    var onPasteImage: ((NSImage) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
 
     override func paste(_ sender: Any?) {
-        if onPasteImage?() == true { return }
+        if consumePastedImage() { return }
         super.paste(sender)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if window?.firstResponder == self,
+           flags == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "v" {
+            paste(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Attach a real image from the pasteboard. A text paste stays in the field.
+    private func consumePastedImage() -> Bool {
+        let pasteboard = NSPasteboard.general
+        let types = pasteboard.types ?? []
+        let hasImageType = types.contains { type in
+            type == .png || type == .tiff || NSImage.imageTypes.contains(type.rawValue)
+        }
+        guard hasImageType,
+              let image = NSImage(pasteboard: pasteboard),
+              image.isValid,
+              image.size.width > 0,
+              image.size.height > 0 else {
+            return false
+        }
+        onPasteImage?(image)
+        return true
     }
 }
 
 private struct ComposerView: View {
     @ObservedObject var model: LinksMacOSAppModel
 
+    private var textEditorHeight: CGFloat {
+        let lineCount = model.composerText.components(separatedBy: .newlines).count
+        return CGFloat(min(5, max(1, lineCount)) * 18 + 18)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let preview = model.composerImagePreview {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 0) {
                     Image(nsImage: preview)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    Text("Image ready to send")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        model.clearComposerImage()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(model.isSendingComposerImage)
-                    .help("Remove pasted image")
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                model.clearComposerImage()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.body)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.55))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(model.isSendingComposerImage)
+                            .help("Remove image")
+                            .offset(x: 6, y: -6)
+                        }
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 4)
+                .padding(.top, 6)
+                .padding(.leading, 4)
             }
             HStack(alignment: .bottom, spacing: 10) {
                 ZStack(alignment: .leading) {
@@ -1667,9 +1725,10 @@ private struct ComposerView: View {
                         isEnabled: model.canComposeSelectedConversation
                             && !model.isSendingComposerImage,
                         onPasteImage: model.setComposerImage)
-                        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 108)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: textEditorHeight)
                     if model.composerText.isEmpty {
-                        Text("Message · paste an image")
+                        Text("Message")
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 12)
                             .allowsHitTesting(false)
@@ -1678,15 +1737,6 @@ private struct ComposerView: View {
                 .padding(.horizontal, 12)
                 .background(Color.primary.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                Button {
-                    model.pasteComposerImageFromClipboard()
-                } label: {
-                    Image(systemName: "photo.badge.plus")
-                }
-                .buttonStyle(.plain)
-                .help("Paste image from clipboard")
-                .disabled(!model.canComposeSelectedConversation
-                          || model.isSendingComposerImage)
                 Button {
                     if model.composerImageData != nil {
                         model.sendComposerImage()
