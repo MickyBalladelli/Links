@@ -2039,7 +2039,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         let targetConversationID = conversation.id
+        let caption = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if caption.utf8.count > IOSDirectMessaging.maximumTextBytes {
+            actionError = "Select a conversation and enter a message under 64 KiB."
+            return
+        }
         isSendingComposerImage = true
+        composerText = ""
         actionError = nil
 
         Task { @MainActor [weak self] in
@@ -2108,14 +2114,48 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                     self.messageImages[message.id] = preview
                 }
                 self.clearComposerImage()
+                self.persistLocalState()
+                if !caption.isEmpty {
+                    try await self.sendCaption(caption, conversationID: targetConversationID)
+                    self.persistLocalState()
+                }
                 self.pendingOutboxCount = messaging.pendingOutboxCount
                 self.actionError = nil
-                self.persistLocalState()
             } catch {
-                self.actionError = "Image not sent. Check the connection and try again."
+                if self.composerText.isEmpty { self.composerText = caption }
+                self.actionError = self.composerImageData == nil
+                    ? "The image was sent, but the text was not. Check the connection and try again."
+                    : "Image not sent. Check the connection and try again."
             }
             self.isSendingComposerImage = false
         }
+    }
+
+    private func sendCaption(_ text: String, conversationID: String) async throws {
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              let messaging else {
+            throw IOSMessagingError.notConnected
+        }
+        let conversation = conversations[index]
+        if conversation.isGroup {
+            guard let (_, directory, preKeyAPI, _, _) = groupPrerequisites else {
+                throw IOSMessagingError.notConnected
+            }
+            try await messaging.sendGroupText(conversationID: conversation.mlsConversationID,
+                                              text: text,
+                                              directory: directory,
+                                              preKeyAPI: preKeyAPI)
+        } else {
+            try messaging.sendText(conversationID: conversation.mlsConversationID,
+                                   recipientUserID: conversation.recipientUserID,
+                                   text: text)
+        }
+        guard let currentIndex = conversations.firstIndex(where: { $0.id == conversationID }) else {
+            return
+        }
+        conversations[currentIndex].messages.append(LinksMacOSMessage(
+            id: UUID(), text: text, isOutgoing: true, sentAt: Date(), senderDeviceID: nil))
+        pendingOutboxCount = messaging.pendingOutboxCount
     }
 
     private func conversationSetupStillCurrent(_ conversationID: String) -> Bool {
