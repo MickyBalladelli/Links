@@ -1,5 +1,6 @@
 /target/
 /web/pkg/
+/web/client/public/web-wasm/
 /web/http-client/node_modules/
 /web/http-client/dist/
 /.local-tools/

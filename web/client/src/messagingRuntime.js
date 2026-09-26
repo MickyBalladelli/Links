@@ -17,7 +17,7 @@ function websocketEndpoint() {
 
 async function loadWasmModule() {
   if (!wasmModulePromise) {
-    wasmModulePromise = import(/* @vite-ignore */ '/links-web-client.js')
+    wasmModulePromise = import(/* @vite-ignore */ '/web-wasm/links_web_client.js')
       .then(async module => {
         if (typeof module.default === 'function') await module.default()
         return module

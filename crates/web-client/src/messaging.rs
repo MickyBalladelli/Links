@@ -9,7 +9,7 @@ use links_client_core::{
     crypto::{RecipientKeyDirectory, SealedSenderCrypto, SealedSenderKeyResolver},
     envelopes::ClientCore,
     identity::{IdentitySeed, LocalIdentity},
-    mls::{MlsCredentialVerifier, OpenMlsEngine, RustCryptoProvider},
+    mls::{MlsCredentialVerifier, MlsEngine, OpenMlsEngine, RustCryptoProvider},
     prekeys::{generate_profile, generate_upload, LocalPreKeyProfile, PreKeySecretStore, PreKeySigner, SecretKind},
     protocol::{self, v1},
     send::RecipientDevice,
@@ -159,11 +159,9 @@ impl MlsCredentialVerifier for WebVerifier {
 
 struct WebRecipient {
     device: RecipientDevice,
-    credential: Vec<u8>,
 }
 
 struct WebServices {
-    device_id: String,
     identity_public_key: [u8; 32],
     mls_credential: Vec<u8>,
     cursor: u64,
@@ -175,9 +173,8 @@ struct WebServices {
 }
 
 impl WebServices {
-    fn new(device_id: String, identity_public_key: [u8; 32], mls_credential: Vec<u8>) -> Self {
+    fn new(identity_public_key: [u8; 32], mls_credential: Vec<u8>) -> Self {
         Self {
-            device_id,
             identity_public_key,
             mls_credential,
             cursor: 0,
@@ -196,11 +193,6 @@ impl WebServices {
         records.push(recipient);
     }
 
-    fn take_outbox(&mut self) -> Vec<Vec<u8>> {
-        let mut frames = std::mem::take(&mut self.bootstrap_outbox);
-        frames.extend(std::mem::take(&mut self.outbox));
-        frames
-    }
 }
 
 impl DesktopCoreServices for WebServices {
@@ -411,7 +403,7 @@ impl WebMessagingCore {
             WebCrypto::new(WebResolver::new(device_id.to_owned(), local_private)),
             mls,
         );
-        let services = WebServices::new(device_id.to_owned(), identity_public_key, mls_credential.to_vec());
+        let services = WebServices::new(identity_public_key, mls_credential.to_vec());
         let host = DesktopCoreHostAdapter::new(services);
         Ok(Self {
             core: RustDesktopMessagingCore::new(client, host),
@@ -454,7 +446,7 @@ impl WebMessagingCore {
         device_id: &str,
         identity_public_key: &[u8],
         prekey_bundle: &[u8],
-        mls_credential: &[u8],
+        _mls_credential: &[u8],
         mls_key_package: &[u8],
     ) -> Result<(), JsValue> {
         let public_key: [u8; 32] = identity_public_key
@@ -470,12 +462,11 @@ impl WebMessagingCore {
             mls_key_package.to_vec(),
         )
         .map_err(js_error)?;
-        self.core
+            self.core
             .host_mut()
             .services_mut()
             .set_recipient(WebRecipient {
                 device,
-                credential: mls_credential.to_vec(),
             });
         Ok(())
     }
@@ -497,13 +488,52 @@ impl WebMessagingCore {
     pub fn handle_server_frame(&mut self, frame: &[u8]) -> Result<(), JsValue> {
         let mut transport = WebTransport::new();
         let mut received = Vec::new();
-        self.core
-            .handle_server_frame(frame, &mut transport, false, &mut |message| {
-                received.push(message)
-            })
-            .map_err(js_error)?;
+        let server_frame = v1::ServerFrame::decode(frame)
+            .map_err(|_| js_error(CoreError::InvalidSync))?;
+        if let Some(v1::server_frame::Body::MlsBootstrap(bootstrap)) = server_frame.body {
+            self.handle_bootstrap(bootstrap).map_err(js_error)?;
+        } else {
+            self.core
+                .handle_server_frame(frame, &mut transport, false, &mut |message| {
+                    received.push(message)
+                })
+                .map_err(js_error)?;
+        }
         self.outgoing.extend(transport.frames);
         self.received.extend(received);
+        Ok(())
+    }
+
+    fn handle_bootstrap(&mut self, bootstrap: v1::MlsBootstrap) -> Result<(), CoreError> {
+        protocol::validate_id(&bootstrap.conversation_id)?;
+        if bootstrap.recipient_device_id != self.device_id()
+            || bootstrap.commit.is_empty()
+            || bootstrap.welcome.is_empty()
+            || bootstrap.sender_identity_public_key.len() != 32
+        {
+            return Err(CoreError::Authentication);
+        }
+        let binding = links_identity::parse_mls_basic_identity(&bootstrap.sender_mls_credential)
+            .map_err(|_| CoreError::Authentication)?;
+        let sender_public_key: [u8; 32] = bootstrap
+            .sender_identity_public_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| CoreError::Authentication)?;
+        if binding.device_id.to_string() == self.device_id() || binding.public_key != sender_public_key {
+            return Err(CoreError::Authentication);
+        }
+        if bootstrap.reset_group {
+            self.core
+                .core_mut()
+                .mls_mut()
+                .reset_direct_group_from_welcome(&bootstrap.conversation_id, &bootstrap.welcome)?;
+        } else {
+            self.core
+                .core_mut()
+                .mls_mut()
+                .join_direct_group(&bootstrap.conversation_id, &bootstrap.welcome)?;
+        }
         Ok(())
     }
 
