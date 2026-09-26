@@ -39,6 +39,8 @@ let activeAccountID = 'preview'
 let webMessagingSession = null
 let isRestoringSession = false
 let autoRestoreTimer = null
+let isRepairingBrowserIdentity = false
+let webMessagingRetryTimer = null
 
 function setAutoRestoreDisabled(disabled) {
   try {
@@ -75,6 +77,27 @@ function retrySavedSessionLater() {
     autoRestoreTimer = null
     restoreSavedSession()
   }, 5000)
+}
+
+function scheduleWebMessagingRetry() {
+  if (webMessagingRetryTimer !== null || !accessToken.value.trim()) return
+  webMessagingRetryTimer = window.setTimeout(async () => {
+    webMessagingRetryTimer = null
+    const handle = normalizeHandle(profileHandle.value)
+    if (!validHandle(handle) || !accessToken.value.trim()) return
+    try {
+      const identity = await loadBrowserIdentity(handle)
+      if (identity) await startWebMessaging(identity)
+    } catch {
+      scheduleWebMessagingRetry()
+    }
+  }, 3000)
+}
+
+function cancelWebMessagingRetry() {
+  if (webMessagingRetryTimer === null) return
+  window.clearTimeout(webMessagingRetryTimer)
+  webMessagingRetryTimer = null
 }
 
 function accountStorageKey(baseKey, accountID = activeAccountID) {
@@ -446,6 +469,7 @@ function authBase() {
 }
 
 async function stopWebMessaging() {
+  cancelWebMessagingRetry()
   const session = webMessagingSession
   webMessagingSession = null
   session?.shutdown()
@@ -498,7 +522,10 @@ async function startWebMessaging(identity) {
       identitySeed: identity.privateSeed,
       contacts: contacts.value,
       accessToken: () => accessToken.value,
-      onState: state => { connectionState.value = state === 'stopped' ? 'preview' : state },
+      onState: state => {
+        connectionState.value = state === 'stopped' ? 'preview' : state
+        if (state === 'ready') notice.value = ''
+      },
       onTextMessage: appendIncomingText,
       onFailure: () => { connectionState.value = 'failed' }
     })
@@ -506,9 +533,29 @@ async function startWebMessaging(identity) {
     webMessagingSession = session
     session.start()
   } catch (error) {
-    wasmAvailability.value = false
-    connectionState.value = 'preview'
-    notice.value = `Encrypted browser sync unavailable: ${error.message || 'WASM core could not load.'}`
+    const detail = error instanceof Error ? error.message : String(error || '')
+    wasmAvailability.value = detail === 'Web messaging WASM is unavailable'
+      || /dynamically imported module|web-wasm/i.test(detail)
+        ? false
+        : null
+    connectionState.value = 'failed'
+    if (/browser identity does not match MLS credential/i.test(detail)
+      && !isRepairingBrowserIdentity && accessToken.value.trim()) {
+      try {
+        isRepairingBrowserIdentity = true
+        const repaired = await repairBrowserMessagingIdentity()
+        if (repaired) return
+      } catch (repairError) {
+        const repairDetail = repairError instanceof Error ? repairError.message : String(repairError || '')
+        notice.value = `Encrypted browser sync unavailable: ${repairDetail || detail}`
+        scheduleWebMessagingRetry()
+        return
+      } finally {
+        isRepairingBrowserIdentity = false
+      }
+    }
+    notice.value = `Encrypted browser sync unavailable: ${detail || 'WASM core could not load.'}`
+    scheduleWebMessagingRetry()
   }
 }
 
@@ -789,6 +836,28 @@ async function migrateLegacyBrowserIdentity(handle, session) {
     handle,
     mlsCredential: registered.mls_credential
   }
+}
+
+async function repairBrowserMessagingIdentity() {
+  const token = accessToken.value.trim()
+  const handle = normalizeHandle(profileHandle.value)
+  if (!token || !validHandle(handle)) return false
+  const accountResponse = await fetch(`${authBase()}/v1/auth/me`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+  if (!accountResponse.ok) throw new Error('The browser session expired. Log in again.')
+  const account = await accountResponse.json()
+  uuidBytes(account.user_id)
+  const identity = await migrateLegacyBrowserIdentity(handle, {
+    user_id: account.user_id,
+    access_token: token
+  })
+  await saveBrowserIdentity(identity)
+  await establishUsernameSession(handle, 'login', identity)
+  return true
 }
 
 function openAuthenticationDialog(mode = 'login') {
@@ -1750,10 +1819,10 @@ function ConversationDetail() {
               <div class="delivery-banner">
                 <LiveStatusIcon size="1rem" />
                 <div>
-                  <strong>{connectionState.value === 'connecting' ? 'Connecting to server' : 'Local browser mode'}</strong>
-                  <span>{connectionState.value === 'connecting' ? 'Encrypted sync is starting.' : 'Messages and attachments are saved on this device.'}</span>
+                  <strong>{connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Connecting to server' : 'Local browser mode'}</strong>
+                  <span>{connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Encrypted sync is reconnecting.' : 'Messages and attachments are saved on this device.'}</span>
                 </div>
-                <Badge value={connectionState.value === 'connecting' ? 'Connecting' : 'Local'} tone="warning" />
+                <Badge value={connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Connecting' : 'Local'} tone="warning" />
               </div>
               <div class="secure-note"><LockIcon size="0.8rem" /><span>{wasmAvailability.value === false
                 ? 'Encrypted sync is unavailable in this browser build.'

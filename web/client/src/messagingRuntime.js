@@ -22,10 +22,15 @@ async function loadWasmModule() {
   if (!wasmModulePromise) {
     // Keep the generated Rust/WASM asset outside Vite's module graph so the
     // browser can load it as a normal public resource.
-    const wasmURL = new URL('/web-wasm/links_web_client.js', window.location.origin).href
-    wasmModulePromise = import(/* @vite-ignore */ wasmURL)
+    const wasmURL = new URL('/web-wasm/links_web_client.js', window.location.origin)
+    wasmURL.searchParams.set('v', String(Date.now()))
+    wasmModulePromise = import(/* @vite-ignore */ wasmURL.href)
       .then(async module => {
-        if (typeof module.default === 'function') await module.default()
+        if (typeof module.default === 'function') {
+          const binaryURL = new URL('/web-wasm/links_web_client_bg.wasm', window.location.origin)
+          binaryURL.searchParams.set('v', wasmURL.searchParams.get('v'))
+          await module.default(binaryURL)
+        }
         return module
       })
       .catch(error => {
@@ -53,15 +58,24 @@ export async function createWebMessagingSession({
       typeof wasm.WebMessagingCore.from_identity_seed !== 'function') {
     throw new Error('Web messaging WASM is unavailable')
   }
-  const rustCore = wasm.WebMessagingCore.from_identity_seed(
-    userID,
-    deviceID,
-    decodeBase64URL(mlsCredential),
-    new Uint8Array(identitySeed || [])
-  )
+  let rustCore
+  try {
+    rustCore = wasm.WebMessagingCore.from_identity_seed(
+      userID,
+      deviceID,
+      decodeBase64URL(mlsCredential),
+      new Uint8Array(identitySeed || [])
+    )
+  } catch (error) {
+    throw new Error(`WASM identity: ${error instanceof Error ? error.message : String(error || '')}`)
+  }
   const core = new WebWasmMessagingCore(rustCore)
   const token = () => accessToken()
-  await publishLocalKeys(rustCore, token)
+  try {
+    await publishLocalKeys(rustCore, token)
+  } catch (error) {
+    throw new Error(`Browser keys: ${error instanceof Error ? error.message : String(error || '')}`)
+  }
   await loadRecipients(core, contacts, token)
   const session = new WebTextMessaging({
     endpoint: websocketEndpoint(),
@@ -95,14 +109,14 @@ async function publishLocalKeys(rustCore, accessToken) {
     body: rustCore.prekey_upload(16, 16),
     cache: 'no-store'
   })
-  if (!profile.ok) throw new Error('Could not publish browser pre-keys')
+  if (!profile.ok) throw new Error(`Could not publish browser pre-keys (${profile.status})`)
   const keyPackage = await fetch('/links-api/v1/mls/key-package', {
     method: 'PUT',
     headers,
     body: rustCore.key_package(),
     cache: 'no-store'
   })
-  if (!keyPackage.ok) throw new Error('Could not publish browser MLS key package')
+  if (!keyPackage.ok) throw new Error(`Could not publish browser MLS key package (${keyPackage.status})`)
 }
 
 async function loadRecipients(core, contacts, accessToken) {

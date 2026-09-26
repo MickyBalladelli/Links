@@ -20,6 +20,8 @@ use links_desktop_client::{
     DesktopCoreHostAdapter, DesktopCoreServices, DesktopFrameTransport, DesktopInboxItem,
     DesktopMessagingCore, DesktopReceivedTextMessage, RustDesktopMessagingCore,
 };
+use openmls::prelude::tls_codec::Deserialize as TlsDeserialize;
+use openmls::prelude::{BasicCredential, Credential};
 use openmls_rust_crypto::MemoryStorage;
 use prost::Message;
 use std::{collections::HashMap, sync::Arc};
@@ -408,16 +410,32 @@ impl WebMessagingCore {
         };
         let identity_public_key = signer.public_key().map_err(js_error)?;
         let mut vault = WebSecretStore::new();
-        let profile = generate_profile(device_id.to_owned(), 1, &signer, &mut vault)
+        // The browser rebuilds this in-memory core after reload. Use a
+        // time-ordered revision so the server accepts the fresh pre-key
+        // profile as a rotation instead of conflicting with revision 1.
+        let profile_revision = (js_sys::Date::now() as u64)
+            .saturating_mul(1024)
+            .saturating_add((js_sys::Math::random() * 1024.0) as u64)
+            .min(protocol::MAX_CURSOR)
+            .max(1);
+        let profile = generate_profile(device_id.to_owned(), profile_revision, &signer, &mut vault)
+            .map_err(|error| js_error(format!("browser pre-key profile: {error}")))?;
+        let local_private = vault
+            .identity_private(profile.revision)
             .map_err(js_error)?;
-        let local_private = vault.identity_private(1).map_err(js_error)?;
-        let binding = links_identity::parse_mls_basic_identity(mls_credential)
-            .map_err(|_| js_error(CoreError::Authentication))?;
+        // The account service stores the full TLS BasicCredential. Pull out
+        // its application identity before checking the browser signer.
+        let credential = Credential::tls_deserialize_exact(mls_credential)
+            .map_err(|_| js_error(format!("invalid MLS credential ({} bytes)", mls_credential.len())))?;
+        let basic = BasicCredential::try_from(credential)
+            .map_err(|_| js_error("invalid MLS basic credential"))?;
+        let binding = links_identity::parse_mls_basic_identity(basic.identity())
+            .map_err(|_| js_error("invalid MLS identity"))?;
         if binding.user_id.to_string() != user_id
             || binding.device_id.to_string() != device_id
             || binding.public_key != identity_public_key
         {
-            return Err(js_error(CoreError::Authentication));
+            return Err(js_error("browser identity does not match MLS credential"));
         }
         let verifier = WebVerifier {
             bindings: HashMap::from([(binding.device_id, binding.clone())]),
@@ -428,7 +446,7 @@ impl WebMessagingCore {
             mls_credential,
             verifier,
         )
-        .map_err(js_error)?;
+        .map_err(|error| js_error(format!("browser MLS engine: {error}")))?;
         let client = ClientCore::new(
             local,
             WebCrypto::new(WebResolver::new(device_id.to_owned(), local_private)),
@@ -610,7 +628,7 @@ impl WebMessagingCore {
     pub fn prekey_upload(&mut self, curve_count: u32, kem_count: u32) -> Result<Vec<u8>, JsValue> {
         generate_upload(&self.profile, curve_count, kem_count, &self.signer, &mut self.vault)
             .map(|upload| upload.encode_to_vec())
-            .map_err(js_error)
+            .map_err(|error| js_error(format!("browser pre-key upload: {error}")))
     }
 
     pub fn key_package(&self) -> Result<Vec<u8>, JsValue> {
@@ -618,7 +636,7 @@ impl WebMessagingCore {
             .core()
             .mls()
             .generate_key_package()
-            .map_err(js_error)
+            .map_err(|error| js_error(format!("browser MLS key package: {error}")))
     }
 
     pub fn profile_upload(&self) -> Vec<u8> {
