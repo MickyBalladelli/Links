@@ -1245,11 +1245,13 @@ private struct IOSChangeUsernameSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("New username") {
+                Section {
                     TextField("username", text: $handle)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textContentType(.username)
+                } header: {
+                    Text("New username")
                 } footer: {
                     Text("3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.")
                 }
@@ -1305,10 +1307,12 @@ private struct IOSChangeDisplayNameSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Display name") {
+                Section {
                     TextField("Name", text: $displayName)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
+                } header: {
+                    Text("Display name")
                 } footer: {
                     Text("Shown to people in your contacts and conversations.")
                 }
