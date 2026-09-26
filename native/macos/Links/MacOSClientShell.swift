@@ -1598,6 +1598,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
         textView.textContainer?.containerSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude)
+        textView.registerForDraggedTypes([.fileURL, .png, .tiff])
 
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -1687,22 +1688,51 @@ private final class ImagePastingTextView: NSTextView {
         return super.performKeyEquivalent(with: event)
     }
 
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        image(from: sender.draggingPasteboard) == nil ? super.draggingEntered(sender) : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let image = image(from: sender.draggingPasteboard) else {
+            return super.performDragOperation(sender)
+        }
+        onPasteImage?(image)
+        return true
+    }
+
     /// Attach a real image from the pasteboard. A text paste stays in the field.
     private func consumePastedImage() -> Bool {
-        let pasteboard = NSPasteboard.general
-        let types = pasteboard.types ?? []
-        let hasImageType = types.contains { type in
-            type == .png || type == .tiff || NSImage.imageTypes.contains(type.rawValue)
-        }
-        guard hasImageType,
-              let image = NSImage(pasteboard: pasteboard),
-              image.isValid,
-              image.size.width > 0,
-              image.size.height > 0 else {
+        guard let image = image(from: NSPasteboard.general) else {
             return false
         }
         onPasteImage?(image)
         return true
+    }
+
+    private func image(from pasteboard: NSPasteboard) -> NSImage? {
+        let types = pasteboard.types ?? []
+        let hasImageType = types.contains { type in
+            type == .png || type == .tiff || NSImage.imageTypes.contains(type.rawValue)
+        }
+        if hasImageType,
+           let image = NSImage(pasteboard: pasteboard),
+           image.isValid,
+           image.size.width > 0,
+           image.size.height > 0 {
+            return image
+        }
+
+        guard let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              let url = urls.first,
+              let image = NSImage(contentsOf: url),
+              image.isValid,
+              image.size.width > 0,
+              image.size.height > 0 else {
+            return nil
+        }
+        return image
     }
 }
 
