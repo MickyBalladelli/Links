@@ -307,7 +307,7 @@ impl DesktopCoreServices for WebServices {
                     welcome: welcome.clone(),
                     sender_mls_credential: self.mls_credential.clone(),
                     sender_identity_public_key: self.identity_public_key.to_vec(),
-                    reset_group: false,
+                    reset_group: pending.reset_group,
                 }))?;
             self.bootstrap_outbox.push(frame.clone());
             transport.send(&frame)?;

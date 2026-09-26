@@ -37,6 +37,10 @@ pub struct PendingCommit {
     pub commit: Vec<u8>,
     pub welcome: Option<Vec<u8>>,
     pub epoch: u64,
+    /// True when this commit creates a brand-new direct group. A peer that
+    /// already has a group with this conversation ID must replace it with
+    /// the Welcome instead of ignoring the bootstrap as a duplicate.
+    pub reset_group: bool,
 }
 
 /// What a raw MLS message in the ciphertext mailbox carries.
@@ -538,6 +542,7 @@ where
             commit: serialize_message(commit)?,
             welcome: Some(serialize_message(welcome)?),
             epoch: group.epoch().as_u64().saturating_add(1),
+            reset_group: false,
         })
     }
 
@@ -564,6 +569,7 @@ where
             commit: serialize_message(commit)?,
             welcome: welcome.map(serialize_message).transpose()?,
             epoch: group.epoch().as_u64().saturating_add(1),
+            reset_group: false,
         })
     }
 
@@ -611,6 +617,7 @@ where
             commit,
             welcome: None,
             epoch: group.epoch().as_u64().saturating_add(1),
+            reset_group: false,
         })
     }
 
@@ -888,9 +895,9 @@ where
             MlsGroup::load(self.provider.storage(), &group_id).map_err(|_| CoreError::Provider)?;
         let Some(group) = existing else {
             self.create_group_with_id(group_id)?;
-            return self
-                .add_group_members(conversation_id, key_package_bytes)
-                .map(Some);
+            let mut pending = self.add_group_members(conversation_id, key_package_bytes)?;
+            pending.reset_group = true;
+            return Ok(Some(pending));
         };
 
         let users = verified_group_user_counts(&self.verifier, &group)?;

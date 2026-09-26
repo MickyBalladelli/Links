@@ -103,7 +103,10 @@ export async function createWebMessagingSession({
       }
     },
     refreshRecipient: async recipientUserID => {
-      if (loadedRecipientIDs.has(recipientUserID)) return
+      // Recipient device keys are one-time/prekey material. A browser session
+      // can outlive a recipient reconnect, so the cached entry may no longer
+      // decrypt on the other device. Re-read and claim fresh keys for every
+      // send instead of trusting the initial session snapshot.
       await loadRecipient(core, { userID: recipientUserID }, token, deviceID)
       loadedRecipientIDs.add(recipientUserID)
     },
