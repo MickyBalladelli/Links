@@ -150,6 +150,9 @@ button, input, textarea { font: inherit; }
 .contacts-section { flex: 0 0 auto; max-height: 31%; overflow: hidden; border-top: 1px solid var(--links-border); }
 .section-label { min-height: 40px; padding: 7px 11px 5px 15px; display: flex; align-items: center; justify-content: space-between; color: var(--links-muted); font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .section-actions { display: flex; align-items: center; gap: 2px; }
+.section-actions .prism-button-icon,
+.section-label > .prism-button .prism-button-icon { width: 17px !important; height: 17px !important; flex-basis: 17px; font-size: 17px; }
+.section-actions svg, .section-label > .prism-button svg { width: 17px !important; height: 17px !important; }
 .icon-action { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 8px; color: var(--links-muted); background: transparent; cursor: pointer; }
 .icon-action:hover { color: var(--links-text); background: color-mix(in srgb, var(--links-accent-soft) 76%, transparent); }
 .conversation-list, .contact-list { height: calc(100% - 40px); overflow-y: auto; padding: 2px 8px 10px; }
@@ -186,6 +189,9 @@ button, input, textarea { font: inherit; }
 .contact-remove:hover { color: var(--links-text); background: color-mix(in srgb, var(--links-accent-soft) 80%, transparent); }
 .sidebar-empty { margin: 10px; color: var(--links-muted); font-size: .75rem; }
 .profile-card { min-height: 68px; padding: 11px 13px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; border-top: 1px solid var(--links-border); }
+.profile-card > .profile-picture, .profile-card > .prism-avatar { grid-column: 1; grid-row: 1; }
+.profile-card > .profile-copy { grid-column: 2; grid-row: 1; }
+.profile-card > svg { grid-column: 3; grid-row: 1; }
 .profile-picture { display: block; border-radius: 50%; object-fit: cover; }
 .profile-picture.is-small { width: 32px; height: 32px; }
 .profile-picture.is-medium { width: 40px; height: 40px; }
