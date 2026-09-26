@@ -8,6 +8,7 @@ const matrixJSX = {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const authTarget = env.LINKS_AUTH_TARGET || 'http://127.0.0.1:8080'
+  const gatewayTarget = env.LINKS_GATEWAY_TARGET || 'http://127.0.0.1:8081'
 
   return {
     oxc: { jsx: matrixJSX },
@@ -25,6 +26,11 @@ export default defineConfig(({ mode }) => {
           target: authTarget,
           changeOrigin: true,
           rewrite: path => path.replace(/^\/links-api/, '')
+        },
+        '/v1': {
+          target: gatewayTarget,
+          changeOrigin: true,
+          ws: true
         }
       }
     },

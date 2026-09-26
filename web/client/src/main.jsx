@@ -22,6 +22,7 @@ import {
 import './style.css'
 import { clearAttachments, readAttachment, saveAttachment } from './attachmentStore.js'
 import { createBrowserIdentity, loadBrowserIdentity, saveBrowserIdentity } from './authStore.js'
+import { createWebMessagingSession } from './messagingRuntime.js'
 
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
@@ -30,6 +31,7 @@ const profilePictureKey = 'links-web-client-profile-picture-v1'
 const profileHandleKey = 'links-web-client-profile-handle-v1'
 const profileDisplayNameKey = 'links-web-client-profile-display-name-v1'
 let activeAccountID = 'preview'
+let webMessagingSession = null
 
 function accountStorageKey(baseKey, accountID = activeAccountID) {
   return accountID === 'preview' ? baseKey : `${baseKey}:${accountID}`
@@ -394,6 +396,51 @@ function authBase() {
   return authBaseURL.value.trim().replace(/\/$/, '')
 }
 
+async function stopWebMessaging() {
+  const session = webMessagingSession
+  webMessagingSession = null
+  session?.shutdown()
+  connectionState.value = 'preview'
+}
+
+function appendIncomingText(message) {
+  const conversation = conversations.value.find(item => item.id === message.conversationID || item.mlsConversationID === message.conversationID)
+  if (!conversation) return
+  conversations.value = conversations.value.map(item => item === conversation
+    ? {
+        ...item,
+        messages: [...item.messages, {
+          id: crypto.randomUUID(),
+          text: message.text,
+          outgoing: false,
+          sentAt: new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' }).format(new Date(Number(message.sentAtMs)))
+        }]
+      }
+    : item)
+  persistState()
+}
+
+async function startWebMessaging(identity) {
+  await stopWebMessaging()
+  if (!identity?.userID || !identity?.deviceID || !identity?.mlsCredential) return
+  try {
+    const session = await createWebMessagingSession({
+      userID: identity.userID,
+      deviceID: identity.deviceID,
+      mlsCredential: identity.mlsCredential,
+      accessToken: () => accessToken.value,
+      onState: state => { connectionState.value = state === 'stopped' ? 'preview' : state },
+      onTextMessage: appendIncomingText,
+      onFailure: () => { connectionState.value = 'failed' }
+    })
+    webMessagingSession = session
+    session.start()
+  } catch (error) {
+    connectionState.value = 'preview'
+    notice.value = `Encrypted browser sync unavailable: ${error.message || 'WASM core could not load.'}`
+  }
+}
+
 async function publishProfilePictureBytes(dataUrl) {
   const token = accessToken.value.trim()
   if (!token || !dataUrl) return
@@ -559,6 +606,15 @@ function uuidBytes(value) {
   return Uint8Array.from(hex.match(/../g), pair => Number.parseInt(pair, 16))
 }
 
+function isCanonicalUUID(value) {
+  try {
+    uuidBytes(value)
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(value))
+  } catch {
+    return false
+  }
+}
+
 function usernameAuthTranscript(purpose, challenge) {
   const domain = new TextEncoder().encode(purpose === 'registration'
     ? 'links/username-register/v2\0'
@@ -657,6 +713,7 @@ async function authenticateUsername(event) {
     await saveBrowserIdentity(identity)
     accessToken.value = session.access_token
     switchAccountState(session.user_id, handle)
+    await startWebMessaging(identity)
     authDialogOpen.value = false
     notice.value = purpose === 'registration' ? `Created @${handle} and opened a browser session.` : `Logged in as @${handle}.`
     refreshProfileDisplayName()
@@ -683,6 +740,7 @@ async function logoutAccount() {
   if (isLoggingOut.value) return
   const token = accessToken.value.trim()
   if (!token) {
+    await stopWebMessaging()
     accessToken.value = ''
     connectionState.value = 'preview'
     logoutConfirmOpen.value = false
@@ -707,6 +765,7 @@ async function logoutAccount() {
   } catch {
     remoteRevoked = false
   } finally {
+    await stopWebMessaging()
     if (accessToken.value.trim() === token) accessToken.value = ''
     connectionState.value = 'preview'
     isLoggingOut.value = false
@@ -1120,6 +1179,7 @@ async function sendPreviewMessage(event) {
   const text = composerText.value.trim()
   const attachment = pendingAttachment.value
   const id = selectedConversationID.value
+  const selected = conversations.value.find(conversation => conversation.id === id)
   if ((!text && !attachment) || !id) return
 
   const additions = []
@@ -1156,7 +1216,19 @@ async function sendPreviewMessage(event) {
     ? { ...conversation, messages: [...conversation.messages, ...additions] }
     : conversation)
   composerText.value = ''
-  notice.value = 'Saved in the local preview. Encrypted transport is not connected yet.'
+  let sentOverNetwork = false
+  let sendError = ''
+  if (text && !attachment && webMessagingSession?.isConnected && selected?.recipientUserID && isCanonicalUUID(selected.mlsConversationID)) {
+    try {
+      webMessagingSession.sendText(selected.mlsConversationID, selected.recipientUserID, text)
+      sentOverNetwork = true
+    } catch (error) {
+      sendError = `Encrypted send failed: ${error.message || 'connection unavailable.'}`
+    }
+  }
+  notice.value = sendError || (sentOverNetwork
+    ? 'Encrypted message sent.'
+    : 'Saved in the local preview. Encrypted transport is not connected yet.')
   persistState()
   requestAnimationFrame(() => document.querySelector('.message-list')?.scrollTo({ top: 999999, behavior: 'smooth' }))
 }
