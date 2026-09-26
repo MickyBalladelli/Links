@@ -11,14 +11,17 @@ function decodeBase64URL(value) {
 }
 
 function websocketEndpoint() {
+  if (typeof __LINKS_GATEWAY_ENDPOINT__ === 'string' && __LINKS_GATEWAY_ENDPOINT__) {
+    return __LINKS_GATEWAY_ENDPOINT__
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${window.location.host}/v1/connect`
 }
 
 async function loadWasmModule() {
   if (!wasmModulePromise) {
-    // Keep this optional asset outside Vite's module graph. The client must
-    // still boot in local-preview mode before `npm run build:wasm` is run.
+    // Keep the generated Rust/WASM asset outside Vite's module graph so the
+    // browser can load it as a normal public resource.
     const wasmURL = new URL('/web-wasm/links_web_client.js', window.location.origin).href
     wasmModulePromise = import(/* @vite-ignore */ wasmURL)
       .then(async module => {

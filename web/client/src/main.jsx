@@ -485,7 +485,11 @@ function appendIncomingText(message) {
 
 async function startWebMessaging(identity) {
   await stopWebMessaging()
-  if (!identity?.userID || !identity?.deviceID || !identity?.mlsCredential || !identity?.privateSeed) return
+  if (!identity?.userID || !identity?.deviceID || !identity?.mlsCredential || !identity?.privateSeed) {
+    notice.value = 'Encrypted browser sync needs a paired browser identity.'
+    return
+  }
+  connectionState.value = 'connecting'
   try {
     const session = await createWebMessagingSession({
       userID: identity.userID,
@@ -709,6 +713,84 @@ function usernameAuthTranscript(purpose, challenge) {
   return transcript
 }
 
+async function ensureBrowserIdentitySeed(identity) {
+  const storedSeed = identity?.privateSeed
+  if (storedSeed && new Uint8Array(storedSeed).length === 32) {
+    return { ...identity, privateSeed: new Uint8Array(storedSeed) }
+  }
+  if (!identity?.privateKey) return identity
+  let pkcs8
+  try {
+    pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', identity.privateKey))
+  } catch {
+    throw new Error('This browser identity cannot be restored. Pair this browser again.')
+  }
+  if (pkcs8.length < 32) throw new Error('This browser identity has invalid signing key material.')
+  return { ...identity, privateSeed: pkcs8.slice(pkcs8.length - 32) }
+}
+
+function hasBrowserIdentitySeed(identity) {
+  try {
+    return new Uint8Array(identity?.privateSeed || []).length === 32
+  } catch {
+    return false
+  }
+}
+
+function pairingTranscript(userID, deviceID, mlsNodeID, publicKey, nonce) {
+  const prefix = new TextEncoder().encode('links/device-pairing/v1\0')
+  const parts = [prefix, uuidBytes(userID), uuidBytes(deviceID), uuidBytes(mlsNodeID), publicKey, nonce]
+  const length = parts.reduce((total, part) => total + part.length, 0)
+  const transcript = new Uint8Array(length)
+  let offset = 0
+  parts.forEach(part => { transcript.set(part, offset); offset += part.length })
+  return transcript
+}
+
+async function migrateLegacyBrowserIdentity(handle, session) {
+  const identity = await createBrowserIdentity()
+  const userID = session.user_id
+  const publicKey = new Uint8Array(identity.publicKey)
+  const nonce = crypto.getRandomValues(new Uint8Array(32))
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    'Ed25519',
+    identity.privateKey,
+    pairingTranscript(userID, identity.deviceID, identity.mlsNodeID, publicKey, nonce)
+  ))
+  const response = await fetch(`${authBase()}/v1/devices`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      device_id: identity.deviceID,
+      mls_node_id: identity.mlsNodeID,
+      public_key: encodeBase64URL(publicKey),
+      nonce: encodeBase64URL(nonce),
+      signature: encodeBase64URL(signature)
+    }),
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+  if (!response.ok) throw new Error('The browser identity needs to be paired again.')
+  const registered = await response.json()
+  if (registered.user_id !== userID || registered.device_id !== identity.deviceID
+    || registered.mls_node_id !== identity.mlsNodeID
+    || !registered.mls_credential
+    || !decodeBase64URL(registered.public_key, 32).every((byte, index) => byte === publicKey[index])) {
+    throw new Error('The account service returned an invalid browser device.')
+  }
+  return {
+    ...identity,
+    userID,
+    handle,
+    mlsCredential: registered.mls_credential
+  }
+}
+
 function openAuthenticationDialog(mode = 'login') {
   authMode.value = mode
   authHandle.value = normalizeHandle(profileHandle.value)
@@ -762,7 +844,14 @@ async function establishUsernameSession(handle, purpose, identity) {
     throw new Error('The account service returned an invalid session.')
   }
   uuidBytes(session.user_id)
-  const nextIdentity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
+  let nextIdentity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
+  if (!hasBrowserIdentitySeed(nextIdentity)) {
+    nextIdentity = await migrateLegacyBrowserIdentity(handle, session)
+    await saveBrowserIdentity(nextIdentity)
+    await establishUsernameSession(handle, 'login', nextIdentity)
+    return nextIdentity
+  }
+  nextIdentity = await ensureBrowserIdentitySeed(nextIdentity)
   await saveBrowserIdentity(nextIdentity)
   setAutoRestoreDisabled(false)
   cancelAutoRestoreRetry()
@@ -815,6 +904,8 @@ async function restoreSavedSession() {
     connectionState.value = 'preview'
     if (error instanceof TypeError || /could not (start authentication|create a session)/i.test(error.message || '')) {
       retrySavedSessionLater()
+    } else if (error?.message) {
+      notice.value = `Could not restore encrypted sync: ${error.message}`
     }
   } finally {
     isRestoringSession = false

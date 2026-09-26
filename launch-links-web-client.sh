@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 client_root="$repo_root/web/client"
 
+if [[ -f "$repo_root/.env" ]]; then
+  set -a
+  . "$repo_root/.env"
+  set +a
+fi
+
 if [[ ! -d "$client_root/node_modules" ]]; then
   npm install --prefix "$client_root"
 fi
