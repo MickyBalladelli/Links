@@ -1880,7 +1880,7 @@ function App() {
       <Background
         class="app-background"
         palette="aurora"
-        animation="veil"
+        animation="silk"
         speed={0.42}
         intensity={0.72}
         grain={0.01}
