@@ -1592,7 +1592,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
         textView.drawsBackground = false
         textView.textColor = .labelColor
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
-        textView.textContainerInset = NSSize(width: 0, height: 5)
+        textView.textContainerInset = NSSize(width: 0, height: 9)
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(
