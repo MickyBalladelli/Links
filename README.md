@@ -148,11 +148,12 @@ bash launch-links-web-client.sh
 ```
 
 Open `http://localhost:5175`. The interface mirrors the macOS split-view client
-with conversations, contacts, delivery state, profile settings, username
-resolution, message bubbles, and a responsive mobile layout. It is intentionally
-marked as a UI preview: directory lookup can use the local account API, while
-the shared WASM encryption core, durable stores, pairing, and live messaging
-transport still need to be composed into this host.
+with conversations, contacts, local group management, image and file messages,
+delivery state, profile settings, username resolution, and a responsive mobile
+layout. It is intentionally marked as a UI preview: directory lookup and profile
+updates can use the local account API, while the shared WASM encryption core,
+durable encrypted stores, group MLS operations, attachment transfer, pairing,
+and live messaging transport still need to be composed into this host.
 
 ### Disposable username development mode
 

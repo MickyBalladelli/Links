@@ -19,6 +19,7 @@ import {
   prismTheme
 } from '@mickyballadelli/prism'
 import './style.css'
+import { clearAttachments, readAttachment, saveAttachment } from './attachmentStore.js'
 
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
@@ -70,6 +71,14 @@ const contactPictures = signal({})
 const profileOpen = signal(false)
 const mobileSidebarOpen = signal(false)
 const isResolving = signal(false)
+const createGroupOpen = signal(false)
+const groupInfoOpen = signal(false)
+const groupNameDraft = signal('')
+const groupMemberDraft = signal([])
+const groupError = signal('')
+const pendingAttachment = signal(null)
+const attachmentURLs = signal({})
+const composerDragActive = signal(false)
 
 const seededState = {
   contacts: [
@@ -95,6 +104,21 @@ const seededState = {
       messages: [
         { id: 'm3', text: 'Can you see this conversation?', outgoing: false, sentAt: 'Yesterday' }
       ]
+    },
+    {
+      id: 'launch-crew',
+      title: 'Launch crew',
+      isGroup: true,
+      groupActive: true,
+      unreadCount: 1,
+      members: [
+        { userID: 'self', handle: 'micky', role: 'owner', isSelf: true },
+        { userID: '4bc1797c-2dc3-4854-aada-6a52037a35e1', handle: 'karine', role: 'member' },
+        { userID: 'c394da90-1982-4541-bc6a-af981bd67978', handle: 'bob', role: 'member' }
+      ],
+      messages: [
+        { id: 'm4', text: 'Images and files can live in this group too.', outgoing: false, senderHandle: 'karine', sentAt: 'Yesterday' }
+      ]
     }
   ]
 }
@@ -102,7 +126,17 @@ const seededState = {
 function loadState() {
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) || 'null')
-    if (stored?.contacts && stored?.conversations) return stored
+    if (Array.isArray(stored?.contacts) && Array.isArray(stored?.conversations)) {
+      return {
+        contacts: stored.contacts,
+        conversations: stored.conversations.map(conversation => ({
+          ...conversation,
+          unreadCount: Number(conversation.unreadCount || 0),
+          messages: Array.isArray(conversation.messages) ? conversation.messages : [],
+          members: conversation.isGroup && Array.isArray(conversation.members) ? conversation.members : []
+        }))
+      }
+    }
   } catch {
     // Keep the preview usable when browser storage is unavailable.
   }
@@ -123,6 +157,99 @@ function persistState() {
     // State remains available for the current tab.
   }
 }
+
+function currentTimeLabel() {
+  return new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' }).format(new Date())
+}
+
+function conversationSummary(conversation) {
+  const message = conversation.messages.at(-1)
+  if (!message) return conversation.isGroup ? `${conversation.members?.length || 1} members` : 'No messages yet'
+  if (message.attachment?.kind === 'image') return message.text || 'Image'
+  if (message.attachment?.kind === 'file') return message.attachment.name || 'File'
+  return message.text || 'Message'
+}
+
+function formatBytes(bytes) {
+  const size = Number(bytes || 0)
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+}
+
+function setAttachmentURL(id, url) {
+  const previous = attachmentURLs.value[id]
+  if (previous && previous !== url) URL.revokeObjectURL(previous)
+  attachmentURLs.value = { ...attachmentURLs.value, [id]: url }
+}
+
+async function hydrateAttachment(attachment) {
+  if (!attachment?.id || attachmentURLs.value[attachment.id]) return
+  try {
+    const blob = await readAttachment(attachment.id)
+    if (blob) setAttachmentURL(attachment.id, URL.createObjectURL(blob))
+  } catch {
+    // A missing browser database leaves the message metadata visible.
+  }
+}
+
+function hydrateStoredAttachments() {
+  conversations.value.forEach(conversation => {
+    conversation.messages.forEach(message => { hydrateAttachment(message.attachment) })
+  })
+}
+
+function clearPendingAttachment() {
+  const pending = pendingAttachment.value
+  if (pending?.previewURL) URL.revokeObjectURL(pending.previewURL)
+  pendingAttachment.value = null
+  composerDragActive.value = false
+}
+
+function selectComposerAttachment(file) {
+  if (!(file instanceof File)) return
+  const isImage = file.type.startsWith('image/')
+  const maximumBytes = isImage ? 32 * 1024 * 1024 : 20 * 1024 * 1024
+  if (file.size === 0 || file.size > maximumBytes) {
+    notice.value = isImage ? 'Images must be under 32 MB.' : 'Files must be under 20 MB.'
+    return
+  }
+  clearPendingAttachment()
+  pendingAttachment.value = {
+    id: crypto.randomUUID(),
+    kind: isImage ? 'image' : 'file',
+    name: file.name || (isImage ? 'Image' : 'File'),
+    mimeType: file.type || 'application/octet-stream',
+    size: file.size,
+    blob: file,
+    previewURL: isImage ? URL.createObjectURL(file) : ''
+  }
+  notice.value = ''
+}
+
+function handleComposerFiles(files) {
+  const file = Array.from(files || [])[0]
+  if (file) selectComposerAttachment(file)
+}
+
+function handleComposerPaste(event) {
+  const file = Array.from(event.clipboardData?.files || [])[0]
+  if (!file) return
+  event.preventDefault()
+  selectComposerAttachment(file)
+}
+
+function handleComposerDrop(event) {
+  event.preventDefault()
+  composerDragActive.value = false
+  handleComposerFiles(event.dataTransfer?.files)
+}
+
+hydrateStoredAttachments()
+window.addEventListener('beforeunload', () => {
+  clearPendingAttachment()
+  Object.values(attachmentURLs.value).forEach(url => URL.revokeObjectURL(url))
+})
 
 function normalizeHandle(value) {
   return String(value || '').trim().toLowerCase().replace(/^@/, '')
@@ -612,6 +739,106 @@ function openConversation(contact) {
   persistState()
 }
 
+function openCreateGroup() {
+  groupNameDraft.value = ''
+  groupMemberDraft.value = []
+  groupError.value = ''
+  createGroupOpen.value = true
+}
+
+function toggleGroupMember(userID) {
+  groupMemberDraft.value = groupMemberDraft.value.includes(userID)
+    ? groupMemberDraft.value.filter(id => id !== userID)
+    : [...groupMemberDraft.value, userID]
+}
+
+function createPreviewGroup(event) {
+  event?.preventDefault()
+  const name = groupNameDraft.value.trim()
+  if (!name || name.length > 64) {
+    groupError.value = 'Use a group name of 1–64 characters.'
+    return
+  }
+  if (groupMemberDraft.value.length === 0) {
+    groupError.value = 'Choose at least one contact.'
+    return
+  }
+  const members = [
+    { userID: 'self', handle: normalizeHandle(profileHandle.value), role: 'owner', isSelf: true },
+    ...contacts.value
+      .filter(contact => groupMemberDraft.value.includes(contact.userID))
+      .map(contact => ({ userID: contact.userID, handle: contact.handle, displayName: contact.displayName, role: 'member' }))
+  ]
+  const group = {
+    id: crypto.randomUUID(),
+    title: name,
+    isGroup: true,
+    groupActive: true,
+    unreadCount: 0,
+    members,
+    messages: []
+  }
+  conversations.value = [group, ...conversations.value]
+  selectedConversationID.value = group.id
+  createGroupOpen.value = false
+  groupError.value = ''
+  persistState()
+  notice.value = `Created ${name} in the local preview.`
+}
+
+function openGroupInfo(conversation) {
+  if (!conversation?.isGroup) return
+  groupNameDraft.value = conversation.title
+  groupMemberDraft.value = (conversation.members || []).filter(member => !member.isSelf).map(member => member.userID)
+  groupError.value = ''
+  groupInfoOpen.value = true
+}
+
+function saveGroupDetails(event) {
+  event?.preventDefault()
+  const conversation = selectedConversation.value
+  const name = groupNameDraft.value.trim()
+  if (!conversation?.isGroup) return
+  if (!name || name.length > 64) {
+    groupError.value = 'Use a group name of 1–64 characters.'
+    return
+  }
+  const existingSelf = conversation.members?.find(member => member.isSelf) || {
+    userID: 'self', handle: normalizeHandle(profileHandle.value), role: 'owner', isSelf: true
+  }
+  const members = [
+    existingSelf,
+    ...contacts.value
+      .filter(contact => groupMemberDraft.value.includes(contact.userID))
+      .map(contact => {
+        const current = conversation.members?.find(member => member.userID === contact.userID)
+        return {
+          userID: contact.userID,
+          handle: contact.handle,
+          displayName: contact.displayName,
+          role: current?.role || 'member'
+        }
+      })
+  ]
+  conversations.value = conversations.value.map(item => item.id === conversation.id
+    ? { ...item, title: name, members }
+    : item)
+  groupInfoOpen.value = false
+  groupError.value = ''
+  persistState()
+  notice.value = 'Group details saved in the local preview.'
+}
+
+function disbandSelectedGroup() {
+  const conversation = selectedConversation.value
+  if (!conversation?.isGroup) return
+  conversations.value = conversations.value.filter(item => item.id !== conversation.id)
+  selectedConversationID.value = conversations.value[0]?.id || null
+  groupInfoOpen.value = false
+  persistState()
+  notice.value = `Removed ${conversation.title} from the local preview.`
+}
+
 async function addOrOpenContact(event) {
   event?.preventDefault()
   if (isResolving.value) return
@@ -637,31 +864,57 @@ async function addOrOpenContact(event) {
   }
 }
 
-function sendPreviewMessage(event) {
+async function sendPreviewMessage(event) {
   event?.preventDefault()
   const text = composerText.value.trim()
+  const attachment = pendingAttachment.value
   const id = selectedConversationID.value
-  if (!text || !id) return
-  conversations.value = conversations.value.map(conversation => (
-    conversation.id === id
-      ? {
-          ...conversation,
-          messages: [...conversation.messages, {
-            id: crypto.randomUUID(),
-            text,
-            outgoing: true,
-            sentAt: new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' }).format(new Date())
-          }]
-        }
-      : conversation
-  ))
+  if ((!text && !attachment) || !id) return
+
+  const additions = []
+  if (attachment) {
+    additions.push({
+      id: crypto.randomUUID(),
+      text: attachment.kind === 'image' ? 'Image' : attachment.name,
+      attachment: {
+        id: attachment.id,
+        kind: attachment.kind,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        size: attachment.size
+      },
+      outgoing: true,
+      sentAt: currentTimeLabel()
+    })
+  }
+  if (text) {
+    additions.push({ id: crypto.randomUUID(), text, outgoing: true, sentAt: currentTimeLabel() })
+  }
+
+  if (attachment) {
+    try {
+      await saveAttachment(attachment.id, attachment.blob)
+      setAttachmentURL(attachment.id, attachment.previewURL || URL.createObjectURL(attachment.blob))
+      pendingAttachment.value = null
+    } catch {
+      notice.value = 'The attachment could not be saved in this browser.'
+      return
+    }
+  }
+  conversations.value = conversations.value.map(conversation => conversation.id === id
+    ? { ...conversation, messages: [...conversation.messages, ...additions] }
+    : conversation)
   composerText.value = ''
   notice.value = 'Saved in the local preview. Encrypted transport is not connected yet.'
   persistState()
   requestAnimationFrame(() => document.querySelector('.message-list')?.scrollTo({ top: 999999, behavior: 'smooth' }))
 }
 
-function resetPreview() {
+async function resetPreview() {
+  clearPendingAttachment()
+  Object.values(attachmentURLs.value).forEach(url => URL.revokeObjectURL(url))
+  attachmentURLs.value = {}
+  try { await clearAttachments() } catch { /* Keep reset available without IndexedDB. */ }
   contacts.value = seededState.contacts
   conversations.value = seededState.conversations
   selectedConversationID.value = 'karine'
@@ -685,6 +938,25 @@ function StatusDot() {
   return <span class={computed(() => `status-dot is-${connectionState.value}`)} aria-hidden="true"></span>
 }
 
+function GroupIcon({ size = 40 }) {
+  return (
+    <span class={`group-avatar is-${size}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 20v-1.4c0-2-1.8-3.6-4-3.6H6c-2.2 0-4 1.6-4 3.6V20" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M17 11a3.5 3.5 0 1 0-2.8-5.6M18 15c2.2 0 4 1.6 4 3.6V20" />
+      </svg>
+    </span>
+  )
+}
+
+function ConversationAvatar({ conversation, size = 'medium' }) {
+  if (conversation.isGroup) return <GroupIcon size={size === 'large' ? 48 : size === 'small' ? 32 : 40} />
+  return contactPictures.value[conversation.recipientUserID]
+    ? <img class={`profile-picture is-${size}`} src={contactPictures.value[conversation.recipientUserID]} alt="" />
+    : <Avatar name={avatarName(conversation.displayName || conversation.title)} size={size} />
+}
+
 function ConversationList() {
   return computed(() => filteredConversations.value.length ? filteredConversations.value.map(conversation => (
     <button
@@ -692,13 +964,15 @@ function ConversationList() {
       class={computed(() => `conversation-row ${selectedConversationID.value === conversation.id ? 'is-selected' : ''}`)}
       onClick={() => selectConversation(conversation.id)}
     >
-      {contactPictures.value[conversation.recipientUserID]
-        ? <img class="profile-picture is-medium" src={contactPictures.value[conversation.recipientUserID]} alt="" />
-        : <Avatar name={avatarName(conversation.displayName || conversation.title)} size="medium" />}
+      <ConversationAvatar conversation={conversation} />
       <span class="conversation-copy">
         <strong>{conversation.displayName || conversation.title}</strong>
-        <span>{conversation.displayName ? conversation.title : (conversation.messages.at(-1)?.text || 'No messages yet')}</span>
-        {conversation.displayName ? <span>{conversation.messages.at(-1)?.text || 'No messages yet'}</span> : null}
+        {conversation.isGroup
+          ? <span>{conversationSummary(conversation)}</span>
+          : <>
+              <span>{conversation.displayName ? conversation.title : conversationSummary(conversation)}</span>
+              {conversation.displayName ? <span>{conversationSummary(conversation)}</span> : null}
+            </>}
       </span>
       {conversation.unreadCount > 0 ? <Badge value={conversation.unreadCount > 99 ? '99+' : conversation.unreadCount} tone="info" /> : null}
     </button>
@@ -758,6 +1032,23 @@ function TrashIcon() {
   )
 }
 
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M6 2h8l4 4v16H6z" />
+      <path d="M14 2v5h5" />
+    </svg>
+  )
+}
+
+function PaperclipIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5" />
+    </svg>
+  )
+}
+
 function Sidebar() {
   return (
     <aside class={computed(() => `sidebar ${mobileSidebarOpen.value ? 'is-open' : ''}`)}>
@@ -789,7 +1080,10 @@ function Sidebar() {
       <section class="sidebar-section conversations-section">
         <div class="section-label">
           <span>Conversations</span>
-          <Button label="New conversation" showLabel={false} icon={<PlusIcon />} ariaLabel="New conversation" variant="tertiary" size="small" onClick={() => { newConversationOpen.value = true }} />
+          <div class="section-actions">
+            <button type="button" class="icon-action" aria-label="New group" title="New group" onClick={openCreateGroup}><GroupIcon size={24} /></button>
+            <Button label="New conversation" showLabel={false} icon={<PlusIcon />} ariaLabel="New conversation" variant="tertiary" size="small" onClick={() => { newConversationOpen.value = true }} />
+          </div>
         </div>
         <div class="conversation-list"><ConversationList /></div>
       </section>
@@ -827,14 +1121,33 @@ function Messages() {
         />
       )
     }
-    return conversation.messages.map(message => (
-      <div class={`message-row ${message.outgoing ? 'is-outgoing' : 'is-incoming'}`}>
-        <div class="message-bubble">
-          <p>{message.text}</p>
-          <time>{message.sentAt}</time>
+    return conversation.messages.map(message => {
+      const attachment = message.attachment
+      const source = attachment ? attachmentURLs.value[attachment.id] : ''
+      if (attachment && !source) hydrateAttachment(attachment)
+      return (
+        <div class={`message-row ${message.outgoing ? 'is-outgoing' : 'is-incoming'}`}>
+          <div class="message-bubble">
+            {conversation.isGroup && !message.outgoing
+              ? <span class="message-sender">@{message.senderHandle || 'member'}</span>
+              : null}
+            {attachment?.kind === 'image'
+              ? source
+                ? <a class="message-image-link" href={source} download={attachment.name} title="Save image">
+                    <img class="message-image" src={source} alt={attachment.name || 'Shared image'} />
+                  </a>
+                : <div class="attachment-loading">Image unavailable</div>
+              : attachment?.kind === 'file'
+                ? <a class={`file-message ${source ? '' : 'is-unavailable'}`} href={source || undefined} download={attachment.name}>
+                    <FileIcon />
+                    <span><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></span>
+                  </a>
+                : <p>{message.text}</p>}
+            <time>{message.sentAt}</time>
+          </div>
         </div>
-      </div>
-    ))
+      )
+    })
   })
 }
 
@@ -852,44 +1165,67 @@ function ConversationDetail() {
       <main class="conversation-detail">
         <header class="conversation-header">
           <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
-          {contactPictures.value[conversation.recipientUserID]
-            ? <img class="profile-picture is-large" src={contactPictures.value[conversation.recipientUserID]} alt="" />
-            : <Avatar name={avatarName(conversation.displayName || conversation.title)} size="large" />}
+          <ConversationAvatar conversation={conversation} size="large" />
           <div class="conversation-heading">
             <h1>{conversation.displayName || conversation.title}</h1>
-            <p>{conversation.title}</p>
+            <p>{conversation.isGroup ? `${conversation.members?.length || 1} members` : conversation.title}</p>
           </div>
+          {conversation.isGroup
+            ? <button type="button" class="group-info-button" onClick={() => openGroupInfo(conversation)}>Members</button>
+            : null}
           <div class="conversation-status"><StatusDot /><span>{statusLabel}</span></div>
         </header>
 
         <div class="delivery-banner">
           <LiveStatusIcon size="1rem" />
           <div>
-            <strong>Browser transport not connected</strong>
-            <span>This shell is ready for the shared WASM messaging core and WebTextMessaging host.</span>
+            <strong>Local browser mode</strong>
+            <span>Messages and attachments are saved on this device.</span>
           </div>
-          <Badge value="Preview" tone="warning" />
+          <Badge value="Local" tone="warning" />
         </div>
 
-        <div class="secure-note"><LockIcon size="0.8rem" /><span>Secure conversation initialization is pending browser-core integration.</span></div>
+        <div class="secure-note"><LockIcon size="0.8rem" /><span>Encrypted sync is not enabled in this browser build.</span></div>
 
         <section class="message-list" aria-live="polite"><Messages /></section>
 
-        <form class="composer" onSubmit={sendPreviewMessage}>
+        <form
+          class={computed(() => `composer ${composerDragActive.value ? 'is-dragging' : ''}`)}
+          onSubmit={sendPreviewMessage}
+          onDragEnter={event => { event.preventDefault(); composerDragActive.value = true }}
+          onDragOver={event => { event.preventDefault(); composerDragActive.value = true }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) composerDragActive.value = false }}
+          onDrop={handleComposerDrop}
+        >
+          {computed(() => pendingAttachment.value ? (
+            <div class="composer-attachment">
+              {pendingAttachment.value.kind === 'image'
+                ? <img src={pendingAttachment.value.previewURL} alt="Selected attachment" />
+                : <FileIcon />}
+              <span><strong>{pendingAttachment.value.name}</strong><small>{formatBytes(pendingAttachment.value.size)}</small></span>
+              <button type="button" aria-label="Remove attachment" onClick={clearPendingAttachment}><CloseIcon /></button>
+            </div>
+          ) : null)}
+          <label class="attach-button" aria-label="Attach image or file" title="Attach image or file">
+            <PaperclipIcon />
+            <input type="file" onChange={event => { handleComposerFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
+          </label>
           <textarea
             value={composerText}
             onInput={event => { composerText.value = event.currentTarget.value }}
+            onPaste={handleComposerPaste}
             onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 sendPreviewMessage(event)
               }
             }}
-            placeholder="Message"
+            placeholder={computed(() => pendingAttachment.value ? 'Add a caption' : 'Message')}
             aria-label={`Message ${conversation.title}`}
             rows="1"
           ></textarea>
-          <Button type="submit" label="Send" showLabel={false} icon={<SendIcon />} ariaLabel="Save preview message" variant="primary" disabled={computed(() => !composerText.value.trim())} />
+          <Button type="submit" label="Send" showLabel={false} icon={<SendIcon />} ariaLabel="Save preview message or attachment" variant="primary" disabled={computed(() => !composerText.value.trim() && !pendingAttachment.value)} />
+          <span class="drop-hint">Drop an image or file to attach</span>
         </form>
       </main>
     )
@@ -944,6 +1280,90 @@ function RemoveContactPopup() {
       })}</p>
     </Popup>
   )
+}
+
+function GroupContactPicker() {
+  return computed(() => contacts.value.length ? (
+    <div class="group-contact-picker">
+      {contacts.value.map(contact => (
+        <label class="group-contact-option">
+          <input
+            type="checkbox"
+            checked={groupMemberDraft.value.includes(contact.userID)}
+            onChange={() => toggleGroupMember(contact.userID)}
+          />
+          {contactPictures.value[contact.userID]
+            ? <img class="profile-picture is-small" src={contactPictures.value[contact.userID]} alt="" />
+            : <Avatar name={avatarName(contact.displayName || contact.handle)} size="small" />}
+          <span><strong>{contact.displayName || `@${contact.handle}`}</strong><small>@{contact.handle}</small></span>
+        </label>
+      ))}
+    </div>
+  ) : <p class="sidebar-empty">Add contacts before creating a group.</p>)
+}
+
+function CreateGroupPopup() {
+  return (
+    <Popup
+      open={createGroupOpen}
+      title="New group"
+      ariaDescription="Name the group and choose at least one contact."
+      size="small"
+      onClose={() => { createGroupOpen.value = false; groupError.value = '' }}
+      footer={() => (
+        <div class="popup-actions">
+          <Button label="Cancel" variant="secondary" onClick={() => { createGroupOpen.value = false }} />
+          <Button label="Create group" variant="primary" onClick={createPreviewGroup} />
+        </div>
+      )}
+    >
+      <form class="popup-form" onSubmit={createPreviewGroup}>
+        <label for="group-name">Group name</label>
+        <TextField id="group-name" value={groupNameDraft} placeholder="Launch crew" autocomplete="off" />
+        <label>Members</label>
+        <GroupContactPicker />
+        {computed(() => groupError.value ? <Alert tone="error">{groupError}</Alert> : null)}
+      </form>
+    </Popup>
+  )
+}
+
+function GroupInfoPopup() {
+  return computed(() => {
+    const conversation = selectedConversation.value
+    if (!conversation?.isGroup) return null
+    return (
+      <Popup
+        open={groupInfoOpen}
+        title="Group details"
+        ariaDescription="Rename the group or change its members."
+        size="medium"
+        onClose={() => { groupInfoOpen.value = false; groupError.value = '' }}
+        footer={() => (
+          <div class="popup-actions is-split">
+            <Button label="Disband group" variant="tertiary" onClick={disbandSelectedGroup} />
+            <span class="popup-actions">
+              <Button label="Cancel" variant="secondary" onClick={() => { groupInfoOpen.value = false }} />
+              <Button label="Save changes" variant="primary" onClick={saveGroupDetails} />
+            </span>
+          </div>
+        )}
+      >
+        <form class="popup-form" onSubmit={saveGroupDetails}>
+          <label for="group-details-name">Group name</label>
+          <TextField id="group-details-name" value={groupNameDraft} autocomplete="off" />
+          <label>Members</label>
+          <div class="group-owner-row">
+            <ProfilePicture size="small" />
+            <span><strong>You</strong><small>@{normalizeHandle(profileHandle.value)} · Owner</small></span>
+          </div>
+          <GroupContactPicker />
+          <p>Membership changes stay in this browser preview until the Web MLS group core is connected.</p>
+          {computed(() => groupError.value ? <Alert tone="error">{groupError}</Alert> : null)}
+        </form>
+      </Popup>
+    )
+  })
 }
 
 function ProfilePopup() {
@@ -1008,6 +1428,8 @@ function App() {
       <ConversationDetail />
       <UsernamePopup open={newConversationOpen} title="New conversation" description="Find someone by username and open a private conversation." />
       <UsernamePopup open={addContactOpen} title="Add contact" description="Resolve and save a Links account by username." />
+      <CreateGroupPopup />
+      <GroupInfoPopup />
       <RemoveContactPopup />
       <ProfilePopup />
       {computed(() => notice.value && !newConversationOpen.value && !addContactOpen.value ? (
