@@ -6,6 +6,6 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build:wasm": "wasm-pack build ../crates/web-client --target web --out-dir client/public/web-wasm"
+    "build:wasm": "../scripts/build-web-wasm.sh"
   }
 }

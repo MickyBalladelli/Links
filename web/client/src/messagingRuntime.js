@@ -25,6 +25,10 @@ async function loadWasmModule() {
         if (typeof module.default === 'function') await module.default()
         return module
       })
+      .catch(error => {
+        wasmModulePromise = null
+        throw error
+      })
   }
   return wasmModulePromise
 }

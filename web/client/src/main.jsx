@@ -38,6 +38,7 @@ const profileDisplayNameKey = 'links-web-client-profile-display-name-v1'
 let activeAccountID = 'preview'
 let webMessagingSession = null
 let isRestoringSession = false
+let autoRestoreTimer = null
 
 function setAutoRestoreDisabled(disabled) {
   try {
@@ -45,7 +46,7 @@ function setAutoRestoreDisabled(disabled) {
       localStorage.setItem(autoRestoreDisabledKey, '1')
       localStorage.removeItem(lastAccountHandleKey)
     } else localStorage.removeItem(autoRestoreDisabledKey)
-  } catch {
+  } catch (error) {
     // Keep automatic connection available when browser storage is unavailable.
   }
 }
@@ -60,6 +61,20 @@ function autoRestoreIsDisabled() {
   } catch {
     return false
   }
+}
+
+function cancelAutoRestoreRetry() {
+  if (autoRestoreTimer === null) return
+  window.clearTimeout(autoRestoreTimer)
+  autoRestoreTimer = null
+}
+
+function retrySavedSessionLater() {
+  if (autoRestoreTimer !== null || autoRestoreIsDisabled() || accessToken.value) return
+  autoRestoreTimer = window.setTimeout(() => {
+    autoRestoreTimer = null
+    restoreSavedSession()
+  }, 5000)
 }
 
 function accountStorageKey(baseKey, accountID = activeAccountID) {
@@ -106,6 +121,7 @@ const profilePictureSrc = signal('')
 const profilePictureError = signal('')
 let profilePictureObjectURL = ''
 const connectionState = signal('preview')
+const wasmAvailability = signal(null)
 const selectedConversationID = signal('karine')
 const composerText = signal('')
 const contactQuery = signal('')
@@ -433,6 +449,7 @@ async function stopWebMessaging() {
   const session = webMessagingSession
   webMessagingSession = null
   session?.shutdown()
+  wasmAvailability.value = null
   connectionState.value = 'preview'
 }
 
@@ -481,9 +498,11 @@ async function startWebMessaging(identity) {
       onTextMessage: appendIncomingText,
       onFailure: () => { connectionState.value = 'failed' }
     })
+    wasmAvailability.value = true
     webMessagingSession = session
     session.start()
   } catch (error) {
+    wasmAvailability.value = false
     connectionState.value = 'preview'
     notice.value = `Encrypted browser sync unavailable: ${error.message || 'WASM core could not load.'}`
   }
@@ -746,6 +765,7 @@ async function establishUsernameSession(handle, purpose, identity) {
   const nextIdentity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
   await saveBrowserIdentity(nextIdentity)
   setAutoRestoreDisabled(false)
+  cancelAutoRestoreRetry()
   rememberAutoRestoreHandle(handle)
   accessToken.value = session.access_token
   switchAccountState(session.user_id, handle)
@@ -789,10 +809,13 @@ async function restoreSavedSession() {
     const identity = await loadBrowserIdentity(handle)
     if (!identity?.privateKey || !identity.publicKey || !identity.deviceID || !identity.mlsNodeID) return
     await establishUsernameSession(handle, 'login', identity)
-  } catch {
+  } catch (error) {
     // Keep local preview usable when the account service is offline or the saved
     // browser identity needs to be paired again.
     connectionState.value = 'preview'
+    if (error instanceof TypeError || /could not (start authentication|create a session)/i.test(error.message || '')) {
+      retrySavedSessionLater()
+    }
   } finally {
     isRestoringSession = false
   }
@@ -815,6 +838,7 @@ async function logoutAccount() {
   if (!token) {
     await stopWebMessaging()
     accessToken.value = ''
+    cancelAutoRestoreRetry()
     setAutoRestoreDisabled(true)
     connectionState.value = 'preview'
     logoutConfirmOpen.value = false
@@ -841,6 +865,7 @@ async function logoutAccount() {
   } finally {
     await stopWebMessaging()
     if (accessToken.value.trim() === token) accessToken.value = ''
+    cancelAutoRestoreRetry()
     setAutoRestoreDisabled(true)
     connectionState.value = 'preview'
     isLoggingOut.value = false
@@ -1634,12 +1659,16 @@ function ConversationDetail() {
               <div class="delivery-banner">
                 <LiveStatusIcon size="1rem" />
                 <div>
-                  <strong>Local browser mode</strong>
-                  <span>Messages and attachments are saved on this device.</span>
+                  <strong>{connectionState.value === 'connecting' ? 'Connecting to server' : 'Local browser mode'}</strong>
+                  <span>{connectionState.value === 'connecting' ? 'Encrypted sync is starting.' : 'Messages and attachments are saved on this device.'}</span>
                 </div>
-                <Badge value="Local" tone="warning" />
+                <Badge value={connectionState.value === 'connecting' ? 'Connecting' : 'Local'} tone="warning" />
               </div>
-              <div class="secure-note"><LockIcon size="0.8rem" /><span>Encrypted sync is not enabled in this browser build.</span></div>
+              <div class="secure-note"><LockIcon size="0.8rem" /><span>{wasmAvailability.value === false
+                ? 'Encrypted sync is unavailable in this browser build.'
+                : accessToken.value
+                  ? 'Encrypted sync is reconnecting to the server.'
+                  : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
             </>)}
 
         <section class="message-list" aria-live="polite"><Messages /></section>
@@ -1897,7 +1926,9 @@ function ProfilePopup() {
       footer={() => (
         <div class="popup-actions is-split">
           <span class="popup-actions">
-            <Button label="Log out" variant="tertiary" disabled={isLoggingOut} onClick={openLogoutConfirmation} />
+            {computed(() => accessToken.value
+              ? <Button label="Log out" variant="tertiary" disabled={isLoggingOut} onClick={openLogoutConfirmation} />
+              : <Button label="Log in" variant="tertiary" onClick={() => { profileOpen.value = false; openAuthenticationDialog('login') }} />)}
             <Button label="Reset preview" variant="tertiary" onClick={resetPreview} />
           </span>
           <span class="popup-actions">

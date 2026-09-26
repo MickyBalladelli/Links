@@ -8,4 +8,8 @@ if [[ ! -d "$client_root/node_modules" ]]; then
   npm install --prefix "$client_root"
 fi
 
+if [[ ! -f "$client_root/public/web-wasm/links_web_client.js" ]]; then
+  npm run build:wasm --prefix "$repo_root/web"
+fi
+
 exec npm run dev --prefix "$client_root"
