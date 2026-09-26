@@ -52,6 +52,18 @@ button, input, textarea { font: inherit; }
   grid-template-columns: minmax(290px, 330px) minmax(0, 1fr);
   background: var(--links-canvas);
   color: var(--links-text);
+  --prism-color-accent: #5875e8;
+  --prism-color-accent-bright: #7f9cff;
+  --prism-color-accent-glow: rgb(88 117 232 / 20%);
+  --prism-color-accent-soft: #273660;
+  --prism-button-tertiary-text: #f7f9ff;
+  --prism-button-tertiary-border: rgb(126 183 255 / 24%);
+  --prism-button-tertiary-background: linear-gradient(135deg, #4967c9, #3d8fae);
+  --prism-button-tertiary-background-hover: linear-gradient(135deg, #5877dc, #49a0bd);
+  --prism-button-tertiary-background-active: linear-gradient(135deg, #3d58b2, #337d99);
+  --prism-button-tertiary-shadow: 0 0.42rem 0.96rem rgb(39 72 164 / 26%);
+  --prism-button-tertiary-shadow-hover: 0 0.56rem 1.14rem rgb(39 91 164 / 34%);
+  --prism-button-tertiary-shadow-active: 0 0.12rem 0.32rem rgb(26 52 125 / 26%);
 }
 
 .app-background {
