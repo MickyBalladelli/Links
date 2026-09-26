@@ -1441,7 +1441,6 @@ private struct IOSConversationView: View {
     @State private var composerText = ""
     @State private var composerImage: UIImage?
     @State private var showingMembers = false
-    @FocusState private var composerFocused: Bool
 
     private let conversationBottomID = "conversation-bottom"
 
@@ -1570,13 +1569,26 @@ private struct IOSConversationView: View {
                         .padding(.vertical, 4)
                         .background(Color(uiColor: .secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(alignment: .leading) {
+                            if composerText.isEmpty {
+                                Text("Message")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 18)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                 }
 
                 Button {
                     if let composerImage {
-                        model.sendImage(composerImage, caption: composerText, conversationID: conversationID)
-                        self.composerImage = nil
-                        composerText = ""
+                        let image = composerImage
+                        let caption = composerText
+                        model.sendImage(image, caption: caption, conversationID: conversationID) { sent in
+                            if sent {
+                                self.composerImage = nil
+                                composerText = ""
+                            }
+                        }
                     } else if model.sendMessage(conversationID: conversationID, text: composerText) {
                         composerText = ""
                     }
@@ -1639,6 +1651,7 @@ private struct IOSConversationView: View {
 private struct IOSMessageBubble: View {
     let message: IOSMobileMessage
     var senderLabel: String? = nil
+    var image: UIImage? = nil
 
     var body: some View {
         HStack {
@@ -1649,10 +1662,31 @@ private struct IOSMessageBubble: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(IOSLinksPalette.cobalt)
                 }
-                Text(message.text)
-                    .font(.body)
-                    .foregroundStyle(message.isOutgoing ? .white : .primary)
-                    .textSelection(.enabled)
+                if message.imageMetadataProtobuf != nil {
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 260, maxHeight: 320)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .contextMenu {
+                                Button {
+                                    IOSPhotoLibrary.save(image)
+                                } label: {
+                                    Label("Save Image", systemImage: "square.and.arrow.down")
+                                }
+                            }
+                    } else {
+                        Label("Loading image…", systemImage: "photo")
+                            .font(.body)
+                            .foregroundStyle(message.isOutgoing ? .white : .primary)
+                    }
+                } else {
+                    Text(message.text)
+                        .font(.body)
+                        .foregroundStyle(message.isOutgoing ? .white : .primary)
+                        .textSelection(.enabled)
+                }
                 Text(message.sentAt, style: .time)
                     .font(.caption2)
                     .foregroundStyle(message.isOutgoing ? .white.opacity(0.72) : .secondary)
@@ -1664,6 +1698,90 @@ private struct IOSMessageBubble: View {
                         : AnyShapeStyle(Color(uiColor: .secondarySystemGroupedBackground)))
             .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
             if !message.isOutgoing { Spacer(minLength: 52) }
+        }
+    }
+}
+
+private struct IOSComposerField: UIViewRepresentable {
+    @Binding var text: String
+    var onPasteImage: (UIImage) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> IOSImagePastingTextView {
+        let view = IOSImagePastingTextView()
+        view.delegate = context.coordinator
+        view.font = .preferredFont(forTextStyle: .body)
+        view.backgroundColor = .clear
+        view.textColor = .label
+        view.tintColor = UIColor(IOSLinksPalette.cobalt)
+        view.isScrollEnabled = false
+        view.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+        view.textContainer.lineFragmentPadding = 0
+        view.onPasteImage = { [weak coordinator = context.coordinator] image in
+            coordinator?.parent.onPasteImage(image)
+        }
+        view.accessibilityLabel = "Message"
+        return view
+    }
+
+    func updateUIView(_ uiView: IOSImagePastingTextView, context: Context) {
+        context.coordinator.parent = self
+        if uiView.text != text {
+            uiView.text = text
+        }
+        uiView.onPasteImage = { [weak coordinator = context.coordinator] image in
+            coordinator?.parent.onPasteImage(image)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: IOSImagePastingTextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? 280
+        let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: min(120, max(38, ceil(fitted.height))))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: IOSComposerField
+
+        init(_ parent: IOSComposerField) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+    }
+}
+
+private final class IOSImagePastingTextView: UITextView {
+    var onPasteImage: ((UIImage) -> Void)?
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), UIPasteboard.general.image != nil {
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        if let image = UIPasteboard.general.image {
+            onPasteImage?(image)
+            return
+        }
+        super.paste(sender)
+    }
+}
+
+private enum IOSPhotoLibrary {
+    static func save(_ image: UIImage) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }
         }
     }
 }

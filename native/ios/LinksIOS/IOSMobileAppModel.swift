@@ -1034,7 +1034,8 @@ final class IOSMobileAppModel: ObservableObject {
         }
     }
 
-    func sendImage(_ image: UIImage, caption: String, conversationID: String) {
+    func sendImage(_ image: UIImage, caption: String, conversationID: String,
+                   completion: @escaping (Bool) -> Void = { _ in }) {
         let caption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSendingImage,
               let data = image.jpegData(compressionQuality: 0.9),
@@ -1129,8 +1130,10 @@ final class IOSMobileAppModel: ObservableObject {
                 }
                 self.error = nil
                 self.persistLocalState()
+                completion(true)
             } catch {
                 self.error = "Image not sent. Check the connection and try again."
+                completion(false)
             }
             self.isSendingImage = false
         }
