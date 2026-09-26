@@ -1942,10 +1942,18 @@ dependencies = [
 name = "links-web-client"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "links-client-core",
+ "links-desktop-client",
  "links-identity",
+ "openmls",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "prost",
+ "serde_json",
  "uuid",
  "wasm-bindgen",
+ "zeroize",
 ]
 
 [[package]]

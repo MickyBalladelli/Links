@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 pub const DEFAULT_ONE_TIME_PREKEY_TARGET: u32 = 100;
 pub const DEFAULT_ONE_TIME_PREKEY_LOW_WATERMARK: u32 = 20;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SecretKind {
     IdentityDh,
     SignedCurve,

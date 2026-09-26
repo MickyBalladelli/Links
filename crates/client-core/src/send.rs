@@ -23,6 +23,7 @@ use std::collections::HashSet;
 /// One active physical recipient device from an authenticated directory
 /// snapshot. The MLS package is separate because the current pre-key wire
 /// schema does not carry MLS KeyPackages.
+#[derive(Clone)]
 pub struct RecipientDevice {
     pub user_id: String,
     pub device_id: String,

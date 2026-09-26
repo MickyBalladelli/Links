@@ -479,6 +479,21 @@ impl WebClientIdentity {
         self.mls_credential.is_some()
     }
 
+    /// Move this paired identity into the encrypted Web messaging core.
+    /// The seed stays in WASM; JavaScript receives only the opaque core handle.
+    pub fn create_messaging_core(self) -> Result<WebMessagingCore, JsValue> {
+        let credential = self
+            .mls_credential
+            .as_deref()
+            .ok_or_else(|| js_error(CoreError::Authentication))?;
+        WebMessagingCore::from_identity_parts(
+            &self.user_id.to_string(),
+            &self.device_id.to_string(),
+            self.identity,
+            credential,
+        )
+    }
+
     /// Return the public MLS BasicCredential for the Web OpenMLS provider.
     pub fn mls_credential(&self) -> Result<Vec<u8>, JsValue> {
         self.mls_credential

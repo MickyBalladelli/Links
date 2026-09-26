@@ -39,6 +39,7 @@ pub use links_client_core::decentralized::{
     DecentralizedClient, DecentralizedClientPlan, DecentralizedChunkStorage,
     DecentralizedMediaRelay, DecentralizedMediaRoute, DecentralizedTransportAdapter,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use links_client_core::sandbox::{
     SandboxCryptoGrant, SandboxCryptoOperation, SandboxCryptoRequest, SandboxError,
     SandboxHost, SandboxLimits, SandboxNetworkRequest, SandboxNetworkResponse,
