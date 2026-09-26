@@ -1,5 +1,6 @@
 import Photos
 import PhotosUI
+import UniformTypeIdentifiers
 import SwiftUI
 import LinksClient
 
@@ -1670,6 +1671,12 @@ private struct IOSMessageBubble: View {
                             .frame(maxWidth: 260, maxHeight: 320)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contextMenu {
+                                ShareLink(
+                                    item: IOSShareImage(image: image),
+                                    preview: SharePreview("Image", image: Image(uiImage: image))
+                                ) {
+                                    Label("Share", systemImage: "square.and.arrow.up")
+                                }
                                 Button {
                                     IOSPhotoLibrary.save(image)
                                 } label: {
@@ -1772,6 +1779,16 @@ private final class IOSImagePastingTextView: UITextView {
             return
         }
         super.paste(sender)
+    }
+}
+
+private struct IOSShareImage: Transferable {
+    let image: UIImage
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .jpeg) { item in
+            item.image.jpegData(compressionQuality: 0.95) ?? Data()
+        }
     }
 }
 
