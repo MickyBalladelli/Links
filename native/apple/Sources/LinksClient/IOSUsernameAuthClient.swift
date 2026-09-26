@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum IOSUsernameAuthError: Error {
     case invalidEndpoint
@@ -318,6 +319,76 @@ public final class IOSUsernameAuthClient: Sendable {
         guard let http = response as? HTTPURLResponse, http.statusCode == 204 else {
             throw IOSUsernameAuthError.serviceRejected
         }
+    }
+
+    /// Upload opaque client-encrypted attachment bytes. The service receives
+    /// no image pixels, decryption key, or message metadata.
+    public func uploadEncryptedAttachment(
+        attachmentID: String,
+        ciphertext: Data,
+        accessToken: String
+    ) async throws -> IOSImageUploadReceipt {
+        guard IOSClient.isCanonicalUUID(attachmentID),
+              !accessToken.isEmpty, accessToken.count <= 4096,
+              (17...32 * 1024 * 1024 + 16).contains(ciphertext.count) else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(
+            url: baseURL.appendingPathComponent("v1/blobs/\(attachmentID)"))
+        request.httpMethod = "PUT"
+        request.httpShouldHandleCookies = false
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = ciphertext
+        let (_, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              http.url == request.url, http.statusCode == 204,
+              let sizeHeader = http.value(forHTTPHeaderField: "x-links-ciphertext-size"),
+              let size = UInt64(sizeHeader), size == ciphertext.count,
+              let digestHeader = http.value(forHTTPHeaderField: "x-links-ciphertext-sha256"),
+              let digest = Self.decodeHex(digestHeader),
+              digest == Data(SHA256.hash(data: ciphertext)) else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+        return try IOSImageUploadReceipt(
+            attachmentID: attachmentID,
+            ciphertextSizeBytes: size,
+            ciphertextSHA256: digest)
+    }
+
+    /// Download opaque ciphertext and verify the storage receipt before it
+    /// reaches the image decryptor.
+    public func downloadEncryptedAttachment(
+        attachmentID: String,
+        accessToken: String,
+        expectedSize: UInt64,
+        expectedSHA256: Data
+    ) async throws -> Data {
+        guard IOSClient.isCanonicalUUID(attachmentID),
+              !accessToken.isEmpty, accessToken.count <= 4096,
+              expectedSize >= 17, expectedSize <= 32 * 1024 * 1024 + 16,
+              expectedSHA256.count == 32 else {
+            throw IOSUsernameAuthError.invalidRequest
+        }
+        var request = URLRequest(
+            url: baseURL.appendingPathComponent("v1/blobs/\(attachmentID)"))
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (ciphertext, response) = try await data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              http.url == request.url, http.statusCode == 200,
+              http.value(forHTTPHeaderField: "Content-Type") == "application/octet-stream",
+              UInt64(ciphertext.count) == expectedSize,
+              http.value(forHTTPHeaderField: "x-links-ciphertext-size") == String(expectedSize),
+              http.value(forHTTPHeaderField: "x-links-ciphertext-sha256")
+                .flatMap(Self.decodeHex) == expectedSHA256,
+              Data(SHA256.hash(data: ciphertext)) == expectedSHA256 else {
+            throw IOSUsernameAuthError.serviceRejected
+        }
+        return ciphertext
     }
 
     public func changeUsername(accessToken: String, handle: String) async throws -> String {
@@ -719,6 +790,27 @@ public final class IOSUsernameAuthClient: Sendable {
             return nil
         }
         return object["error"] as? String
+    }
+
+    private static func decodeHex(_ value: String) -> Data? {
+        let encoded = Array(value.utf8)
+        guard encoded.count == 64 else { return nil }
+        var result = Data(capacity: 32)
+        for index in stride(from: 0, to: encoded.count, by: 2) {
+            guard let high = hexNibble(encoded[index]),
+                  let low = hexNibble(encoded[index + 1]) else { return nil }
+            result.append((high << 4) | low)
+        }
+        return result
+    }
+
+    private static func hexNibble(_ value: UInt8) -> UInt8? {
+        switch value {
+        case 48...57: return value - 48
+        case 65...70: return value - 55
+        case 97...102: return value - 87
+        default: return nil
+        }
     }
 
     private static func isLoopback(_ host: String) -> Bool {

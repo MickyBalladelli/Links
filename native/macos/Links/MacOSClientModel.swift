@@ -11,6 +11,7 @@ struct LinksMacOSMessage: Identifiable, Equatable, Codable {
     let isOutgoing: Bool
     let sentAt: Date
     let senderDeviceID: String?
+    var imageMetadataProtobuf: Data? = nil
     /// Shown above incoming group messages; direct chats have one sender.
     var senderUserID: String? = nil
 }
@@ -216,6 +217,10 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     @Published private(set) var contacts: [LinksMacOSContact] = []
     @Published var selectedConversationID: String?
     @Published var composerText = ""
+    @Published private(set) var composerImageData: Data?
+    @Published private(set) var composerImagePreview: NSImage?
+    @Published private(set) var isSendingComposerImage = false
+    @Published private(set) var messageImages: [UUID: NSImage] = [:]
     @Published private(set) var groupMembers: [LinksMacOSGroupMember] = []
     @Published private(set) var groupStatus = ""
     @Published private(set) var isUpdatingGroup = false
@@ -557,6 +562,16 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return initializedConversationIDs.contains(conversation.id)
         }
         return true
+    }
+
+    var canSendComposerImage: Bool {
+        guard let conversation = selectedConversation else { return false }
+        let conversationReady = conversation.isGroup
+            ? conversation.groupActive
+            : initializedConversationIDs.contains(conversation.id)
+        return conversationReady
+            && messaging?.state == .ready
+            && messaging?.isConnected == true
     }
 
     var canSendSelectedConversation: Bool {
@@ -1986,6 +2001,123 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         publishProfileStatus()
     }
 
+    func setComposerImage(_ image: NSImage) {
+        guard let data = image.tiffRepresentation,
+              !data.isEmpty, data.count <= 32 * 1024 * 1024 else {
+            actionError = "Could not read that image. Try a smaller image."
+            return
+        }
+        composerImageData = data
+        composerImagePreview = image
+        actionError = nil
+    }
+
+    func clearComposerImage() {
+        composerImageData = nil
+        composerImagePreview = nil
+    }
+
+    func sendComposerImage() {
+        guard !isSendingComposerImage,
+              let source = composerImageData,
+              let selectedConversationID,
+              let index = conversations.firstIndex(where: { $0.id == selectedConversationID }) else {
+            actionError = "Select a conversation and paste an image first."
+            return
+        }
+        let conversation = conversations[index]
+        let conversationReady = conversation.isGroup
+            ? conversation.groupActive
+            : initializedConversationIDs.contains(conversation.id)
+        guard conversationReady,
+              let messaging,
+              messaging.state == .ready,
+              messaging.isConnected,
+              let client,
+              let authClient else {
+            actionError = "Open a ready conversation before sending an image."
+            return
+        }
+        let targetConversationID = conversation.id
+        isSendingComposerImage = true
+        actionError = nil
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let normalized = try IOSImageResizer.resize(source)
+                var rgbPixels = try MacOSImageTransfer.rgbPixels(from: normalized.data)
+                var normalizedBytes = normalized.data
+                defer {
+                    rgbPixels.resetBytes(in: 0..<rgbPixels.count)
+                    normalizedBytes.resetBytes(in: 0..<normalizedBytes.count)
+                }
+                let blurHash = try messaging.encodeImageBlurHash(
+                    rgbPixels: rgbPixels,
+                    width: normalized.width,
+                    height: normalized.height)
+                let encrypted = try messaging.encryptImage(
+                    normalizedBytes,
+                    attachmentID: UUID().uuidString.lowercased(),
+                    mimeType: normalized.mimeType,
+                    width: normalized.width,
+                    height: normalized.height,
+                    blurHash: blurHash)
+
+                let token = try client.accessToken()
+                let receipt = try await authClient.uploadEncryptedAttachment(
+                    attachmentID: encrypted.metadata.attachmentID,
+                    ciphertext: encrypted.ciphertext,
+                    accessToken: token)
+                guard receipt.matches(encrypted.metadata) else {
+                    throw IOSImageError.invalidUploadReceipt
+                }
+                if conversation.isGroup {
+                    guard let (_, directory, preKeyAPI, _, _) = self.groupPrerequisites else {
+                        throw IOSMessagingError.notConnected
+                    }
+                    try await messaging.sendGroupImage(
+                        conversationID: conversation.mlsConversationID,
+                        metadata: encrypted.metadata,
+                        receipt: receipt,
+                        directory: directory,
+                        preKeyAPI: preKeyAPI)
+                } else {
+                    try messaging.sendImage(
+                        conversationID: conversation.mlsConversationID,
+                        recipientUserID: conversation.recipientUserID,
+                        metadata: encrypted.metadata,
+                        receipt: receipt)
+                }
+
+                guard let currentIndex = self.conversations.firstIndex(where: {
+                    $0.id == targetConversationID
+                }) else {
+                    throw IOSMessagingError.invalidMessage
+                }
+
+                let message = LinksMacOSMessage(
+                    id: UUID(),
+                    text: "Image",
+                    isOutgoing: true,
+                    sentAt: Date(),
+                    senderDeviceID: nil,
+                    imageMetadataProtobuf: encrypted.metadata.protobuf())
+                self.conversations[currentIndex].messages.append(message)
+                if let preview = self.composerImagePreview {
+                    self.messageImages[message.id] = preview
+                }
+                self.clearComposerImage()
+                self.pendingOutboxCount = messaging.pendingOutboxCount
+                self.actionError = nil
+                self.persistLocalState()
+            } catch {
+                self.actionError = "Image not sent. Check the connection and try again."
+            }
+            self.isSendingComposerImage = false
+        }
+    }
+
     private func conversationSetupStillCurrent(_ conversationID: String) -> Bool {
         !discardedConnectionIDs.contains(conversationID)
             && conversations.contains { $0.id == conversationID }
@@ -2088,6 +2220,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             deliveryState = pendingOutboxCount > 0
                 ? .offlineOutboxRetry(count: pendingOutboxCount) : .ready
             if pendingOutboxCount == 0 { actionError = nil }
+            loadSavedImages(using: messaging)
         case .reconnecting:
             deliveryState = pendingOutboxCount > 0
                 ? .offlineOutboxRetry(count: pendingOutboxCount) : .reconnecting
@@ -2119,6 +2252,116 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         Task { @MainActor [weak self] in
             guard let self, self.messaging === messaging else { return }
             self.renderReceivedMessage(message)
+        }
+    }
+
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                    didReceive image: IOSReceivedImageMessage) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            self.renderReceivedImage(image, messaging: messaging)
+        }
+    }
+
+    private func renderReceivedImage(
+        _ image: IOSReceivedImageMessage,
+        messaging: IOSDirectMessaging
+    ) {
+        let messageID = UUID()
+        let metadata = image.metadataProtobuf
+        let received = LinksMacOSMessage(
+            id: messageID,
+            text: "Image",
+            isOutgoing: false,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(image.sentAtMs) / 1000),
+            senderDeviceID: image.senderDeviceID,
+            imageMetadataProtobuf: metadata,
+            senderUserID: image.senderUserID)
+
+        if let index = conversations.firstIndex(where: {
+            $0.isGroup && $0.id == image.conversationID
+        }) {
+            conversations[index].messages.append(received)
+            if selectedConversationID != conversations[index].id || lifecycleStatus != "Active" {
+                conversations[index].unreadCount += 1
+            }
+        } else {
+            let knownContact = contacts.first(where: { $0.userID == image.senderUserID })
+            if let index = conversations.firstIndex(where: {
+                $0.id == image.conversationID
+                    || $0.peerUserID == image.senderUserID
+                    || (!$0.isIncoming && $0.recipientUserID == image.senderUserID)
+            }) {
+                conversations[index].recipientUserID = image.senderUserID
+                conversations[index].peerUserID = image.senderUserID
+                if conversations[index].mlsConversationID != image.conversationID {
+                    conversations[index].deliveryConversationID = image.conversationID
+                }
+                if let knownContact {
+                    conversations[index].title = "@\(knownContact.handle)"
+                    conversations[index].displayName = knownContact.displayName
+                }
+                conversations[index].messages.append(received)
+                if selectedConversationID != conversations[index].id
+                    || lifecycleStatus != "Active" {
+                    conversations[index].unreadCount += 1
+                }
+            } else {
+                conversations.append(LinksMacOSConversation(
+                    id: image.conversationID,
+                    title: knownContact.map { "@\($0.handle)" } ?? "Incoming conversation",
+                    recipientUserID: image.senderUserID,
+                    peerUserID: image.senderUserID,
+                    messages: [received],
+                    unreadCount: 1,
+                    displayName: knownContact?.displayName))
+            }
+            resolveIncomingUsername(
+                conversationID: image.conversationID,
+                senderUserID: image.senderUserID)
+        }
+        initializedConversationIDs.insert(image.conversationID)
+        actionError = nil
+        persistLocalState()
+        loadReceivedImage(messageID: messageID, protobuf: metadata, messaging: messaging)
+    }
+
+    private func loadReceivedImage(
+        messageID: UUID,
+        protobuf: Data,
+        messaging: IOSDirectMessaging
+    ) {
+        guard let client, let authClient,
+              let metadata = try? IOSImageMetadata(protobuf: protobuf),
+              let token = try? client.accessToken() else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let ciphertext = try await authClient.downloadEncryptedAttachment(
+                    attachmentID: metadata.attachmentID,
+                    accessToken: token,
+                    expectedSize: metadata.ciphertextSizeBytes,
+                    expectedSHA256: metadata.ciphertextSHA256)
+                var plaintext = try messaging.decryptImage(metadata, ciphertext: ciphertext)
+                defer { plaintext.resetBytes(in: 0..<plaintext.count) }
+                guard let image = NSImage(data: plaintext) else {
+                    throw IOSImageError.unableToRender
+                }
+                self.messageImages[messageID] = image
+            } catch {
+                self.actionError = "Could not load the received image."
+            }
+        }
+    }
+
+    private func loadSavedImages(using messaging: IOSDirectMessaging) {
+        for message in conversations.flatMap(\.messages)
+        where message.imageMetadataProtobuf != nil && messageImages[message.id] == nil {
+            guard let metadata = message.imageMetadataProtobuf else { continue }
+            loadReceivedImage(
+                messageID: message.id,
+                protobuf: metadata,
+                messaging: messaging)
         }
     }
 
@@ -2445,8 +2688,12 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return false
         }
         return conversation.messages.allSatisfy { message in
-            !message.text.isEmpty
+            let validText = !message.text.isEmpty
                 && message.text.utf8.count <= IOSDirectMessaging.maximumTextBytes
+            let validImage = message.imageMetadataProtobuf.map {
+                (try? IOSImageMetadata(protobuf: $0)) != nil
+            } ?? false
+            return (validText || validImage)
                 && message.sentAt.timeIntervalSince1970.isFinite
                 && (message.senderDeviceID == nil
                     || IOSClient.isCanonicalUUID(message.senderDeviceID!))

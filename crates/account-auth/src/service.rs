@@ -2218,6 +2218,91 @@ impl AccountAuth {
         })
     }
 
+    /// Store opaque attachment ciphertext after validating the caller session.
+    /// Attachment IDs are random UUIDs carried only inside end-to-end
+    /// encrypted messages. Reusing an ID is idempotent only for identical
+    /// ciphertext.
+    pub async fn put_encrypted_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        ciphertext: Vec<u8>,
+    ) -> Result<(u64, Vec<u8>), AuthError> {
+        self.authenticate(token).await?;
+        let id = Uuid::parse_str(attachment_id).map_err(|_| AuthError::Invalid)?;
+        if id.is_nil()
+            || id.to_string() != attachment_id
+            || ciphertext.len() < 17
+            || ciphertext.len() > links_server_store::blob::MAX_BLOB_BYTES
+        {
+            return Err(AuthError::Invalid);
+        }
+        let size = i64::try_from(ciphertext.len()).map_err(|_| AuthError::Invalid)?;
+        let digest = Sha256::digest(&ciphertext).to_vec();
+
+        sqlx::query(
+            "WITH expired AS (
+                 SELECT attachment_id FROM encrypted_attachments
+                 WHERE created_at <= now() - interval '30 days'
+                 ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED
+             )
+             DELETE FROM encrypted_attachments a USING expired e
+             WHERE a.attachment_id=e.attachment_id",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO encrypted_attachments
+                 (attachment_id,ciphertext,ciphertext_size_bytes,ciphertext_sha256)
+             VALUES ($1,$2,$3,$4) ON CONFLICT (attachment_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(&ciphertext)
+        .bind(size)
+        .bind(&digest)
+        .execute(&self.pool)
+        .await?;
+
+        let stored = sqlx::query(
+            "SELECT ciphertext_size_bytes,ciphertext_sha256
+             FROM encrypted_attachments WHERE attachment_id=$1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AuthError::Unavailable)?;
+        let stored_size: i64 = stored.get("ciphertext_size_bytes");
+        let stored_digest: Vec<u8> = stored.get("ciphertext_sha256");
+        if stored_size != size || stored_digest != digest {
+            return Err(AuthError::Conflict);
+        }
+        Ok((size as u64, digest))
+    }
+
+    /// Return attachment ciphertext only to an authenticated session. The
+    /// message metadata and decryption key stay in the encrypted conversation.
+    pub async fn get_encrypted_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+    ) -> Result<(Vec<u8>, Vec<u8>), AuthError> {
+        self.authenticate(token).await?;
+        let id = Uuid::parse_str(attachment_id).map_err(|_| AuthError::Invalid)?;
+        if id.is_nil() || id.to_string() != attachment_id {
+            return Err(AuthError::Invalid);
+        }
+        let row = sqlx::query(
+            "SELECT ciphertext,ciphertext_sha256 FROM encrypted_attachments
+             WHERE attachment_id=$1 AND created_at > now() - interval '30 days'",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AuthError::NotFound)?;
+        Ok((row.get("ciphertext"), row.get("ciphertext_sha256")))
+    }
+
     /// Revoke the presented session. A well-formed token that is already absent
     /// is treated as logged out so callers do not learn prior session state.
     pub async fn logout(&self, token: &str) -> Result<(), AuthError> {

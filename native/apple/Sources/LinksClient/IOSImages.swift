@@ -25,7 +25,8 @@ public struct IOSImageMetadata: Sendable {
                 contentKey: Data, nonce: Data, ciphertextSHA256: Data,
                 width: Int, height: Int, blurHash: String) throws {
         guard IOSClient.isCanonicalUUID(attachmentID),
-              mimeType == "image/webp" || mimeType == "image/avif",
+              mimeType == "image/webp" || mimeType == "image/avif"
+                  || mimeType == "image/jpeg",
               (17...32 * 1024 * 1024 + 16).contains(ciphertextSizeBytes),
               contentKey.count == 32, nonce.count == 12,
               ciphertextSHA256.count == 32,

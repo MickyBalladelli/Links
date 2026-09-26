@@ -34,6 +34,15 @@ typedef int32_t (*LinksDesktopGroupCallback)(void *context, const uint8_t *conve
                                               const uint8_t *sender_user,
                                               size_t sender_user_length, const uint8_t *payload,
                                               size_t payload_length);
+typedef int32_t (*LinksDesktopImageCallback)(void *context, const uint8_t *conversation,
+                                              size_t conversation_length,
+                                              const uint8_t *sender_user,
+                                              size_t sender_user_length,
+                                              const uint8_t *sender_device,
+                                              size_t sender_device_length,
+                                              const uint8_t *metadata,
+                                              size_t metadata_length, uint64_t sequence_id,
+                                              uint64_t sent_at_ms);
 
 enum {
     LINKS_DESKTOP_GROUP_JOINED = 1,
@@ -55,6 +64,7 @@ typedef struct LinksDesktopCoreCallbacks {
     LinksDesktopTextCallback on_text;
     uint8_t identity_public_key[32];
     LinksDesktopGroupCallback on_group;
+    LinksDesktopImageCallback on_image;
 } LinksDesktopCoreCallbacks;
 
 enum {
@@ -110,6 +120,29 @@ int32_t links_desktop_core_send_text(LinksDesktopCore *core, const uint8_t *conv
                                      size_t conversation_id_length, const uint8_t *recipient_user_id,
                                      size_t recipient_user_id_length, const uint8_t *text,
                                      size_t text_length);
+int32_t links_desktop_core_encode_image_blur_hash(const uint8_t *rgb_pixels,
+                                                  size_t rgb_pixels_length, uint32_t width,
+                                                  uint32_t height, uint8_t *output,
+                                                  size_t capacity, size_t *length);
+int32_t links_desktop_core_encrypt_image(const uint8_t *image, size_t image_length,
+                                         const uint8_t *attachment_id,
+                                         size_t attachment_id_length,
+                                         const uint8_t *mime_type, size_t mime_type_length,
+                                         uint32_t width, uint32_t height,
+                                         const uint8_t *blur_hash, size_t blur_hash_length,
+                                         uint8_t *metadata_output, size_t metadata_capacity,
+                                         size_t *metadata_length, uint8_t *ciphertext_output,
+                                         size_t ciphertext_capacity, size_t *ciphertext_length);
+int32_t links_desktop_core_decrypt_image(const uint8_t *metadata, size_t metadata_length,
+                                         const uint8_t *ciphertext, size_t ciphertext_length,
+                                         uint8_t *plaintext_output, size_t plaintext_capacity,
+                                         size_t *plaintext_length);
+int32_t links_desktop_core_send_image(LinksDesktopCore *core,
+                                      const uint8_t *conversation_id,
+                                      size_t conversation_id_length,
+                                      const uint8_t *recipient_user_id,
+                                      size_t recipient_user_id_length,
+                                      const uint8_t *metadata, size_t metadata_length);
 
 int32_t links_desktop_core_create_group(LinksDesktopCore *core, const uint8_t *conversation_id,
                                         size_t conversation_id_length);
@@ -130,6 +163,11 @@ int32_t links_desktop_core_send_group_text(LinksDesktopCore *core,
                                            const uint8_t *conversation_id,
                                            size_t conversation_id_length, const uint8_t *text,
                                            size_t text_length);
+int32_t links_desktop_core_send_group_image(LinksDesktopCore *core,
+                                            const uint8_t *conversation_id,
+                                            size_t conversation_id_length,
+                                            const uint8_t *metadata,
+                                            size_t metadata_length);
 int32_t links_desktop_core_set_group_name(LinksDesktopCore *core,
                                           const uint8_t *conversation_id,
                                           size_t conversation_id_length, const uint8_t *name,

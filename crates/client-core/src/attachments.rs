@@ -570,7 +570,7 @@ pub fn encrypt_image(
     blur_hash: String,
 ) -> Result<EncryptedImage, CoreError> {
     protocol::validate_id(&attachment_id)?;
-    if !matches!(mime_type.as_str(), "image/webp" | "image/avif")
+    if !matches!(mime_type.as_str(), "image/webp" | "image/avif" | "image/jpeg")
         || plaintext.is_empty()
         || plaintext.len() > MAX_IMAGE_BYTES
     {
@@ -631,7 +631,7 @@ pub fn decrypt_image(
 
 fn validate_image_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
     protocol::validate_media_metadata(media)?;
-    if !matches!(media.mime_type.as_str(), "image/webp" | "image/avif")
+    if !matches!(media.mime_type.as_str(), "image/webp" | "image/avif" | "image/jpeg")
         || media.opus.is_some()
         || media.duration_ms.is_some()
         || media.width.is_none()

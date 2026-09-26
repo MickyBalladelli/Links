@@ -1,6 +1,4 @@
-#if os(iOS)
 import ImageIO
-import UIKit
 import UniformTypeIdentifiers
 
 /// Result ready for the later encrypted-image attachment pipeline.
@@ -59,7 +57,7 @@ public enum IOSImageResizer {
         outputProperties.removeValue(forKey: kCGImagePropertyPixelHeight)
         outputProperties[kCGImageDestinationLossyCompressionQuality] = lossyCompressionQuality
 
-        let outputTypes = [avifTypeIdentifier, webPTypeIdentifier]
+        let outputTypes = [avifTypeIdentifier, webPTypeIdentifier, jpegTypeIdentifier]
         for outputUTI in outputTypes {
             let output = NSMutableData()
             guard let destination = CGImageDestinationCreateWithData(
@@ -91,10 +89,11 @@ public enum IOSImageResizer {
         UTType(filenameExtension: "webp")?.identifier ?? "org.webmproject.webp"
     private static let avifTypeIdentifier =
         UTType(filenameExtension: "avif")?.identifier ?? "public.avif"
+    private static let jpegTypeIdentifier = UTType.jpeg.identifier
 
     private static func mimeType(for uti: String) -> String {
         if uti == avifTypeIdentifier { return "image/avif" }
+        if uti == jpegTypeIdentifier { return "image/jpeg" }
         return "image/webp"
     }
 }
-#endif

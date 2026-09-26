@@ -23,6 +23,7 @@
 		A1000001000000000000000E /* icon-admin.png in Resources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000012 /* icon-admin.png */; };
 		A1000001000000000000000F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000013 /* Assets.xcassets */; };
 		A10000010000000000000010 /* LinksAdminKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000014 /* LinksAdminKeychain.swift */; };
+		A10000010000000000000011 /* MacOSImageTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000015 /* MacOSImageTransfer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +47,7 @@
 		A10000020000000000000012 /* icon-admin.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon-admin.png; sourceTree = "<group>"; };
 		A10000020000000000000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000020000000000000014 /* LinksAdminKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinksAdminKeychain.swift; sourceTree = "<group>"; };
+		A10000020000000000000015 /* MacOSImageTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSImageTransfer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +91,7 @@
 				A10000020000000000000008 /* LinksMacOSProfileLogger.swift */,
 				A10000020000000000000009 /* LinksMacOSProfileStatus.swift */,
 				A1000002000000000000000A /* MacOSRustCore.swift */,
+				A10000020000000000000015 /* MacOSImageTransfer.swift */,
 				A1000002000000000000000B /* Assets.xcassets */,
 			);
 			path = Links;
@@ -223,6 +226,7 @@
 				A10000010000000000000007 /* LinksMacOSProfileLogger.swift in Sources */,
 				A10000010000000000000008 /* LinksMacOSProfileStatus.swift in Sources */,
 				A10000010000000000000009 /* MacOSRustCore.swift in Sources */,
+				A10000010000000000000011 /* MacOSImageTransfer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -12,6 +12,8 @@ pub enum AuthError {
     Invalid,
     #[error("authentication failed")]
     Denied,
+    #[error("resource not found")]
+    NotFound,
     #[error("authentication rate limit exceeded")]
     RateLimited,
     #[error("conflicting authentication write")]

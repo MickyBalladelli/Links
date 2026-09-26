@@ -37,11 +37,38 @@ public struct IOSReceivedTextMessage: Sendable {
     }
 }
 
+public struct IOSReceivedImageMessage: Sendable {
+    public let conversationID: String
+    public let senderUserID: String
+    public let senderDeviceID: String
+    public let metadataProtobuf: Data
+    public let sequenceID: UInt64
+    public let sentAtMs: UInt64
+
+    public init(conversationID: String, senderUserID: String, senderDeviceID: String,
+                metadataProtobuf: Data, sequenceID: UInt64, sentAtMs: UInt64) throws {
+        guard IOSClient.isCanonicalUUID(conversationID),
+              IOSClient.isCanonicalUUID(senderUserID),
+              IOSClient.isCanonicalUUID(senderDeviceID), sequenceID > 0 else {
+            throw IOSMessagingError.invalidMessage
+        }
+        _ = try IOSImageMetadata(protobuf: metadataProtobuf)
+        self.conversationID = conversationID
+        self.senderUserID = senderUserID
+        self.senderDeviceID = senderDeviceID
+        self.metadataProtobuf = metadataProtobuf
+        self.sequenceID = sequenceID
+        self.sentAtMs = sentAtMs
+    }
+}
+
 public protocol IOSDirectMessagingDelegate: AnyObject {
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didChange state: IOSDirectMessaging.State)
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didReceive message: IOSReceivedTextMessage)
+    func directMessaging(_ messaging: IOSDirectMessaging,
+                         didReceive image: IOSReceivedImageMessage)
     func directMessagingDidFail(_ messaging: IOSDirectMessaging)
     func directMessagingDidFail(_ messaging: IOSDirectMessaging,
                                 reason: IOSMessagingIssue)
@@ -50,6 +77,9 @@ public protocol IOSDirectMessagingDelegate: AnyObject {
 }
 
 public extension IOSDirectMessagingDelegate {
+    func directMessaging(_ messaging: IOSDirectMessaging,
+                         didReceive image: IOSReceivedImageMessage) {}
+
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didReceive event: IOSGroupEvent) {}
 
@@ -419,6 +449,23 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         scheduleRetry(for: manager)
     }
 
+    public func sendGroupImage(conversationID: String, metadata: IOSImageMetadata,
+                               receipt: IOSImageUploadReceipt,
+                               directory: any IOSDirectChatDirectory,
+                               preKeyAPI: any IOSPreKeyAPI) async throws {
+        guard Self.isValidTextID(conversationID), receipt.matches(metadata) else {
+            throw IOSMessagingError.invalidMessage
+        }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directory, preKeyAPI: preKeyAPI)
+        try coreQueue.sync {
+            try sharedCore.sendGroupImage(conversationID: conversationID,
+                                          metadata: metadata, transport: manager)
+        }
+        scheduleRetry(for: manager)
+    }
+
     public func setGroupName(conversationID: String, name: String,
                              directory: any IOSDirectChatDirectory,
                              preKeyAPI: any IOSPreKeyAPI) async throws {
@@ -683,16 +730,23 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         lock.unlock()
         guard let sharedCore, active === manager, !failed else { return }
         var committedMessages = [IOSReceivedTextMessage]()
+        var committedImages = [IOSReceivedImageMessage]()
         do {
             _ = try sharedCore.handleServerFrame(
-                frame, transport: manager, fullSync: false) { message in
+                frame, transport: manager, fullSync: false,
+                onTextMessage: { message in
                     committedMessages.append(message)
-                }
+                }, onImageMessage: { image in
+                    committedImages.append(image)
+                })
             // The shared core returns only after its inbox/MLS/cursor commit
             // and QueueAck path have completed. Buffering here prevents a
             // callback queue from rendering during core processing.
             for message in committedMessages {
                 notifyMessage(message)
+            }
+            for image in committedImages {
+                notifyImage(image)
             }
             // Accepted frames can retire encrypted outbox entries. Refresh
             // the host's visible queue state after the core call completes.
@@ -769,6 +823,13 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         callbackQueue.async { [weak self] in
             guard let self else { return }
             self.delegate?.directMessaging(self, didReceive: message)
+        }
+    }
+
+    private func notifyImage(_ image: IOSReceivedImageMessage) {
+        callbackQueue.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.directMessaging(self, didReceive: image)
         }
     }
 

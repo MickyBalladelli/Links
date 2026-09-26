@@ -56,6 +56,12 @@ public protocol SharedClientCore: AnyObject {
                            fullSync: Bool,
                            onTextMessage: (IOSReceivedTextMessage) -> Void)
         throws -> IOSCoreFrameResult
+    @discardableResult
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           fullSync: Bool,
+                           onTextMessage: (IOSReceivedTextMessage) -> Void,
+                           onImageMessage: (IOSReceivedImageMessage) -> Void)
+        throws -> IOSCoreFrameResult
     /// Retry exact persisted outbox frames after reconnect. The binding must
     /// never re-encrypt or create a new message for this operation.
     func retryOutbox(transport: any IOSCoreTransport) throws
@@ -126,6 +132,8 @@ public protocol SharedClientCore: AnyObject {
     func leaveGroup(conversationID: String) throws
     func sendGroupText(conversationID: String, text: String,
                        transport: any IOSCoreTransport) throws
+    func sendGroupImage(conversationID: String, metadata: IOSImageMetadata,
+                        transport: any IOSCoreTransport) throws
     func setGroupName(conversationID: String, name: String,
                       transport: any IOSCoreTransport) throws
     func groupMembers(conversationID: String) throws -> [String]
@@ -133,6 +141,16 @@ public protocol SharedClientCore: AnyObject {
 }
 
 public extension SharedClientCore {
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           fullSync: Bool,
+                           onTextMessage: (IOSReceivedTextMessage) -> Void,
+                           onImageMessage: (IOSReceivedImageMessage) -> Void)
+        throws -> IOSCoreFrameResult {
+        try handleServerFrame(
+            frame, transport: transport, fullSync: fullSync,
+            onTextMessage: onTextMessage)
+    }
+
     func setGroupEventHandler(_ handler: @escaping (IOSGroupEvent) -> Void) {}
     func registerRecipientDevices(_ devices: [IOSClaimedRecipientDevice]) throws {
         throw IOSMessagingError.groupsUnavailable
@@ -156,6 +174,10 @@ public extension SharedClientCore {
     }
     func sendGroupText(conversationID: String, text: String,
                        transport: any IOSCoreTransport) throws {
+        throw IOSMessagingError.groupsUnavailable
+    }
+    func sendGroupImage(conversationID: String, metadata: IOSImageMetadata,
+                        transport: any IOSCoreTransport) throws {
         throw IOSMessagingError.groupsUnavailable
     }
     func setGroupName(conversationID: String, name: String,

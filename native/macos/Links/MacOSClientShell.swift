@@ -1307,6 +1307,7 @@ private struct LinksConversationDetail: View {
                 Divider()
                 MessageList(messages: conversation.messages,
                             conversationID: conversation.id,
+                            messageImages: model.messageImages,
                             senderLabel: { model.senderLabel(for: $0) })
                 Divider()
                 ComposerView(model: model)
@@ -1421,6 +1422,7 @@ private struct DeliveryStatusBanner: View {
 private struct MessageList: View {
     let messages: [LinksMacOSMessage]
     let conversationID: String
+    let messageImages: [UUID: NSImage]
     var senderLabel: (LinksMacOSMessage) -> String? = { _ in nil }
 
     private let messageListBottomID = "message-list-bottom"
@@ -1444,7 +1446,10 @@ private struct MessageList: View {
                         .padding(.top, 76)
                     } else {
                         ForEach(messages) { message in
-                            MessageBubble(message: message, senderLabel: senderLabel(message))
+                            MessageBubble(
+                                message: message,
+                                senderLabel: senderLabel(message),
+                                image: messageImages[message.id])
                                 .id(message.id)
                         }
                     }
@@ -1478,6 +1483,7 @@ private struct MessageList: View {
 private struct MessageBubble: View {
     let message: LinksMacOSMessage
     var senderLabel: String? = nil
+    var image: NSImage? = nil
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -1488,16 +1494,33 @@ private struct MessageBubble: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                Text(message.text)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .background(message.isOutgoing
-                                ? Color.accentColor
-                                : Color.primary.opacity(0.08))
-                    .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                if message.imageMetadataProtobuf != nil {
+                    if let image {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 440, maxHeight: 440)
+                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                    } else {
+                        Label("Loading image…", systemImage: "photo")
+                            .font(.body)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .background(Color.primary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 13))
+                    }
+                } else {
+                    Text(message.text)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 9)
+                        .background(message.isOutgoing
+                                    ? Color.accentColor
+                                    : Color.primary.opacity(0.08))
+                        .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 13))
+                }
                 Text(message.sentAt, style: .time)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1513,28 +1536,81 @@ private struct ComposerView: View {
     @ObservedObject var model: LinksMacOSAppModel
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message", text: $model.composerText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .onSubmit { model.sendMessage() }
-                .disabled(!model.canComposeSelectedConversation)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(Color.primary.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            Button {
-                model.sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            if let preview = model.composerImagePreview {
+                HStack(spacing: 10) {
+                    Image(nsImage: preview)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    Text("Image ready to send")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        model.clearComposerImage()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.isSendingComposerImage)
+                    .help("Remove pasted image")
+                }
+                .padding(.horizontal, 4)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.return, modifiers: [.command])
-            .help("Send message")
-            .disabled(!model.canComposeSelectedConversation
-                      || model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Message · paste an image", text: $model.composerText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...5)
+                    .onSubmit {
+                        if model.composerImageData != nil {
+                            model.sendComposerImage()
+                        } else {
+                            model.sendMessage()
+                        }
+                    }
+                    .onPasteCommand(of: [.image]) { providers in
+                        guard model.canComposeSelectedConversation,
+                              !model.isSendingComposerImage,
+                              let provider = providers.first,
+                              provider.canLoadObject(ofClass: NSImage.self) else { return }
+                        provider.loadObject(ofClass: NSImage.self) { object, _ in
+                            guard let image = object as? NSImage else { return }
+                            Task { @MainActor in model.setComposerImage(image) }
+                        }
+                    }
+                    .disabled(!model.canComposeSelectedConversation
+                              || model.isSendingComposerImage)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Button {
+                    if model.composerImageData != nil {
+                        model.sendComposerImage()
+                    } else {
+                        model.sendMessage()
+                    }
+                } label: {
+                    if model.isSendingComposerImage {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.return, modifiers: [.command])
+                .help("Send message or image")
+                .disabled(!model.canComposeSelectedConversation
+                          || model.isSendingComposerImage
+                          || (model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              && model.composerImageData == nil)
+                          || (model.composerImageData != nil && !model.canSendComposerImage))
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)

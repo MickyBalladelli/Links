@@ -9,6 +9,7 @@ private final class MacOSRustCoreCallbackBox: @unchecked Sendable {
     let stateStore: MacOSEncryptedStateStore
     var transport: (any IOSCoreTransport)?
     var onText: ((IOSReceivedTextMessage) -> Void)?
+    var onImage: ((IOSReceivedImageMessage) -> Void)?
     var onGroup: ((IOSGroupEvent) -> Void)?
 
     init(signer: any SharedCoreIdentitySigner,
@@ -214,6 +215,43 @@ private func macOSRustText(
     }
 }
 
+private func macOSRustImage(
+    _ context: UnsafeMutableRawPointer?,
+    _ conversation: UnsafePointer<UInt8>?,
+    _ conversationLength: Int,
+    _ senderUser: UnsafePointer<UInt8>?,
+    _ senderUserLength: Int,
+    _ sender: UnsafePointer<UInt8>?,
+    _ senderLength: Int,
+    _ metadata: UnsafePointer<UInt8>?,
+    _ metadataLength: Int,
+    _ sequenceID: UInt64,
+    _ sentAtMs: UInt64) -> Int32 {
+    guard let box = callbackBox(context),
+          let conversation = callbackData(conversation, conversationLength),
+          let senderUser = callbackData(senderUser, senderUserLength),
+          let sender = callbackData(sender, senderLength),
+          let metadata = callbackData(metadata, metadataLength),
+          let conversationID = String(data: conversation, encoding: .utf8),
+          let senderUserID = String(data: senderUser, encoding: .utf8),
+          let senderDeviceID = String(data: sender, encoding: .utf8) else {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+    do {
+        let image = try IOSReceivedImageMessage(
+            conversationID: conversationID,
+            senderUserID: senderUserID,
+            senderDeviceID: senderDeviceID,
+            metadataProtobuf: metadata,
+            sequenceID: sequenceID,
+            sentAtMs: sentAtMs)
+        box.onImage?(image)
+        return Int32(LINKS_DESKTOP_OK)
+    } catch {
+        return Int32(LINKS_DESKTOP_INVALID)
+    }
+}
+
 private func macOSRustGroup(
     _ context: UnsafeMutableRawPointer?,
     _ conversation: UnsafePointer<UInt8>?,
@@ -284,7 +322,7 @@ private final class MacOSRustSharedCore: SharedClientCore {
         let callbacks = MacOSRustCoreCallbackBox(
             signer: signer, secrets: secrets, stateStore: stateStore)
         var callbackTable = LinksDesktopCoreCallbacks(
-            abi_version: 2,
+            abi_version: 3,
             context: Unmanaged.passUnretained(callbacks).toOpaque(),
             sign: macOSRustSign,
             store_secret: macOSRustStoreSecret,
@@ -295,7 +333,8 @@ private final class MacOSRustSharedCore: SharedClientCore {
             send_frame: macOSRustSendFrame,
             on_text: macOSRustText,
             identity_public_key: publicKeyTuple,
-            on_group: macOSRustGroup)
+            on_group: macOSRustGroup,
+            on_image: macOSRustImage)
         var created: OpaquePointer?
         let status = credential.withUnsafeBytes { credentialBytes in
             identity.userID.withCString { userBytes in
@@ -395,26 +434,40 @@ private final class MacOSRustSharedCore: SharedClientCore {
                            fullSync: Bool,
                            onTextMessage: (IOSReceivedTextMessage) -> Void)
         throws -> IOSCoreFrameResult {
-        return try withoutActuallyEscaping(onTextMessage) { escapableMessageHandler in
-            lock.lock()
-            callbacks.transport = transport
-            callbacks.onText = escapableMessageHandler
-            let status = frame.withUnsafeBytes { bytes in
-                links_desktop_core_handle_server_frame(
-                    pointer,
-                    bytes.bindMemory(to: UInt8.self).baseAddress!,
-                    frame.count)
+        try handleServerFrame(
+            frame, transport: transport, fullSync: fullSync,
+            onTextMessage: onTextMessage, onImageMessage: { _ in })
+    }
+
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           fullSync: Bool,
+                           onTextMessage: (IOSReceivedTextMessage) -> Void,
+                           onImageMessage: (IOSReceivedImageMessage) -> Void)
+        throws -> IOSCoreFrameResult {
+        try withoutActuallyEscaping(onTextMessage) { textHandler in
+            try withoutActuallyEscaping(onImageMessage) { imageHandler in
+                lock.lock()
+                callbacks.transport = transport
+                callbacks.onText = textHandler
+                callbacks.onImage = imageHandler
+                let status = frame.withUnsafeBytes { bytes in
+                    links_desktop_core_handle_server_frame(
+                        pointer,
+                        bytes.bindMemory(to: UInt8.self).baseAddress!,
+                        frame.count)
+                }
+                callbacks.transport = nil
+                callbacks.onText = nil
+                callbacks.onImage = nil
+                if status != Int32(LINKS_DESKTOP_OK) {
+                    currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
+                        ? .staleCursor : status == Int32(LINKS_DESKTOP_AUTHENTICATION)
+                            ? .authenticationExpired : .dependencyOutage
+                }
+                lock.unlock()
+                guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+                return fullSync ? .recoveryComplete : .pending
             }
-            callbacks.transport = nil
-            callbacks.onText = nil
-            if status != Int32(LINKS_DESKTOP_OK) {
-                currentIssue = status == Int32(LINKS_DESKTOP_STALE_CURSOR)
-                    ? .staleCursor : status == Int32(LINKS_DESKTOP_AUTHENTICATION)
-                        ? .authenticationExpired : .dependencyOutage
-            }
-            lock.unlock()
-            guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
-            return fullSync ? .recoveryComplete : .pending
         }
     }
 
@@ -725,22 +778,150 @@ private final class MacOSRustSharedCore: SharedClientCore {
     }
 
     func encodeImageBlurHash(rgbPixels: Data, width: Int, height: Int) throws -> String {
-        throw IOSImageError.coreUnavailable
+        guard (1...1_600).contains(width), (1...1_600).contains(height) else {
+            throw IOSImageError.invalidMetadata
+        }
+        var output = Data(count: 64)
+        let outputCapacity = output.count
+        var outputLength = 0
+        let status = rgbPixels.withUnsafeBytes { pixels in
+            output.withUnsafeMutableBytes { result in
+                links_desktop_core_encode_image_blur_hash(
+                    pixels.bindMemory(to: UInt8.self).baseAddress,
+                    rgbPixels.count,
+                    UInt32(width),
+                    UInt32(height),
+                    result.bindMemory(to: UInt8.self).baseAddress,
+                    outputCapacity,
+                    &outputLength)
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        output.removeSubrange(outputLength..<output.count)
+        guard let hash = String(data: output, encoding: .utf8) else {
+            throw IOSImageError.coreUnavailable
+        }
+        return hash
     }
 
     func encryptImage(_ image: Data, attachmentID: String, mimeType: String,
                       width: Int, height: Int, blurHash: String) throws -> IOSEncryptedImage {
-        throw IOSImageError.coreUnavailable
+        guard !image.isEmpty, image.count <= 32 * 1024 * 1024 else {
+            throw IOSImageError.invalidMetadata
+        }
+        var metadataBytes = Data(count: 1024)
+        let metadataCapacity = metadataBytes.count
+        var metadataLength = 0
+        var ciphertext = Data(count: 32 * 1024 * 1024 + 16)
+        let ciphertextCapacity = ciphertext.count
+        var ciphertextLength = 0
+        let status = image.withUnsafeBytes { imageBytes in
+            attachmentID.withCString { attachmentBytes in
+                mimeType.withCString { mimeBytes in
+                    blurHash.withCString { blurBytes in
+                        metadataBytes.withUnsafeMutableBytes { metadataOutput in
+                            ciphertext.withUnsafeMutableBytes { ciphertextOutput in
+                                links_desktop_core_encrypt_image(
+                                    imageBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    image.count,
+                                    UnsafeRawPointer(attachmentBytes).assumingMemoryBound(to: UInt8.self),
+                                    attachmentID.utf8.count,
+                                    UnsafeRawPointer(mimeBytes).assumingMemoryBound(to: UInt8.self),
+                                    mimeType.utf8.count,
+                                    UInt32(width),
+                                    UInt32(height),
+                                    UnsafeRawPointer(blurBytes).assumingMemoryBound(to: UInt8.self),
+                                    blurHash.utf8.count,
+                                    metadataOutput.bindMemory(to: UInt8.self).baseAddress,
+                                    metadataCapacity,
+                                    &metadataLength,
+                                    ciphertextOutput.bindMemory(to: UInt8.self).baseAddress,
+                                    ciphertextCapacity,
+                                    &ciphertextLength)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        metadataBytes.removeSubrange(metadataLength..<metadataBytes.count)
+        ciphertext.removeSubrange(ciphertextLength..<ciphertext.count)
+        let metadata = try IOSImageMetadata(protobuf: metadataBytes)
+        return try IOSEncryptedImage(metadata: metadata, ciphertext: ciphertext)
     }
 
     func decryptImage(_ metadata: IOSImageMetadata, ciphertext: Data) throws -> Data {
-        throw IOSImageError.coreUnavailable
+        var metadataBytes = metadata.protobuf()
+        var plaintext = Data(count: 32 * 1024 * 1024)
+        let plaintextCapacity = plaintext.count
+        var plaintextLength = 0
+        let status = metadataBytes.withUnsafeBytes { metadataInput in
+            ciphertext.withUnsafeBytes { ciphertextInput in
+                plaintext.withUnsafeMutableBytes { plaintextOutput in
+                    links_desktop_core_decrypt_image(
+                        metadataInput.bindMemory(to: UInt8.self).baseAddress,
+                        metadataBytes.count,
+                        ciphertextInput.bindMemory(to: UInt8.self).baseAddress,
+                        ciphertext.count,
+                        plaintextOutput.bindMemory(to: UInt8.self).baseAddress,
+                        plaintextCapacity,
+                        &plaintextLength)
+                }
+            }
+        }
+        metadataBytes.resetBytes(in: 0..<metadataBytes.count)
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+        plaintext.removeSubrange(plaintextLength..<plaintext.count)
+        return plaintext
     }
 
     func sendImage(conversationID: String, recipientUserID: String,
                    metadata: IOSImageMetadata, receipt: IOSImageUploadReceipt,
                    transport: any IOSCoreTransport) throws {
-        throw IOSImageError.coreUnavailable
+        guard receipt.matches(metadata) else { throw IOSImageError.invalidUploadReceipt }
+        let encodedMetadata = metadata.protobuf()
+        lock.lock()
+        callbacks.transport = transport
+        let status = conversationID.withCString { conversation in
+            recipientUserID.withCString { recipient in
+                encodedMetadata.withUnsafeBytes { metadataBytes in
+                    links_desktop_core_send_image(
+                        pointer,
+                        UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self),
+                        conversationID.utf8.count,
+                        UnsafeRawPointer(recipient).assumingMemoryBound(to: UInt8.self),
+                        recipientUserID.utf8.count,
+                        metadataBytes.bindMemory(to: UInt8.self).baseAddress,
+                        encodedMetadata.count)
+                }
+            }
+        }
+        callbacks.transport = nil
+        if status != Int32(LINKS_DESKTOP_OK) { currentIssue = .sendFailed }
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
+    }
+
+    func sendGroupImage(conversationID: String, metadata: IOSImageMetadata,
+                        transport: any IOSCoreTransport) throws {
+        let encodedMetadata = metadata.protobuf()
+        lock.lock()
+        callbacks.transport = transport
+        let status = conversationID.withCString { conversation in
+            encodedMetadata.withUnsafeBytes { metadataBytes in
+                links_desktop_core_send_group_image(
+                    pointer,
+                    UnsafeRawPointer(conversation).assumingMemoryBound(to: UInt8.self),
+                    conversationID.utf8.count,
+                    metadataBytes.bindMemory(to: UInt8.self).baseAddress,
+                    encodedMetadata.count)
+            }
+        }
+        callbacks.transport = nil
+        if status != Int32(LINKS_DESKTOP_OK) { currentIssue = .sendFailed }
+        lock.unlock()
+        guard status == Int32(LINKS_DESKTOP_OK) else { throw coreError(for: status) }
     }
 
     private func generatePreKeyUpload(curve: UInt32, kem: UInt32) throws -> Data {

@@ -284,7 +284,7 @@ private final class IOSRustSharedCore: SharedClientCore {
         let callbacks = IOSRustCoreCallbackBox(
             signer: signer, secrets: secrets, stateStore: stateStore)
         var callbackTable = LinksDesktopCoreCallbacks(
-            abi_version: 2,
+            abi_version: 3,
             context: Unmanaged.passUnretained(callbacks).toOpaque(),
             sign: iosRustSign,
             store_secret: iosRustStoreSecret,
@@ -295,7 +295,8 @@ private final class IOSRustSharedCore: SharedClientCore {
             send_frame: iosRustSendFrame,
             on_text: iosRustText,
             identity_public_key: publicKeyTuple,
-            on_group: iosRustGroup)
+            on_group: iosRustGroup,
+            on_image: nil)
         var created: OpaquePointer?
         let status = credential.withUnsafeBytes { credentialBytes in
             identity.userID.withCString { userBytes in

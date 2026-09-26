@@ -117,6 +117,14 @@ pub fn router_with_trusted_proxies(
             get(directory_profile_picture),
         )
         .layer(DefaultBodyLimit::max(131_072));
+    let attachment_routes = Router::new()
+        .route(
+            "/v1/blobs/{attachment_id}",
+            put(put_encrypted_attachment).get(get_encrypted_attachment),
+        )
+        .layer(DefaultBodyLimit::max(
+            links_server_store::blob::MAX_BLOB_BYTES,
+        ));
     let admin_routes = Router::new()
         .route("/v1/admin/users", get(admin_users))
         .route("/v1/admin/users/{user_id}", delete(admin_delete_user))
@@ -158,6 +166,7 @@ pub fn router_with_trusted_proxies(
         .merge(directory_routes)
         .merge(directory_profile_routes)
         .merge(profile_picture_routes)
+        .merge(attachment_routes)
         .merge(admin_routes)
         .merge(contact_psi_routes)
         .merge(privacy_pass_routes)
@@ -319,6 +328,66 @@ async fn delete_profile_picture(
 ) -> Result<impl IntoResponse, AuthError> {
     auth.delete_profile_picture(bearer(&headers)?).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn put_encrypted_attachment(
+    State(auth): State<Arc<AccountAuth>>,
+    Path(attachment_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<impl IntoResponse, AuthError> {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        != Some("application/octet-stream")
+    {
+        return Err(AuthError::Invalid);
+    }
+    let (size, digest) = auth
+        .put_encrypted_attachment(bearer(&headers)?, &attachment_id, body.to_vec())
+        .await?;
+    let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response.headers_mut().insert(
+        "x-links-ciphertext-size",
+        size.to_string()
+            .parse()
+            .map_err(|_| AuthError::Unavailable)?,
+    );
+    response.headers_mut().insert(
+        "x-links-ciphertext-sha256",
+        digest.parse().map_err(|_| AuthError::Unavailable)?,
+    );
+    Ok(response)
+}
+
+async fn get_encrypted_attachment(
+    State(auth): State<Arc<AccountAuth>>,
+    Path(attachment_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    let (ciphertext, digest) = auth
+        .get_encrypted_attachment(bearer(&headers)?, &attachment_id)
+        .await?;
+    let size = ciphertext.len();
+    let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let mut response = ciphertext.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/octet-stream"),
+    );
+    response.headers_mut().insert(
+        "x-links-ciphertext-size",
+        size
+            .to_string()
+            .parse()
+            .map_err(|_| AuthError::Unavailable)?,
+    );
+    response.headers_mut().insert(
+        "x-links-ciphertext-sha256",
+        digest.parse().map_err(|_| AuthError::Unavailable)?,
+    );
+    Ok(response)
 }
 
 async fn directory_profile_picture(
@@ -787,6 +856,7 @@ impl IntoResponse for AuthError {
         let (status, code) = match self {
             Self::Invalid => (StatusCode::BAD_REQUEST, "invalid_request"),
             Self::Denied => (StatusCode::UNAUTHORIZED, "authentication_failed"),
+            Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
             Self::Conflict => (StatusCode::CONFLICT, "conflicting_write"),
             Self::UsernameConflict => (StatusCode::CONFLICT, "username_exists"),
