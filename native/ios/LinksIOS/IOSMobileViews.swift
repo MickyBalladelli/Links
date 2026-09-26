@@ -1,3 +1,4 @@
+import Photos
 import PhotosUI
 import SwiftUI
 import LinksClient
@@ -1438,6 +1439,7 @@ private struct IOSConversationView: View {
     @ObservedObject var model: IOSMobileAppModel
     let conversationID: String
     @State private var composerText = ""
+    @State private var composerImage: UIImage?
     @State private var showingMembers = false
     @FocusState private var composerFocused: Bool
 
@@ -1502,8 +1504,10 @@ private struct IOSConversationView: View {
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(conversation.messages) { message in
-                                IOSMessageBubble(message: message,
-                                                 senderLabel: model.senderLabel(for: message))
+                                IOSMessageBubble(
+                                    message: message,
+                                    senderLabel: model.senderLabel(for: message),
+                                    image: model.messageImages[message.id])
                                     .id(message.id)
                             }
                             Color.clear
@@ -1525,6 +1529,11 @@ private struct IOSConversationView: View {
                             }
                         }
                     }
+                    .onChange(of: model.messageImages.count) { _ in
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                        }
+                    }
                     .onReceive(NotificationCenter.default.publisher(
                         for: UIResponder.keyboardDidShowNotification)) { _ in
                         DispatchQueue.main.async {
@@ -1537,16 +1546,38 @@ private struct IOSConversationView: View {
             }
 
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("Message", text: $composerText, axis: .vertical)
-                    .lineLimit(1...5)
-                    .focused($composerFocused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                VStack(alignment: .leading, spacing: 8) {
+                    if let composerImage {
+                        Image(uiImage: composerImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 72, height: 72)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(alignment: .topTrailing) {
+                                Button {
+                                    self.composerImage = nil
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.body)
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, .black.opacity(0.55))
+                                }
+                                .offset(x: 6, y: -6)
+                            }
+                    }
+                    IOSComposerField(text: $composerText, onPasteImage: { composerImage = $0 })
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
 
                 Button {
-                    if model.sendMessage(conversationID: conversationID, text: composerText) {
+                    if let composerImage {
+                        model.sendImage(composerImage, caption: composerText, conversationID: conversationID)
+                        self.composerImage = nil
+                        composerText = ""
+                    } else if model.sendMessage(conversationID: conversationID, text: composerText) {
                         composerText = ""
                     }
                 } label: {
@@ -1558,10 +1589,14 @@ private struct IOSConversationView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                .disabled((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                           && composerImage == nil)
+                          || model.isSendingImage
                           || conversation?.isSecureReady != true
                           || conversation?.groupActive == false)
-                .opacity(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                .opacity((composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          && composerImage == nil)
+                         || model.isSendingImage
                          || conversation?.isSecureReady != true
                          || conversation?.groupActive == false ? 0.45 : 1)
                 .accessibilityLabel("Send message")

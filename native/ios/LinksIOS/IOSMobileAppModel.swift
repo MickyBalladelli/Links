@@ -1553,6 +1553,102 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
     }
 
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                     didReceive image: IOSReceivedImageMessage) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            self.renderReceivedImage(image, messaging: messaging)
+        }
+    }
+
+    private func renderReceivedImage(
+        _ image: IOSReceivedImageMessage,
+        messaging: IOSDirectMessaging
+    ) {
+        let messageID = UUID().uuidString.lowercased()
+        var received = IOSMobileMessage(
+            id: messageID,
+            text: "Image",
+            isOutgoing: false,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(image.sentAtMs) / 1_000),
+            senderDeviceID: image.senderDeviceID,
+            imageMetadataProtobuf: image.metadataProtobuf)
+        if let groupIndex = conversations.firstIndex(where: {
+            $0.isGroup && $0.id == image.conversationID
+        }) {
+            received.senderUserID = image.senderUserID
+            conversations[groupIndex].messages.append(received)
+            if activeConversationID != image.conversationID {
+                conversations[groupIndex].unreadCount += 1
+            }
+            persistLocalState()
+            resolveMemberHandles([image.senderUserID])
+            loadReceivedImage(messageID: messageID, protobuf: image.metadataProtobuf, messaging: messaging)
+            return
+        }
+        let knownContact = contacts.first(where: { $0.userID == image.senderUserID })
+        if let index = conversations.firstIndex(where: {
+            !$0.isGroup
+                && ($0.id == image.conversationID || $0.recipientUserID == image.senderUserID)
+        }) {
+            if let knownContact {
+                conversations[index].handle = knownContact.handle
+                conversations[index].displayName = knownContact.displayName
+            }
+            conversations[index].isSecureReady = true
+            conversations[index].messages.append(received)
+            if activeConversationID != conversations[index].id {
+                conversations[index].unreadCount += 1
+            }
+        } else {
+            conversations.insert(IOSMobileConversation(
+                id: image.conversationID,
+                handle: knownContact?.handle ?? "New contact",
+                recipientUserID: image.senderUserID,
+                deviceCount: 1,
+                createdAt: Date(),
+                messages: [received],
+                isSecureReady: true,
+                unreadCount: 1,
+                displayName: knownContact?.displayName), at: 0)
+            resolveIncomingUsername(conversationID: image.conversationID, senderUserID: image.senderUserID)
+        }
+        persistLocalState()
+        loadReceivedImage(messageID: messageID, protobuf: image.metadataProtobuf, messaging: messaging)
+    }
+
+    private func loadSavedImages(using messaging: IOSDirectMessaging) {
+        for message in conversations.flatMap(\.messages)
+        where message.imageMetadataProtobuf != nil && messageImages[message.id] == nil {
+            guard let metadata = message.imageMetadataProtobuf else { continue }
+            loadReceivedImage(messageID: message.id, protobuf: metadata, messaging: messaging)
+        }
+    }
+
+    private func loadReceivedImage(messageID: String, protobuf: Data, messaging: IOSDirectMessaging) {
+        guard let client, let usernameAuthClient,
+              let metadata = try? IOSImageMetadata(protobuf: protobuf),
+              let token = try? client.accessToken() else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let ciphertext = try await usernameAuthClient.downloadEncryptedAttachment(
+                    attachmentID: metadata.attachmentID,
+                    accessToken: token,
+                    expectedSize: metadata.ciphertextSizeBytes,
+                    expectedSHA256: metadata.ciphertextSHA256)
+                var plaintext = try messaging.decryptImage(metadata, ciphertext: ciphertext)
+                defer { plaintext.resetBytes(in: 0..<plaintext.count) }
+                guard let image = UIImage(data: plaintext) else {
+                    throw IOSImageError.unableToRender
+                }
+                self.messageImages[messageID] = image
+            } catch {
+                self.error = "Could not load the received image."
+            }
+        }
+    }
+
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
                                      didReceive message: IOSReceivedTextMessage) {
         Task { @MainActor [weak self] in
             guard let self, self.messaging === messaging else { return }

@@ -56,6 +56,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Links uses your local network to reach a development account service.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Links saves pictures from your chats to your photo library when you choose Save Image.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>
