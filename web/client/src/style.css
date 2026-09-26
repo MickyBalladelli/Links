@@ -162,9 +162,6 @@ button, input, textarea { font: inherit; }
 .conversation-open { min-width: 0; flex: 1; padding: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
 .conversation-remove { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 1px solid var(--links-border); border-radius: 7px; color: var(--links-text); background: color-mix(in srgb, var(--links-text) 7%, var(--links-surface)); cursor: pointer; }
 .conversation-remove:hover { color: var(--links-text); background: color-mix(in srgb, var(--links-accent-soft) 80%, transparent); }
-.trash-icon { position: relative; width: 16px; height: 17px; display: block; border: 1.7px solid currentColor; border-top: 0; border-radius: 0 0 3px 3px; color: var(--links-text); background: linear-gradient(to right, transparent 25%, currentColor 25% 34%, transparent 34% 48%, currentColor 48% 57%, transparent 57% 71%, currentColor 71% 80%, transparent 80%) center 5px / 100% 9px no-repeat; }
-.trash-icon::before { content: ''; position: absolute; left: -3px; top: -3px; width: 19px; height: 1.7px; border-radius: 2px; background: currentColor; }
-.trash-icon::after { content: ''; position: absolute; left: 4px; top: -7px; width: 6px; height: 4px; border: 1.7px solid currentColor; border-bottom: 0; border-radius: 3px 3px 0 0; }
 .conversation-copy strong, .contact-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
 .conversation-copy > span { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--links-muted); font-size: .72rem; }
 

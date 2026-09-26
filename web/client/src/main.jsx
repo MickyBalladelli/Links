@@ -15,6 +15,7 @@ import {
   SearchIcon,
   SendIcon,
   SettingsIcon,
+  TrashIcon,
   TextField,
   UploadIcon,
   UserPlusIcon,
@@ -1321,7 +1322,7 @@ function ConversationList() {
         title="Remove conversation"
         onClick={event => askRemoveConversation(event, conversation)}
       >
-        <TrashIcon />
+        <TrashIcon size="1.25rem" />
       </button>
     </div>
   )) : (
@@ -1406,14 +1407,10 @@ function ContactList() {
         title={`Remove @${contact.handle}`}
         onClick={event => askRemoveContact(event, contact)}
       >
-        <TrashIcon />
+        <TrashIcon size="1.25rem" />
       </button>
     </div>
   )) : <p class="sidebar-empty">Add someone by username.</p>)
-}
-
-function TrashIcon() {
-  return <span class="trash-icon" aria-hidden="true"></span>
 }
 
 function FileIcon() {
