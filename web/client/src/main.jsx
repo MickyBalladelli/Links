@@ -1574,7 +1574,7 @@ async function sendPreviewMessage(event) {
     ? 'Encrypted message sent.'
     : 'Saved in the local preview. Encrypted transport is not connected yet.')
   persistState()
-  requestAnimationFrame(() => document.querySelector('.message-list')?.scrollTo({ top: 999999, behavior: 'smooth' }))
+  scheduleMessageScrollRestore()
 }
 
 async function resetPreview() {
