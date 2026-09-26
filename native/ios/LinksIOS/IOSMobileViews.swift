@@ -2,6 +2,7 @@ import Photos
 import PhotosUI
 import UniformTypeIdentifiers
 import SwiftUI
+import QuickLook
 import LinksClient
 
 struct IOSMobileRootView: View {
@@ -1449,6 +1450,7 @@ private struct IOSConversationView: View {
     let conversationID: String
     @State private var composerText = ""
     @State private var composerImage: UIImage?
+    @State private var previewFileURL: URL?
     @State private var showingMembers = false
 
     private let conversationBottomID = "conversation-bottom"
@@ -1531,7 +1533,9 @@ private struct IOSConversationView: View {
                                 IOSMessageBubble(
                                     message: message,
                                     senderLabel: model.senderLabel(for: message),
-                                    image: model.messageImages[message.id])
+                                    image: model.messageImages[message.id],
+                                    fileURL: model.messageFiles[message.id],
+                                    onOpenFile: { previewFileURL = $0 })
                                     .id(message.id)
                             }
                             Color.clear
@@ -1554,6 +1558,11 @@ private struct IOSConversationView: View {
                         }
                     }
                     .onChange(of: model.messageImages.count) { _ in
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: model.messageFiles.count) { _ in
                         DispatchQueue.main.async {
                             proxy.scrollTo(conversationBottomID, anchor: .bottom)
                         }
@@ -1670,6 +1679,7 @@ private struct IOSConversationView: View {
         .task(id: conversationID) {
             await model.prepareConversation(conversationID)
         }
+        .quickLookPreview($previewFileURL)
     }
 }
 
@@ -1677,6 +1687,8 @@ private struct IOSMessageBubble: View {
     let message: IOSMobileMessage
     var senderLabel: String? = nil
     var image: UIImage? = nil
+    var fileURL: URL? = nil
+    var onOpenFile: (URL) -> Void = { _ in }
 
     var body: some View {
         HStack {
@@ -1709,6 +1721,20 @@ private struct IOSMessageBubble: View {
                             }
                     } else {
                         Label("Loading image…", systemImage: "photo")
+                            .font(.body)
+                            .foregroundStyle(message.isOutgoing ? .white : .primary)
+                    }
+                } else if message.fileMetadataProtobuf != nil {
+                    if let fileURL {
+                        Button { onOpenFile(fileURL) } label: {
+                            Label(message.text, systemImage: "doc")
+                                .lineLimit(2)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(message.isOutgoing ? .white : .primary)
+                        .accessibilityHint("Open attachment")
+                    } else {
+                        Label("Loading \(message.text)…", systemImage: "doc")
                             .font(.body)
                             .foregroundStyle(message.isOutgoing ? .white : .primary)
                     }

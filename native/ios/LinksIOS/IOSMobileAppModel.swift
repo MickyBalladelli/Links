@@ -39,6 +39,8 @@ struct IOSMobileMessage: Identifiable, Equatable, Codable {
     var senderUserID: String? = nil
     /// Encrypted image metadata. The pixels are downloaded after the message arrives.
     var imageMetadataProtobuf: Data? = nil
+    /// Encrypted file metadata. File bytes are downloaded after the message arrives.
+    var fileMetadataProtobuf: Data? = nil
 }
 
 /// One row of the open group's member list.
@@ -192,6 +194,7 @@ final class IOSMobileAppModel: ObservableObject {
     @Published private(set) var profilePictureJPEG: Data?
     @Published private(set) var contactPictures: [String: Data] = [:]
     @Published private(set) var messageImages: [String: UIImage] = [:]
+    @Published private(set) var messageFiles: [String: URL] = [:]
     @Published private(set) var isSendingImage = false
     @Published private(set) var preparingConversationIDs = Set<String>()
     @Published private(set) var groupMembers: [String: [IOSMobileGroupMember]] = [:]
@@ -1540,6 +1543,7 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
                 self.messagingStatus = messaging.pendingOutboxCount > 0
                     ? "Delivering queued messages" : "End-to-end encrypted"
                 self.loadSavedImages(using: messaging)
+                self.loadSavedFiles(using: messaging)
             case .reconnecting:
                 self.messagingStatus = "Reconnecting"
             case .staleCursor:
@@ -1560,6 +1564,112 @@ extension IOSMobileAppModel: IOSDirectMessagingDelegate {
         Task { @MainActor [weak self] in
             guard let self, self.messaging === messaging else { return }
             self.renderReceivedImage(image, messaging: messaging)
+        }
+    }
+
+    nonisolated func directMessaging(_ messaging: IOSDirectMessaging,
+                                     didReceive file: IOSReceivedFileMessage) {
+        Task { @MainActor [weak self] in
+            guard let self, self.messaging === messaging else { return }
+            self.renderReceivedFile(file, messaging: messaging)
+        }
+    }
+
+    private func renderReceivedFile(
+        _ file: IOSReceivedFileMessage,
+        messaging: IOSDirectMessaging
+    ) {
+        let messageID = UUID().uuidString.lowercased()
+        var received = IOSMobileMessage(
+            id: messageID,
+            text: file.fileName,
+            isOutgoing: false,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(file.sentAtMs) / 1_000),
+            senderDeviceID: file.senderDeviceID,
+            fileMetadataProtobuf: file.metadataProtobuf)
+        if let groupIndex = conversations.firstIndex(where: {
+            $0.isGroup && $0.id == file.conversationID
+        }) {
+            received.senderUserID = file.senderUserID
+            conversations[groupIndex].messages.append(received)
+            if activeConversationID != file.conversationID {
+                conversations[groupIndex].unreadCount += 1
+            }
+            persistLocalState()
+            resolveMemberHandles([file.senderUserID])
+            loadReceivedFile(messageID: messageID, protobuf: file.metadataProtobuf,
+                             messaging: messaging)
+            return
+        }
+        let knownContact = contacts.first(where: { $0.userID == file.senderUserID })
+        if let index = conversations.firstIndex(where: {
+            !$0.isGroup
+                && ($0.id == file.conversationID || $0.recipientUserID == file.senderUserID)
+        }) {
+            if let knownContact {
+                conversations[index].handle = knownContact.handle
+                conversations[index].displayName = knownContact.displayName
+            }
+            conversations[index].isSecureReady = true
+            conversations[index].messages.append(received)
+            if activeConversationID != conversations[index].id {
+                conversations[index].unreadCount += 1
+            }
+        } else {
+            conversations.insert(IOSMobileConversation(
+                id: file.conversationID,
+                handle: knownContact?.handle ?? "New contact",
+                recipientUserID: file.senderUserID,
+                deviceCount: 1,
+                createdAt: Date(),
+                messages: [received],
+                isSecureReady: true,
+                unreadCount: 1,
+                displayName: knownContact?.displayName), at: 0)
+            resolveIncomingUsername(conversationID: file.conversationID,
+                                    senderUserID: file.senderUserID)
+        }
+        persistLocalState()
+        loadReceivedFile(messageID: messageID, protobuf: file.metadataProtobuf,
+                         messaging: messaging)
+    }
+
+    private func loadSavedFiles(using messaging: IOSDirectMessaging) {
+        for message in conversations.flatMap(\.messages)
+        where message.fileMetadataProtobuf != nil && messageFiles[message.id] == nil {
+            guard let metadata = message.fileMetadataProtobuf else { continue }
+            loadReceivedFile(messageID: message.id, protobuf: metadata, messaging: messaging)
+        }
+    }
+
+    private func loadReceivedFile(messageID: String, protobuf: Data,
+                                  messaging: IOSDirectMessaging) {
+        guard let client, let usernameAuthClient,
+              let metadata = try? IOSFileMetadata(protobuf: protobuf),
+              let token = try? client.accessToken() else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let ciphertext = try await usernameAuthClient.downloadEncryptedAttachment(
+                    attachmentID: metadata.attachmentID,
+                    accessToken: token,
+                    expectedSize: metadata.ciphertextSizeBytes,
+                    expectedSHA256: metadata.ciphertextSHA256)
+                var plaintext = try messaging.decryptFile(metadata: protobuf,
+                                                          ciphertext: ciphertext)
+                defer { plaintext.resetBytes(in: 0..<plaintext.count) }
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("Links Attachments", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory,
+                                                        withIntermediateDirectories: true)
+                let safeName = URL(fileURLWithPath: metadata.fileName).lastPathComponent
+                let url = directory.appendingPathComponent(
+                    "\(metadata.attachmentID)-\(safeName)", isDirectory: false)
+                try plaintext.write(to: url, options: .atomic)
+                self.messageFiles[messageID] = url
+            } catch {
+                self.error = "Could not load the received file."
+            }
         }
     }
 
