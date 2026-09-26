@@ -65,6 +65,7 @@ typedef struct LinksDesktopCoreCallbacks {
     uint8_t identity_public_key[32];
     LinksDesktopGroupCallback on_group;
     LinksDesktopImageCallback on_image;
+    LinksDesktopImageCallback on_file;
 } LinksDesktopCoreCallbacks;
 
 enum {
@@ -168,6 +169,26 @@ int32_t links_desktop_core_send_group_image(LinksDesktopCore *core,
                                             size_t conversation_id_length,
                                             const uint8_t *metadata,
                                             size_t metadata_length);
+int32_t links_desktop_core_encrypt_file(const uint8_t *file, size_t file_length,
+                                        const uint8_t *attachment_id, size_t attachment_id_length,
+                                        const uint8_t *mime_type, size_t mime_type_length,
+                                        const uint8_t *file_name, size_t file_name_length,
+                                        uint8_t *metadata_output, size_t metadata_capacity,
+                                        size_t *metadata_length, uint8_t *ciphertext_output,
+                                        size_t ciphertext_capacity, size_t *ciphertext_length);
+int32_t links_desktop_core_decrypt_file(const uint8_t *metadata, size_t metadata_length,
+                                        const uint8_t *ciphertext, size_t ciphertext_length,
+                                        uint8_t *plaintext_output, size_t plaintext_capacity,
+                                        size_t *plaintext_length);
+int32_t links_desktop_core_send_file(LinksDesktopCore *core, const uint8_t *conversation_id,
+                                     size_t conversation_id_length,
+                                     const uint8_t *recipient_user_id,
+                                     size_t recipient_user_id_length, const uint8_t *metadata,
+                                     size_t metadata_length);
+int32_t links_desktop_core_send_group_file(LinksDesktopCore *core,
+                                           const uint8_t *conversation_id,
+                                           size_t conversation_id_length,
+                                           const uint8_t *metadata, size_t metadata_length);
 int32_t links_desktop_core_set_group_name(LinksDesktopCore *core,
                                           const uint8_t *conversation_id,
                                           size_t conversation_id_length, const uint8_t *name,

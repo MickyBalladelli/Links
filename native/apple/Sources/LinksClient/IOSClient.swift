@@ -62,6 +62,13 @@ public protocol SharedClientCore: AnyObject {
                            onTextMessage: (IOSReceivedTextMessage) -> Void,
                            onImageMessage: (IOSReceivedImageMessage) -> Void)
         throws -> IOSCoreFrameResult
+    @discardableResult
+    func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
+                           fullSync: Bool,
+                           onTextMessage: (IOSReceivedTextMessage) -> Void,
+                           onImageMessage: (IOSReceivedImageMessage) -> Void,
+                           onFileMessage: (IOSReceivedFileMessage) -> Void)
+        throws -> IOSCoreFrameResult
     /// Retry exact persisted outbox frames after reconnect. The binding must
     /// never re-encrypt or create a new message for this operation.
     func retryOutbox(transport: any IOSCoreTransport) throws
@@ -98,6 +105,13 @@ public protocol SharedClientCore: AnyObject {
     func sendImage(conversationID: String, recipientUserID: String,
                    metadata: IOSImageMetadata, receipt: IOSImageUploadReceipt,
                    transport: any IOSCoreTransport) throws
+    func encryptFile(_ file: Data, attachmentID: String, mimeType: String,
+                     fileName: String) throws -> (metadata: Data, ciphertext: Data)
+    func decryptFile(metadata: Data, ciphertext: Data) throws -> Data
+    func sendFile(conversationID: String, recipientUserID: String, metadata: Data,
+                  transport: any IOSCoreTransport) throws
+    func sendGroupFile(conversationID: String, metadata: Data,
+                       transport: any IOSCoreTransport) throws
     /// Encode PCM with the shared Opus profile and return a complete Ogg Opus container.
     func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data
     /// Encrypt the complete container; metadata stays inside the MLS Message.
@@ -144,11 +158,12 @@ public extension SharedClientCore {
     func handleServerFrame(_ frame: Data, transport: any IOSCoreTransport,
                            fullSync: Bool,
                            onTextMessage: (IOSReceivedTextMessage) -> Void,
-                           onImageMessage: (IOSReceivedImageMessage) -> Void)
+                           onImageMessage: (IOSReceivedImageMessage) -> Void,
+                           onFileMessage: (IOSReceivedFileMessage) -> Void)
         throws -> IOSCoreFrameResult {
         try handleServerFrame(
             frame, transport: transport, fullSync: fullSync,
-            onTextMessage: onTextMessage)
+            onTextMessage: onTextMessage, onImageMessage: onImageMessage)
     }
 
     func setGroupEventHandler(_ handler: @escaping (IOSGroupEvent) -> Void) {}

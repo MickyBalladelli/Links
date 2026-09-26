@@ -7,7 +7,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use links_client_core::{
-    attachments::{decrypt_image, encrypt_image, MAX_IMAGE_BYTES},
+    attachments::{decrypt_file, decrypt_image, encrypt_file, encrypt_image, MAX_FILE_BYTES, MAX_IMAGE_BYTES},
     crypto::{RecipientKeyDirectory, SealedSenderCrypto, SealedSenderKeyResolver},
     envelopes::{ClientCore, FanoutRecipient},
     identity::LocalIdentity,
@@ -118,6 +118,8 @@ pub const GROUP_EVENT_RENAMED: u32 = 2;
 pub const GROUP_EVENT_MEMBERS_CHANGED: u32 = 3;
 pub const GROUP_EVENT_REMOVED: u32 = 4;
 
+pub type FileCallback = ImageCallback;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct LinksDesktopCoreCallbacks {
@@ -134,6 +136,7 @@ pub struct LinksDesktopCoreCallbacks {
     pub identity_public_key: [u8; 32],
     pub on_group: Option<GroupCallback>,
     pub on_image: Option<ImageCallback>,
+    pub on_file: Option<FileCallback>,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -954,6 +957,29 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         self.send_group_content(conversation_id, v1::message::Content::Media(media))
     }
 
+    fn send_file(
+        &mut self,
+        conversation_id: &str,
+        recipient_user_id: &str,
+        media: v1::MediaMetadata,
+    ) -> Result<(), CoreError> {
+        links_client_core::attachments::validate_file_metadata(&media)?;
+        self.send_direct_content(
+            conversation_id,
+            recipient_user_id,
+            v1::message::Content::Media(media),
+        )
+    }
+
+    fn send_group_file(
+        &mut self,
+        conversation_id: &str,
+        media: v1::MediaMetadata,
+    ) -> Result<(), CoreError> {
+        links_client_core::attachments::validate_file_metadata(&media)?;
+        self.send_group_content(conversation_id, v1::message::Content::Media(media))
+    }
+
     fn send_direct_content(
         &mut self,
         conversation_id: &str,
@@ -1441,6 +1467,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         // repeats the commit. Those items are already applied.
         let mut rendered = Vec::new();
         let mut rendered_images = Vec::new();
+        let mut rendered_files = Vec::new();
         let mut events = Vec::new();
         let mut expected = self.cursor;
         for item in &batch.items {
@@ -1477,7 +1504,17 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                             )),
                             Some(v1::message::Content::Media(media)) => {
                                 protocol::validate_media_metadata(&media)?;
-                                if !matches!(media.mime_type.as_str(), "image/webp" | "image/avif" | "image/jpeg")
+                                if media.file_name.as_deref().is_some_and(|name| !name.is_empty()) {
+                                    links_client_core::attachments::validate_file_metadata(&media)?;
+                                    rendered_files.push((
+                                        message.conversation_id,
+                                        sender_user_id,
+                                        message.sender_device_id,
+                                        media.encode_to_vec(),
+                                        message.sequence_id,
+                                        message.sent_at_ms,
+                                    ));
+                                } else if !matches!(media.mime_type.as_str(), "image/webp" | "image/avif" | "image/jpeg")
                                     || media.content_key.len() != 32
                                     || media.nonce.len() != 12
                                     || media.ciphertext_size_bytes < 17
@@ -1492,7 +1529,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                                     || !media.chunk_cids.is_empty()
                                 {
                                     return Err(CoreError::Authentication);
-                                }
+                                } else {
                                 rendered_images.push((
                                     message.conversation_id,
                                     sender_user_id,
@@ -1501,6 +1538,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                                     message.sequence_id,
                                     message.sent_at_ms,
                                 ));
+                                }
                             }
                             Some(v1::message::Content::MlsControl(v1::MlsControl {
                                 body: Some(v1::mls_control::Body::GroupInfo(info)),
@@ -1571,6 +1609,20 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
         }
         if let Some(callback) = self.callbacks.on_image {
             for (conversation, sender_user, sender, metadata, sequence, sent_at) in rendered_images {
+                callback_status(unsafe {
+                    callback(
+                        self.callbacks.context,
+                        conversation.as_ptr(), conversation.len(),
+                        sender_user.as_ptr(), sender_user.len(),
+                        sender.as_ptr(), sender.len(),
+                        metadata.as_ptr(), metadata.len(),
+                        sequence, sent_at,
+                    )
+                })?;
+            }
+        }
+        if let Some(callback) = self.callbacks.on_file {
+            for (conversation, sender_user, sender, metadata, sequence, sent_at) in rendered_files {
                 callback_status(unsafe {
                     callback(
                         self.callbacks.context,
@@ -2199,6 +2251,141 @@ pub unsafe extern "C" fn links_desktop_core_send_group_image(
     }
 }
 
+            core.send_group_image(&conversation, metadata)
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_encrypt_file(
+    file: *const u8,
+    file_length: usize,
+    attachment_id: *const u8,
+    attachment_id_length: usize,
+    mime_type: *const u8,
+    mime_type_length: usize,
+    file_name: *const u8,
+    file_name_length: usize,
+    metadata_output: *mut u8,
+    metadata_capacity: usize,
+    metadata_length: *mut usize,
+    ciphertext_output: *mut u8,
+    ciphertext_capacity: usize,
+    ciphertext_length: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let result = (|| -> Result<(Vec<u8>, Vec<u8>), CoreError> {
+            let file = unsafe { input(file, file_length, MAX_FILE_BYTES) }
+                .map_err(|_| CoreError::Authentication)?;
+            let attachment_id = unsafe { input_string(attachment_id, attachment_id_length, 64) }?;
+            let mime_type = unsafe { input_string(mime_type, mime_type_length, 128) }?;
+            let file_name = unsafe { input_string(file_name, file_name_length, 120) }?;
+            let encrypted = encrypt_file(attachment_id, file, mime_type, file_name)?;
+            let mut metadata = Vec::with_capacity(encrypted.media.encoded_len());
+            encrypted.media.encode(&mut metadata).map_err(|_| CoreError::Provider)?;
+            Ok((metadata, encrypted.ciphertext))
+        })();
+        match result {
+            Ok((metadata, ciphertext)) => {
+                let metadata_status = unsafe {
+                    write_output(&metadata, metadata_output, metadata_capacity, metadata_length)
+                };
+                if metadata_status != LINKS_DESKTOP_OK {
+                    return metadata_status;
+                }
+                unsafe {
+                    write_output_limited(
+                        &ciphertext,
+                        ciphertext_output,
+                        ciphertext_capacity,
+                        ciphertext_length,
+                        MAX_FILE_BYTES + 16,
+                    )
+                }
+            }
+            Err(error) => status(error),
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_decrypt_file(
+    metadata: *const u8,
+    metadata_length: usize,
+    ciphertext: *const u8,
+    ciphertext_length: usize,
+    plaintext_output: *mut u8,
+    plaintext_capacity: usize,
+    plaintext_length: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let result = (|| -> Result<Vec<u8>, CoreError> {
+            let metadata = unsafe { input(metadata, metadata_length, protocol::MAX_MESSAGE_BYTES) }
+                .map_err(|_| CoreError::Authentication)?;
+            let metadata = v1::MediaMetadata::decode(metadata).map_err(|_| CoreError::Authentication)?;
+            let ciphertext = unsafe { input(ciphertext, ciphertext_length, MAX_FILE_BYTES + 16) }
+                .map_err(|_| CoreError::Authentication)?;
+            Ok(decrypt_file(&metadata, ciphertext)?.as_bytes().to_vec())
+        })();
+        match result {
+            Ok(plaintext) => unsafe {
+                write_output_limited(
+                    &plaintext,
+                    plaintext_output,
+                    plaintext_capacity,
+                    plaintext_length,
+                    MAX_FILE_BYTES,
+                )
+            },
+            Err(error) => status(error),
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_send_file(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    recipient_user_id: *const u8,
+    recipient_user_id_length: usize,
+    metadata: *const u8,
+    metadata_length: usize,
+) -> i32 {
+    boundary(|| {
+        if core.is_null() {
+            return LINKS_DESKTOP_INVALID;
+        }
+        let result = (|| -> Result<(), CoreError> {
+            let conversation = unsafe { input_string(conversation_id, conversation_id_length, 64) }?;
+            let recipient = unsafe { input_string(recipient_user_id, recipient_user_id_length, 64) }?;
+            let metadata = unsafe { input(metadata, metadata_length, protocol::MAX_MESSAGE_BYTES) }
+                .map_err(|_| CoreError::Authentication)?;
+            let metadata = v1::MediaMetadata::decode(metadata).map_err(|_| CoreError::Authentication)?;
+            unsafe { (&mut *core).send_file(&conversation, &recipient, metadata) }
+        })();
+        result.map_or_else(status, |_| LINKS_DESKTOP_OK)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn links_desktop_core_send_group_file(
+    core: *mut LinksDesktopCore,
+    conversation_id: *const u8,
+    conversation_id_length: usize,
+    metadata: *const u8,
+    metadata_length: usize,
+) -> i32 {
+    unsafe {
+        group_call(core, conversation_id, conversation_id_length, |core, conversation| {
+            let metadata = input(metadata, metadata_length, protocol::MAX_MESSAGE_BYTES)
+                .map_err(|_| CoreError::Authentication)?;
+            let metadata = v1::MediaMetadata::decode(metadata).map_err(|_| CoreError::Authentication)?;
+            core.send_group_file(&conversation, metadata)
+        })
+    }
+}
+
 unsafe fn input_string(pointer: *const u8, length: usize, maximum: usize) -> Result<String, CoreError> {
     let bytes = unsafe { input(pointer, length, maximum) }.map_err(|_| CoreError::Authentication)?;
     String::from_utf8(bytes.to_vec()).map_err(|_| CoreError::Authentication)
@@ -2533,6 +2720,7 @@ mod group_tests {
                 identity_public_key: public_key,
                 on_group: Some(on_group),
                 on_image: None,
+                on_file: None,
             };
             let user_id = user.to_string();
             let device_id = device.to_string();

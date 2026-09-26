@@ -20,6 +20,8 @@ message MediaMetadata {
   optional uint32 encryption_chunk_bytes = 13;
   // Ordered ciphertext CIDs for content-addressed chunk retrieval; private E2EE metadata.
   repeated string chunk_cids = 14;
+  // Original file name for documents the recipient opens. Images leave this empty.
+  optional string file_name = 15;
 }
 
 message OpusAudioMetadata {

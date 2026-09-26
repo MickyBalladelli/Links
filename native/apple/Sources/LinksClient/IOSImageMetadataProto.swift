@@ -78,6 +78,58 @@ public extension IOSImageMetadata {
     }
 }
 
+public struct IOSFileMetadata: Sendable {
+    public let attachmentID: String
+    public let mimeType: String
+    public let ciphertextSizeBytes: UInt64
+    public let ciphertextSHA256: Data
+    public let fileName: String
+
+    public init(protobuf: Data) throws {
+        var reader = IOSImageProtoReader(data: protobuf)
+        var attachmentID: String?
+        var mimeType: String?
+        var ciphertextSizeBytes: UInt64?
+        var ciphertextSHA256: Data?
+        var fileName: String?
+        while !reader.isAtEnd {
+            let tag = try reader.readVarint()
+            let field = Int(tag >> 3)
+            let wireType = Int(tag & 7)
+            guard field > 0 else { throw IOSImageError.invalidMetadata }
+            switch field {
+            case 1: attachmentID = try reader.readString(wireType: wireType)
+            case 2: mimeType = try reader.readString(wireType: wireType)
+            case 3: ciphertextSizeBytes = try reader.readVarint(wireType: wireType)
+            case 6: ciphertextSHA256 = try reader.readBytes(wireType: wireType)
+            case 15: fileName = try reader.readString(wireType: wireType)
+            default: try reader.skip(wireType: wireType)
+            }
+        }
+        guard let attachmentID, let mimeType, let ciphertextSizeBytes,
+              let ciphertextSHA256, let fileName,
+              IOSClient.isCanonicalUUID(attachmentID),
+              !fileName.isEmpty, fileName.count <= 120,
+              (17...20 * 1024 * 1024 + 16).contains(ciphertextSizeBytes),
+              ciphertextSHA256.count == 32 else {
+            throw IOSImageError.invalidMetadata
+        }
+        self.attachmentID = attachmentID
+        self.mimeType = mimeType
+        self.ciphertextSizeBytes = ciphertextSizeBytes
+        self.ciphertextSHA256 = ciphertextSHA256
+        self.fileName = fileName
+    }
+}
+
+public extension IOSImageUploadReceipt {
+    func matches(_ metadata: IOSFileMetadata) -> Bool {
+        attachmentID == metadata.attachmentID
+            && ciphertextSizeBytes == metadata.ciphertextSizeBytes
+            && ciphertextSHA256 == metadata.ciphertextSHA256
+    }
+}
+
 private struct IOSImageProtoReader {
     private let data: Data
     private var offset = 0

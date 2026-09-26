@@ -24,8 +24,10 @@ pub const ATTACHMENT_NONCE_BYTES: usize = 12;
 pub const ATTACHMENT_TAG_BYTES: usize = 16;
 pub const VOICE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/voice-note/attachment/v1\0";
 pub const IMAGE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/image/attachment/v1\0";
+pub const FILE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/file/attachment/v1\0";
 pub const LARGE_FILE_ATTACHMENT_AAD_PREFIX: &[u8] = b"links/large-file/attachment/v1\0";
 pub const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_FILE_BYTES: usize = 20 * 1024 * 1024;
 pub const LARGE_FILE_CIPHERTEXT_CHUNK_BYTES: usize = 256 * 1024;
 pub const LARGE_FILE_PLAINTEXT_CHUNK_BYTES: usize =
     LARGE_FILE_CIPHERTEXT_CHUNK_BYTES - ATTACHMENT_TAG_BYTES;
@@ -398,6 +400,7 @@ fn chunked_media_metadata(
         original_size_bytes: Some(plaintext_size),
         encryption_chunk_bytes: Some(LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32),
         chunk_cids: Vec::new(),
+        file_name: None,
     };
     validate_large_file_metadata(&media)?;
     Ok(media)
@@ -559,6 +562,133 @@ pub fn decrypt_voice_note(
     Ok(SecretBytes::new(plaintext))
 }
 
+pub struct EncryptedFile {
+    pub media: v1::MediaMetadata,
+    pub ciphertext: Vec<u8>,
+}
+
+/// Encrypt a document the recipient can open under its original file name.
+pub fn encrypt_file(
+    attachment_id: String,
+    plaintext: &[u8],
+    mime_type: String,
+    file_name: String,
+) -> Result<EncryptedFile, CoreError> {
+    protocol::validate_id(&attachment_id)?;
+    let file_name = sanitize_file_name(&file_name)?;
+    let mime_type = sanitize_file_mime(&mime_type)?;
+    if plaintext.is_empty() || plaintext.len() > MAX_FILE_BYTES {
+        return Err(CoreError::Protocol(protocol::ProtocolError::Invalid("file")));
+    }
+    let mut content_key = [0u8; ATTACHMENT_KEY_BYTES];
+    let mut nonce = [0u8; ATTACHMENT_NONCE_BYTES];
+    getrandom::fill(&mut content_key).map_err(|_| CoreError::Provider)?;
+    getrandom::fill(&mut nonce).map_err(|_| CoreError::Provider)?;
+    let ciphertext = encrypt_bytes(
+        &content_key,
+        &nonce,
+        &attachment_id,
+        plaintext,
+        FILE_ATTACHMENT_AAD_PREFIX,
+    )?;
+    let media = v1::MediaMetadata {
+        attachment_id,
+        mime_type,
+        ciphertext_size_bytes: ciphertext.len() as u64,
+        content_key: content_key.to_vec(),
+        nonce: nonce.to_vec(),
+        ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
+        width: None,
+        height: None,
+        duration_ms: None,
+        blur_hash: None,
+        opus: None,
+        original_size_bytes: None,
+        encryption_chunk_bytes: None,
+        chunk_cids: Vec::new(),
+        file_name: Some(file_name),
+    };
+    validate_file_metadata(&media)?;
+    validate_ciphertext(&media, &ciphertext, MAX_FILE_BYTES + ATTACHMENT_TAG_BYTES)?;
+    Ok(EncryptedFile { media, ciphertext })
+}
+
+pub fn decrypt_file(media: &v1::MediaMetadata, ciphertext: &[u8]) -> Result<SecretBytes, CoreError> {
+    validate_file_metadata(media)?;
+    validate_ciphertext(media, ciphertext, MAX_FILE_BYTES + ATTACHMENT_TAG_BYTES)?;
+    let plaintext = decrypt_bytes(
+        &media.content_key,
+        &media.nonce,
+        &media.attachment_id,
+        ciphertext,
+        FILE_ATTACHMENT_AAD_PREFIX,
+    )?;
+    Ok(SecretBytes::new(plaintext))
+}
+
+pub fn validate_file_metadata(media: &v1::MediaMetadata) -> Result<(), CoreError> {
+    protocol::validate_media_metadata(media)?;
+    let file_name = media
+        .file_name
+        .as_deref()
+        .ok_or(CoreError::Authentication)?;
+    sanitize_file_name(file_name)?;
+    sanitize_file_mime(&media.mime_type)?;
+    if media.width.is_some()
+        || media.height.is_some()
+        || media.duration_ms.is_some()
+        || media.blur_hash.is_some()
+        || media.opus.is_some()
+        || media.original_size_bytes.is_some()
+        || media.encryption_chunk_bytes.is_some()
+        || !media.chunk_cids.is_empty()
+        || media.content_key.len() != ATTACHMENT_KEY_BYTES
+        || media.nonce.len() != ATTACHMENT_NONCE_BYTES
+    {
+        return Err(CoreError::Authentication);
+    }
+    Ok(())
+}
+
+fn sanitize_file_name(name: &str) -> Result<String, CoreError> {
+    let name = name.trim();
+    if name.is_empty()
+        || name.len() > 120
+        || name.contains(['/', '\\', '\0'])
+        || name == "."
+        || name == ".."
+        || name.chars().any(|character| character.is_control())
+    {
+        return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
+            "file name",
+        )));
+    }
+    Ok(name.to_owned())
+}
+
+fn sanitize_file_mime(mime: &str) -> Result<String, CoreError> {
+    let mime = mime.trim().to_ascii_lowercase();
+    let mut parts = mime.split('/');
+    let (Some(type_name), Some(subtype), None) = (parts.next(), parts.next(), parts.next()) else {
+        return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
+            "file type",
+        )));
+    };
+    let token = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 64
+            && value
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "+-.".contains(character))
+    };
+    if !token(type_name) || !token(subtype) || matches!(type_name, "image" | "audio" | "video") {
+        return Err(CoreError::Protocol(protocol::ProtocolError::Invalid(
+            "file type",
+        )));
+    }
+    Ok(mime)
+}
+
 /// Encrypt a resized/transcoded image. The caller supplies RGB pixels only to
 /// produce the private BlurHash; those pixels are never stored or uploaded.
 pub fn encrypt_image(
@@ -607,6 +737,7 @@ pub fn encrypt_image(
         original_size_bytes: None,
         encryption_chunk_bytes: None,
         chunk_cids: Vec::new(),
+        file_name: None,
     };
     EncryptedImage::new(media, ciphertext)
 }

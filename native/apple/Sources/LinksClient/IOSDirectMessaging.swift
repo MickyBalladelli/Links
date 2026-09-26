@@ -62,6 +62,35 @@ public struct IOSReceivedImageMessage: Sendable {
     }
 }
 
+public struct IOSReceivedFileMessage: Sendable {
+    public let conversationID: String
+    public let senderUserID: String
+    public let senderDeviceID: String
+    public let metadataProtobuf: Data
+    public let fileName: String
+    public let mimeType: String
+    public let sequenceID: UInt64
+    public let sentAtMs: UInt64
+
+    public init(conversationID: String, senderUserID: String, senderDeviceID: String,
+                metadataProtobuf: Data, sequenceID: UInt64, sentAtMs: UInt64) throws {
+        let parsed = try IOSFileMetadata(protobuf: metadataProtobuf)
+        guard IOSClient.isCanonicalUUID(conversationID),
+              IOSClient.isCanonicalUUID(senderUserID),
+              IOSClient.isCanonicalUUID(senderDeviceID) else {
+            throw IOSImageError.invalidMetadata
+        }
+        self.conversationID = conversationID
+        self.senderUserID = senderUserID
+        self.senderDeviceID = senderDeviceID
+        self.metadataProtobuf = metadataProtobuf
+        self.fileName = parsed.fileName
+        self.mimeType = parsed.mimeType
+        self.sequenceID = sequenceID
+        self.sentAtMs = sentAtMs
+    }
+}
+
 public protocol IOSDirectMessagingDelegate: AnyObject {
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didChange state: IOSDirectMessaging.State)
@@ -69,6 +98,8 @@ public protocol IOSDirectMessagingDelegate: AnyObject {
                          didReceive message: IOSReceivedTextMessage)
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didReceive image: IOSReceivedImageMessage)
+    func directMessaging(_ messaging: IOSDirectMessaging,
+                         didReceive file: IOSReceivedFileMessage)
     func directMessagingDidFail(_ messaging: IOSDirectMessaging)
     func directMessagingDidFail(_ messaging: IOSDirectMessaging,
                                 reason: IOSMessagingIssue)
@@ -79,6 +110,9 @@ public protocol IOSDirectMessagingDelegate: AnyObject {
 public extension IOSDirectMessagingDelegate {
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didReceive image: IOSReceivedImageMessage) {}
+
+    func directMessaging(_ messaging: IOSDirectMessaging,
+                         didReceive file: IOSReceivedFileMessage) {}
 
     func directMessaging(_ messaging: IOSDirectMessaging,
                          didReceive event: IOSGroupEvent) {}
@@ -607,6 +641,32 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             metadata: metadata, receipt: receipt, transport: manager)
     }
 
+    public func sendFile(conversationID: String, recipientUserID: String,
+                         metadata: Data, receipt: IOSImageUploadReceipt) throws {
+        let parsed = try IOSFileMetadata(protobuf: metadata)
+        guard receipt.matches(parsed) else { throw IOSImageError.invalidUploadReceipt }
+        lock.lock()
+        let sharedCore = core
+        let manager = connection
+        let ready = currentState == .ready && !coreFailed
+        lock.unlock()
+        guard let sharedCore, let manager, ready, manager.isConnected else {
+            throw IOSMessagingError.notConnected
+        }
+        try sharedCore.sendFile(
+            conversationID: conversationID, recipientUserID: recipientUserID,
+            metadata: metadata, transport: manager)
+    }
+
+    public func sendGroupFile(conversationID: String, metadata: Data,
+                              receipt: IOSImageUploadReceipt) async throws {
+        let parsed = try IOSFileMetadata(protobuf: metadata)
+        guard receipt.matches(parsed) else { throw IOSImageError.invalidUploadReceipt }
+        let (sharedCore, manager) = try readyCore()
+        try await prepareGroupRecipients(conversationID: conversationID, core: sharedCore,
+                                         directory: directoryPlaceholder(), preKeyAPI: preKeyPlaceholder())
+    }
+
     /// Encode PCM with links-client-core's Opus profile. The shared core
     /// remains the only component that decides framing and codec settings.
     public func encodeVoiceNote(pcmFrames: [Int16], profile: IOSVoiceNoteProfile) throws -> Data {
@@ -731,6 +791,7 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         guard let sharedCore, active === manager, !failed else { return }
         var committedMessages = [IOSReceivedTextMessage]()
         var committedImages = [IOSReceivedImageMessage]()
+        var committedFiles = [IOSReceivedFileMessage]()
         do {
             _ = try sharedCore.handleServerFrame(
                 frame, transport: manager, fullSync: false,
@@ -738,6 +799,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                     committedMessages.append(message)
                 }, onImageMessage: { image in
                     committedImages.append(image)
+                }, onFileMessage: { file in
+                    committedFiles.append(file)
                 })
             // The shared core returns only after its inbox/MLS/cursor commit
             // and QueueAck path have completed. Buffering here prevents a
@@ -747,6 +810,9 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             }
             for image in committedImages {
                 notifyImage(image)
+            }
+            for file in committedFiles {
+                notifyFile(file)
             }
             // Accepted frames can retire encrypted outbox entries. Refresh
             // the host's visible queue state after the core call completes.
@@ -830,6 +896,13 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         callbackQueue.async { [weak self] in
             guard let self else { return }
             self.delegate?.directMessaging(self, didReceive: image)
+        }
+    }
+
+    private func notifyFile(_ file: IOSReceivedFileMessage) {
+        callbackQueue.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.directMessaging(self, didReceive: file)
         }
     }
 

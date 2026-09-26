@@ -172,6 +172,7 @@ impl WebLargeFileDecryptor {
                 links_client_core::attachments::LARGE_FILE_CIPHERTEXT_CHUNK_BYTES as u32,
             ),
             chunk_cids: Vec::new(),
+            file_name: None,
         };
         links_client_core::protocol::validate_media_metadata(&media).map_err(js_error)?;
         Ok(Self { media })
