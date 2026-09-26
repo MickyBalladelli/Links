@@ -1532,6 +1532,107 @@ private struct MessageBubble: View {
     }
 }
 
+private struct ComposerTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var isEnabled: Bool
+    var onPasteImage: (NSImage) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = ImagePastingTextView()
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.drawsBackground = false
+        textView.textColor = .labelColor
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.textContainerInset = NSSize(width: 0, height: 5)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude)
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = textView
+        configurePasteHandler(for: textView, coordinator: context.coordinator)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = scrollView.documentView as? ImagePastingTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.isEditable = isEnabled
+        textView.isSelectable = isEnabled
+        configurePasteHandler(for: textView, coordinator: context.coordinator)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: NSScrollView,
+        context: Context
+    ) -> CGSize? {
+        let width = proposal.width ?? 320
+        guard let textView = nsView.documentView as? NSTextView,
+              let textContainer = textView.textContainer,
+              let layoutManager = textView.layoutManager else {
+            return CGSize(width: width, height: 38)
+        }
+        textContainer.containerSize = NSSize(
+            width: max(1, width - 24),
+            height: .greatestFiniteMagnitude)
+        layoutManager.ensureLayout(for: textContainer)
+        let contentHeight = layoutManager.usedRect(for: textContainer).height
+            + textView.textContainerInset.height * 2
+        return CGSize(width: width, height: min(110, max(38, ceil(contentHeight))))
+    }
+
+    private func configurePasteHandler(
+        for textView: ImagePastingTextView,
+        coordinator: Coordinator
+    ) {
+        textView.onPasteImage = { [weak coordinator] in
+            guard let coordinator,
+                  let image = NSImage(pasteboard: .general) else { return false }
+            coordinator.parent.onPasteImage(image)
+            return true
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ComposerTextEditor
+
+        init(_ parent: ComposerTextEditor) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+    }
+}
+
+private final class ImagePastingTextView: NSTextView {
+    var onPasteImage: (() -> Bool)?
+
+    override func paste(_ sender: Any?) {
+        if onPasteImage?() == true { return }
+        super.paste(sender)
+    }
+}
+
 private struct ComposerView: View {
     @ObservedObject var model: LinksMacOSAppModel
 
@@ -1560,35 +1661,24 @@ private struct ComposerView: View {
                 .padding(.horizontal, 4)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("Message · paste an image", text: $model.composerText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...5)
-                    .onSubmit {
-                        if model.composerImageData != nil {
-                            model.sendComposerImage()
-                        } else {
-                            model.sendMessage()
-                        }
+                ZStack(alignment: .leading) {
+                    ComposerTextEditor(
+                        text: $model.composerText,
+                        isEnabled: model.canComposeSelectedConversation
+                            && !model.isSendingComposerImage,
+                        onPasteImage: model.setComposerImage)
+                        .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 110)
+                    if model.composerText.isEmpty {
+                        Text("Message · paste an image")
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                            .allowsHitTesting(false)
                     }
-                    .onPasteCommand(of: [.image, .png, .tiff, .jpeg]) { providers in
-                        if let image = NSImage(pasteboard: .general) {
-                            model.setComposerImage(image)
-                            return
-                        }
-                        guard let provider = providers.first(where: {
-                            $0.canLoadObject(ofClass: NSImage.self)
-                        }) else { return }
-                        provider.loadObject(ofClass: NSImage.self) { object, _ in
-                            guard let image = object as? NSImage else { return }
-                            Task { @MainActor in model.setComposerImage(image) }
-                        }
-                    }
-                    .disabled(!model.canComposeSelectedConversation
-                              || model.isSendingComposerImage)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(Color.primary.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
                 Button {
                     model.pasteComposerImageFromClipboard()
                 } label: {
