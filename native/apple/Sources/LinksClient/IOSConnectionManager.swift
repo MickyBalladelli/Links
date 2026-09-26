@@ -19,6 +19,7 @@ public final class IOSConnectionManager {
 
     public static let heartbeatInterval: TimeInterval = 30
     public static let helloDeadline: TimeInterval = 5
+    public static let connectDeadline: TimeInterval = 5
     public static let initialBackoff: TimeInterval = 1
     public static let maximumBackoff: TimeInterval = 30
     public static let maximumFrameBytes = 1024 * 1024
@@ -79,6 +80,12 @@ public final class IOSConnectionManager {
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask,
+                        didCompleteWithError error: Error?) {
+            guard let webSocketTask = task as? URLSessionWebSocketTask else { return }
+            owner?.completed(webSocketTask, error: error)
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask,
                         willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest,
                         completionHandler: @escaping (URLRequest?) -> Void) {
@@ -102,6 +109,7 @@ public final class IOSConnectionManager {
     private var socket: URLSessionWebSocketTask?
     private var reconnectWork: DispatchWorkItem?
     private var helloWork: DispatchWorkItem?
+    private var connectWork: DispatchWorkItem?
     private var stableResetWork: DispatchWorkItem?
     private var heartbeatTimer: DispatchSourceTimer?
     private var backoff = IOSConnectionManager.initialBackoff
@@ -216,6 +224,8 @@ public final class IOSConnectionManager {
                 task.cancel(with: .normalClosure, reason: nil)
                 return
             }
+            self.connectWork?.cancel()
+            self.connectWork = nil
             guard negotiatedProtocol == "links.v1" else {
                 self.failSocketLocked(task, reportFailure: true, closeCode: .protocolError)
                 return
@@ -261,12 +271,29 @@ public final class IOSConnectionManager {
         }
     }
 
+    fileprivate func completed(_ task: URLSessionWebSocketTask, error: Error?) {
+        stateQueue.async {
+            guard self.socket === task else { return }
+            self.failSocketLocked(task, reportFailure: error != nil)
+        }
+    }
+
     private func connectLocked() {
         guard started, !isShutdown, socket == nil else { return }
         let task = urlSession.webSocketTask(with: endpoint, protocols: ["links.v1"])
         socket = task
         helloQueued = false
         task.resume()
+        connectWork?.cancel()
+        let deadline = DispatchWorkItem { [weak self, weak task] in
+            guard let self, let task else { return }
+            self.stateQueue.async {
+                guard self.socket === task, !self.helloQueued else { return }
+                self.failSocketLocked(task, reportFailure: true)
+            }
+        }
+        connectWork = deadline
+        stateQueue.asyncAfter(deadline: .now() + Self.connectDeadline, execute: deadline)
     }
 
     private func sendHelloLocked(_ task: URLSessionWebSocketTask, hello: Data) {
@@ -352,12 +379,13 @@ public final class IOSConnectionManager {
         helloQueued = false
         cancelSocketTimersLocked()
         task.cancel(with: closeCode, reason: nil)
-        if reportFailure {
+        let willRetry = started && !isShutdown
+        if reportFailure && !willRetry {
             setStateLocked(.failed)
             notifyFailure()
         }
         notifyDisconnect()
-        guard started, !isShutdown else {
+        guard willRetry else {
             setStateLocked(.stopped)
             return
         }
@@ -381,6 +409,8 @@ public final class IOSConnectionManager {
     private func cancelSocketTimersLocked() {
         helloWork?.cancel()
         helloWork = nil
+        connectWork?.cancel()
+        connectWork = nil
         stableResetWork?.cancel()
         stableResetWork = nil
         heartbeatTimer?.cancel()

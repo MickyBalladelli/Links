@@ -2264,6 +2264,9 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         case .reconnecting:
             deliveryState = pendingOutboxCount > 0
                 ? .offlineOutboxRetry(count: pendingOutboxCount) : .reconnecting
+            if actionError == LinksMacOSDeliveryState.dependencyOutage.detail {
+                actionError = nil
+            }
         case .staleCursor:
             deliveryState = .staleCursor
         case .authenticationRequired:
@@ -2274,7 +2277,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             connectionRequested = false
             restoreSavedSession(reconnectAfterRestore: reconnectAfterRestore)
         case .dependencyOutage:
-            deliveryState = .dependencyOutage
+            deliveryState = connectionRequested ? .reconnecting : .dependencyOutage
         case .sendFailed:
             deliveryState = .sendFailed
         case .failed:
@@ -2564,6 +2567,13 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             connectionRequested = false
             restoreSavedSession(reconnectAfterRestore: reconnectAfterRestore)
         case .dependencyOutage:
+            if connectionRequested {
+                deliveryState = .reconnecting
+                connectionStatus = deliveryState.title
+                actionError = nil
+                publishProfileStatus()
+                return
+            }
             deliveryState = .dependencyOutage
         case .sendFailed:
             deliveryState = pendingOutboxCount > 0
