@@ -219,6 +219,14 @@ impl DesktopCoreServices for WebServices {
         Ok(self.cursor)
     }
 
+    fn now_ms(&self) -> Result<u64, CoreError> {
+        let now = js_sys::Date::now();
+        if !now.is_finite() || now <= 0.0 {
+            return Err(CoreError::Provider);
+        }
+        Ok(now.floor() as u64)
+    }
+
     fn lookup_and_claim_recipient_devices(
         &mut self,
         recipient_user_id: &str,
