@@ -53,6 +53,8 @@ const profileDisplayNameError = signal('')
 const isChangingUsername = signal(false)
 const profileUsernameError = signal('')
 const isSavingDisplayName = signal(false)
+const isLoggingOut = signal(false)
+const logoutConfirmOpen = signal(false)
 const profilePicture = signal('')
 const profilePictureSrc = signal('')
 const profilePictureError = signal('')
@@ -467,6 +469,54 @@ async function saveProfileDisplayName() {
 function authHeaders() {
   const token = accessToken.value.trim()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function openLogoutConfirmation() {
+  profileOpen.value = false
+  requestAnimationFrame(() => { logoutConfirmOpen.value = true })
+}
+
+function cancelLogoutConfirmation() {
+  if (isLoggingOut.value) return
+  logoutConfirmOpen.value = false
+  requestAnimationFrame(() => { profileOpen.value = true })
+}
+
+async function logoutAccount() {
+  if (isLoggingOut.value) return
+  const token = accessToken.value.trim()
+  if (!token) {
+    accessToken.value = ''
+    connectionState.value = 'preview'
+    logoutConfirmOpen.value = false
+    profileOpen.value = false
+    notice.value = 'Logged out locally. No remote session token was available to revoke.'
+    return
+  }
+
+  isLoggingOut.value = true
+  let remoteRevoked = false
+  try {
+    const response = await fetch(`${authBase()}/v1/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    remoteRevoked = response.ok || response.status === 401
+  } catch {
+    remoteRevoked = false
+  } finally {
+    if (accessToken.value.trim() === token) accessToken.value = ''
+    connectionState.value = 'preview'
+    isLoggingOut.value = false
+    logoutConfirmOpen.value = false
+    profileOpen.value = false
+  }
+  notice.value = remoteRevoked
+    ? 'Logged out. Local conversations and attachments were kept.'
+    : 'Logged out locally, but remote session revocation could not be confirmed.'
 }
 
 async function changeProfileUsername() {
@@ -1366,6 +1416,26 @@ function GroupInfoPopup() {
   })
 }
 
+function LogoutPopup() {
+  return (
+    <Popup
+      open={logoutConfirmOpen}
+      title="Log out?"
+      ariaDescription="The current account session will be revoked. Local conversations and attachments will remain on this device."
+      size="small"
+      onClose={cancelLogoutConfirmation}
+      footer={() => (
+        <div class="popup-actions">
+          <Button label="Cancel" variant="secondary" disabled={isLoggingOut} onClick={cancelLogoutConfirmation} />
+          <Button label="Log out" variant="primary" loading={isLoggingOut} disabled={isLoggingOut} onClick={logoutAccount} />
+        </div>
+      )}
+    >
+      <p>Local conversations, contacts, profile information, and attachments will not be deleted.</p>
+    </Popup>
+  )
+}
+
 function ProfilePopup() {
   return (
     <Popup
@@ -1375,9 +1445,14 @@ function ProfilePopup() {
       size="medium"
       footer={() => (
         <div class="popup-actions is-split">
-          <Button label="Reset preview" variant="tertiary" onClick={resetPreview} />
-          <Button label="Save display name" variant="secondary" loading={isSavingDisplayName} disabled={isSavingDisplayName} onClick={saveProfileDisplayName} />
-          <Button label="Change username" variant="primary" loading={isChangingUsername} disabled={isChangingUsername} onClick={changeProfileUsername} />
+          <span class="popup-actions">
+            <Button label="Log out" variant="tertiary" disabled={isLoggingOut} onClick={openLogoutConfirmation} />
+            <Button label="Reset preview" variant="tertiary" onClick={resetPreview} />
+          </span>
+          <span class="popup-actions">
+            <Button label="Save display name" variant="secondary" loading={isSavingDisplayName} disabled={isSavingDisplayName} onClick={saveProfileDisplayName} />
+            <Button label="Change username" variant="primary" loading={isChangingUsername} disabled={isChangingUsername} onClick={changeProfileUsername} />
+          </span>
         </div>
       )}
     >
@@ -1432,6 +1507,7 @@ function App() {
       <GroupInfoPopup />
       <RemoveContactPopup />
       <ProfilePopup />
+      <LogoutPopup />
       {computed(() => notice.value && !newConversationOpen.value && !addContactOpen.value ? (
         <div class="toast" role="status">{notice}</div>
       ) : null)}

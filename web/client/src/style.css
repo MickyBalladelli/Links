@@ -230,7 +230,7 @@ button, input, textarea { font: inherit; }
 .popup-form, .profile-form { display: grid; gap: 9px; }
 .popup-form label, .profile-form label { margin-top: 4px; color: var(--links-text); font-size: .75rem; font-weight: 700; }
 .popup-form p { margin: 2px 0 3px; color: var(--links-muted); font-size: .72rem; line-height: 1.45; }
-.popup-actions { width: 100%; display: flex; justify-content: flex-end; gap: 8px; }
+.popup-actions { width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .popup-actions.is-split { justify-content: space-between; }
 .popup-actions.is-split > .popup-actions { width: auto; }
 .group-contact-picker { max-height: 250px; overflow-y: auto; display: grid; gap: 4px; }
