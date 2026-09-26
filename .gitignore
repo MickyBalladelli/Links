@@ -26,3 +26,4 @@ node_modules/
 /.xcode-derived-data/
 /Trash/
 *.xcuserstate
+dist/
