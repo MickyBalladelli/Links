@@ -37,6 +37,7 @@ const profileHandleKey = 'links-web-client-profile-handle-v1'
 const profileDisplayNameKey = 'links-web-client-profile-display-name-v1'
 let activeAccountID = 'preview'
 let webMessagingSession = null
+const browserSessionConversationIDs = new Map()
 let isRestoringSession = false
 let autoRestoreTimer = null
 let isRepairingBrowserIdentity = false
@@ -513,6 +514,7 @@ async function stopWebMessaging() {
   cancelWebMessagingRetry()
   const session = webMessagingSession
   webMessagingSession = null
+  browserSessionConversationIDs.clear()
   session?.shutdown()
   wasmAvailability.value = null
   connectionState.value = 'preview'
@@ -1536,11 +1538,18 @@ async function sendPreviewMessage(event) {
   scheduleMessageScrollRestore(true)
   let sentOverNetwork = false
   let sendError = ''
-  const networkConversationID = selected?.mlsConversationID || selected?.id
   const canSendFile = attachment?.kind === 'file'
   const canSendText = text && !attachment
   if ((canSendFile || canSendText) && webMessagingSession?.isConnected &&
-      selected?.recipientUserID && isCanonicalUUID(networkConversationID)) {
+      selected?.recipientUserID) {
+    let networkConversationID = browserSessionConversationIDs.get(id)
+    if (!networkConversationID) {
+      networkConversationID = crypto.randomUUID()
+      browserSessionConversationIDs.set(id, networkConversationID)
+      conversations.value = conversations.value.map(conversation => conversation.id === id
+        ? { ...conversation, mlsConversationID: networkConversationID }
+        : conversation)
+    }
     const sendNetworkPayload = async () => {
       const session = webMessagingSession
       if (!session?.isConnected) throw new Error('connection unavailable.')

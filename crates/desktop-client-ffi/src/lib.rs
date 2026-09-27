@@ -1425,6 +1425,26 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
             self.client
                 .mls_mut()
                 .reset_direct_group_from_welcome(&bootstrap.conversation_id, &bootstrap.welcome)?;
+        } else if self
+            .client
+            .mls()
+            .current_epoch(&bootstrap.conversation_id)
+            .is_ok()
+        {
+            // Existing members advance with the commit. Only newly added
+            // devices can join from the Welcome.
+            if self
+                .client
+                .mls_mut()
+                .process_direct_commit(&bootstrap.conversation_id, &bootstrap.commit)
+                .is_err()
+            {
+                // Replayed bootstrap frames are harmless once this commit is
+                // already reflected in the local group.
+                self.client
+                    .mls()
+                    .group_ready(&bootstrap.conversation_id)?;
+            }
         } else {
             self.client
                 .mls_mut()

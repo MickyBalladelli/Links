@@ -2179,7 +2179,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         if conversation.isGroup {
             return conversation.groupActive
         }
-        if initializedConversationIDs.contains(conversation.id) {
+        if initializedConversationIDs.contains(conversation.id),
+           messaging?.hasRecipientDevices(for: conversation.recipientUserID) == true {
             return true
         }
         sendAfterSetupConversationID = conversation.id
@@ -2430,15 +2431,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             sendGroupMessage(text, conversationID: conversation.id)
             return
         }
-        guard initializedConversationIDs.contains(conversation.id) else {
-            sendAfterSetupConversationID = conversation.id
-            conversationSetupStatus = "Starting secure chat. Your message will send when it is ready."
-            if !initializingConversationIDs.contains(conversation.id) {
-                forgetUnavailableRecipientForSelectedConversation()
-                initializeSelectedConversation(reset: false, userInitiated: false)
-            }
-            return
-        }
+        guard prepareConversationForPendingSend(conversation) else { return }
         guard let messaging else {
             actionError = "Messaging host is not configured yet."
             return
