@@ -1617,6 +1617,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
     var onSend: () -> Void
     var onPasteImage: (NSImage) -> Void
     var onPasteFile: (URL) -> Void
+    var onTextViewReady: (ImagePastingTextView) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -1646,6 +1647,9 @@ private struct ComposerTextEditor: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.documentView = textView
         configurePasteHandler(for: textView, coordinator: context.coordinator)
+        DispatchQueue.main.async {
+            context.coordinator.parent.onTextViewReady(textView)
+        }
         return scrollView
     }
 
@@ -1807,6 +1811,7 @@ private final class ImagePastingTextView: NSTextView {
 
 private struct ComposerView: View {
     @ObservedObject var model: LinksMacOSAppModel
+    @State private var composerTextView: ImagePastingTextView?
 
     private var textEditorHeight: CGFloat {
         let lineCount = model.composerText.components(separatedBy: .newlines).count
@@ -1858,20 +1863,14 @@ private struct ComposerView: View {
                 .padding(.leading, 4)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                Menu {
-                    ForEach([
-                        "😀", "😂", "😍", "🥳", "😎", "😢", "😡", "👍",
-                        "👎", "👏", "🙏", "❤️", "🔥", "🎉", "✅", "👀"
-                    ], id: \.self) { emoji in
-                        Button(emoji) {
-                            model.composerText.append(emoji)
-                        }
-                    }
+                Button {
+                    composerTextView?.window?.makeFirstResponder(composerTextView)
+                    NSApp.orderFrontCharacterPalette(nil)
                 } label: {
                     Image(systemName: "face.smiling")
                         .font(.title3)
                 }
-                .menuStyle(.borderedButton)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .help("Add emoji")
                 .disabled(!model.canComposeSelectedConversation || model.isSendingComposerImage)
@@ -1882,7 +1881,10 @@ private struct ComposerView: View {
                             && !model.isSendingComposerImage,
                         onSend: model.sendComposerContent,
                         onPasteImage: model.setComposerImage,
-                        onPasteFile: model.setComposerFile)
+                        onPasteFile: model.setComposerFile,
+                        onTextViewReady: { textView in
+                            composerTextView = textView
+                        })
                         .frame(maxWidth: .infinity)
                         .frame(height: textEditorHeight)
                     if model.composerText.isEmpty {
