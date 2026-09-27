@@ -278,12 +278,11 @@ export class WebTextMessaging implements WebCoreTransport {
         false,
         message => this.notify(() => this.onTextMessage(message))
       )
-    } catch (error) {
-      // Leave the core running. Stopping here froze the status on
-      // Reconnecting and never opened another socket.
-      this.setState('failed')
-      this.notify(this.onFailure)
-      throw error
+    } catch {
+      // A mailbox frame that cannot be opened must not close the socket.
+      // Closing it left the status on Connecting while the retry repeated
+      // the same frame.
+      if (this.manager === manager && manager.isConnected) this.setState('ready')
     }
   }
 

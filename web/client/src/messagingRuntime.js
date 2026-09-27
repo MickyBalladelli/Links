@@ -20,26 +20,27 @@ function websocketEndpoint() {
 }
 
 async function loadWasmModule() {
-  if (!wasmModulePromise) {
-    // Keep the generated Rust/WASM asset outside Vite's module graph so the
-    // browser can load it as a normal public resource.
-    const wasmURL = new URL('/web-wasm/links_web_client.js', window.location.origin)
-    wasmURL.searchParams.set('v', String(Date.now()))
-    wasmModulePromise = import(/* @vite-ignore */ wasmURL.href)
-      .then(async module => {
-        if (typeof module.default === 'function') {
-          const binaryURL = new URL('/web-wasm/links_web_client_bg.wasm', window.location.origin)
-          binaryURL.searchParams.set('v', wasmURL.searchParams.get('v'))
-          await module.default(binaryURL)
-        }
-        return module
-      })
-      .catch(error => {
-        wasmModulePromise = null
-        throw error
-      })
+  // Keep the generated Rust/WASM asset outside Vite's module graph so the
+  // browser can load it as a normal public resource. Do not reuse the first
+  // import: a later session would keep an older core.
+  const wasmURL = new URL('/web-wasm/links_web_client.js', window.location.origin)
+  wasmURL.searchParams.set('v', String(Date.now()))
+  const pending = import(/* @vite-ignore */ wasmURL.href)
+    .then(async module => {
+      if (typeof module.default === 'function') {
+        const binaryURL = new URL('/web-wasm/links_web_client_bg.wasm', window.location.origin)
+        binaryURL.searchParams.set('v', wasmURL.searchParams.get('v'))
+        await module.default(binaryURL)
+      }
+      return module
+    })
+  wasmModulePromise = pending
+  try {
+    return await pending
+  } catch (error) {
+    if (wasmModulePromise === pending) wasmModulePromise = null
+    throw error
   }
-  return wasmModulePromise
 }
 
 /** Create the real Rust/WASM core plus reconnecting binary WebSocket host. */
