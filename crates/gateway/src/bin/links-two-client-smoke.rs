@@ -28,8 +28,6 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-const ALICE_HANDLE: &str = "alice_test";
-const BOB_HANDLE: &str = "bob_test";
 const DEFAULT_AUTH_URL: &str = "http://127.0.0.1:8080";
 const DEFAULT_GATEWAY_URL: &str = "ws://127.0.0.1:8081/v1/connect";
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -39,8 +37,11 @@ type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 struct SmokeFailure;
 
 struct Account {
+    handle: String,
     user_id: Uuid,
     device_id: Uuid,
+    mls_node_id: Uuid,
+    identity: IdentitySeed,
     access_token: String,
 }
 
@@ -77,9 +78,17 @@ struct UsernameRegistrationRequest {
     signature: String,
 }
 
+#[derive(Serialize)]
+struct UsernameLoginRequest {
+    challenge_id: Uuid,
+    signature: String,
+}
+
 #[derive(Deserialize)]
 struct UsernameAuthResponse {
     session: AuthSession,
+    handle: String,
+    mls_credential: String,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +102,7 @@ struct AuthSession {
 #[derive(Default)]
 struct Timings {
     auth_ms: u64,
+    login_ms: u64,
     connect_ms: u64,
     duplicate_device_ms: u64,
     alice_to_bob_ms: u64,
@@ -104,6 +114,7 @@ struct SmokeReport {
     result: &'static str,
     total_ms: u64,
     auth_ms: u64,
+    login_ms: u64,
     connect_ms: u64,
     duplicate_device_ms: u64,
     alice_to_bob_ms: u64,
@@ -119,6 +130,7 @@ async fn main() {
         result: if result.is_ok() { "pass" } else { "fail" },
         total_ms: elapsed_ms(started),
         auth_ms: timings.auth_ms,
+        login_ms: timings.login_ms,
         connect_ms: timings.connect_ms,
         duplicate_device_ms: timings.duplicate_device_ms,
         alice_to_bob_ms: timings.alice_to_bob_ms,
@@ -149,19 +161,33 @@ async fn run(timings: &mut Timings) -> Result<(), SmokeFailure> {
         .build()
         .map_err(|_| SmokeFailure)?;
 
-    // The wire handle contract uses `_test`; the UI display labels are
-    // @alice-test and @bob-test.
+    // Every run gets fresh names. This makes the test safe to run again
+    // against a long-lived local development account service.
+    let alice_handle = test_handle("alice");
+    let bob_handle = test_handle("bob");
     let auth_started = Instant::now();
     let (alice_result, bob_result) = tokio::join!(
-        register_account(&http, &auth_url, ALICE_HANDLE),
-        register_account(&http, &auth_url, BOB_HANDLE),
+        register_account(&http, &auth_url, &alice_handle),
+        register_account(&http, &auth_url, &bob_handle),
     );
-    let alice = alice_result?;
-    let bob = bob_result?;
+    let mut alice = alice_result?;
+    let mut bob = bob_result?;
     if alice.user_id == bob.user_id || alice.device_id == bob.device_id {
         return Err(SmokeFailure);
     }
     timings.auth_ms = elapsed_ms(auth_started);
+
+    // A newly created account must survive the first login round trip. This
+    // catches a registration flow that issued a token but failed to persist
+    // the signed device binding used by later clients.
+    let login_started = Instant::now();
+    let (alice_login, bob_login) = tokio::join!(
+        login_account(&http, &auth_url, &alice),
+        login_account(&http, &auth_url, &bob),
+    );
+    alice.access_token = alice_login?;
+    bob.access_token = bob_login?;
+    timings.login_ms = elapsed_ms(login_started);
 
     let connect_started = Instant::now();
     let (alice_socket, bob_socket) = tokio::join!(
@@ -262,11 +288,90 @@ async fn register_account(
     {
         return Err(SmokeFailure);
     }
+    if response.handle != handle || response.mls_credential.is_empty() {
+        return Err(SmokeFailure);
+    }
     Ok(Account {
+        handle: handle.to_owned(),
         user_id: response.session.user_id,
         device_id,
+        mls_node_id,
+        identity: seed,
         access_token: response.session.access_token,
     })
+}
+
+async fn login_account(
+    http: &Client,
+    auth_url: &str,
+    account: &Account,
+) -> Result<String, SmokeFailure> {
+    let public_key = account.identity.public_key();
+    let challenge = http
+        .post(format!("{auth_url}/v1/auth/username/challenge"))
+        .json(&UsernameChallengeRequest {
+            handle: account.handle.clone(),
+            purpose: "login",
+            device_id: account.device_id,
+            mls_node_id: account.mls_node_id,
+            public_key: URL_SAFE_NO_PAD.encode(public_key),
+        })
+        .send()
+        .await
+        .map_err(|_| SmokeFailure)?
+        .json::<UsernameChallenge>()
+        .await
+        .map_err(|_| SmokeFailure)?;
+    if challenge.handle != account.handle
+        || challenge.purpose != "login"
+        || challenge.device_id != account.device_id
+        || challenge.mls_node_id != account.mls_node_id
+        || challenge.public_key != URL_SAFE_NO_PAD.encode(public_key)
+        || challenge.expires_at_ms <= now_ms()?
+    {
+        return Err(SmokeFailure);
+    }
+    let challenge_bytes: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&challenge.challenge)
+        .map_err(|_| SmokeFailure)?
+        .try_into()
+        .map_err(|_| SmokeFailure)?;
+    let transcript = links_identity::username_login_transcript(
+        challenge.challenge_id,
+        &account.handle,
+        account.device_id,
+        account.mls_node_id,
+        &public_key,
+        &challenge_bytes,
+        challenge.expires_at_ms,
+    )
+    .map_err(|_| SmokeFailure)?;
+    let response = http
+        .post(format!("{auth_url}/v1/auth/username/login"))
+        .json(&UsernameLoginRequest {
+            challenge_id: challenge.challenge_id,
+            signature: URL_SAFE_NO_PAD.encode(account.identity.sign(&transcript)),
+        })
+        .send()
+        .await
+        .map_err(|_| SmokeFailure)?;
+    if !response.status().is_success() {
+        return Err(SmokeFailure);
+    }
+    let response = response
+        .json::<UsernameAuthResponse>()
+        .await
+        .map_err(|_| SmokeFailure)?;
+    if response.handle != account.handle
+        || response.mls_credential.is_empty()
+        || response.session.access_token.is_empty()
+        || response.session.user_id != account.user_id
+        || response.session.device_id != account.device_id
+        || response.session.expires_at_ms <= now_ms()?
+    {
+        return Err(SmokeFailure);
+    }
+    Ok(response.session.access_token)
 }
 
 async fn connect_account(endpoint: &str, account: &Account) -> Result<Socket, SmokeFailure> {
@@ -456,6 +561,11 @@ fn fresh_nonce() -> [u8; 32] {
 
 fn opaque_payload() -> Vec<u8> {
     fresh_nonce().to_vec()
+}
+
+fn test_handle(prefix: &str) -> String {
+    let run_id = Uuid::new_v4().simple().to_string();
+    format!("{prefix}_{}", &run_id[..24])
 }
 
 fn now_ms() -> Result<u64, SmokeFailure> {

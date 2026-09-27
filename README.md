@@ -256,6 +256,13 @@ disposable database and run:
 cargo test --workspace --all-targets --locked -- --ignored
 ```
 
+For the client compatibility checks, see [`docs/testing.md`](docs/testing.md).
+The local stack is already expected to be running:
+
+```sh
+./scripts/test-client-matrix.sh all
+```
+
 ## Roadmap
 
 The intended delivery order is:
