@@ -278,12 +278,12 @@ export class WebTextMessaging implements WebCoreTransport {
         false,
         message => this.notify(() => this.onTextMessage(message))
       )
-    } catch {
-      this.coreFailed = true
+    } catch (error) {
+      // Leave the core running. Stopping here froze the status on
+      // Reconnecting and never opened another socket.
       this.setState('failed')
-      this.manager = null
-      manager.stop()
       this.notify(this.onFailure)
+      throw error
     }
   }
 

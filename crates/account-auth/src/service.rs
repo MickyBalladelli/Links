@@ -2940,9 +2940,16 @@ impl AccountAuth {
         target_device_id: Uuid,
     ) -> Result<v1::PreKeyBundle, AuthError> {
         self.authenticate(token).await?;
-        Ok(RelationalStore::from_pool(self.pool.clone())
+        match RelationalStore::from_pool(self.pool.clone())
             .claim_prekey_bundle(target_device_id)
-            .await?)
+            .await
+        {
+            Ok(bundle) => Ok(bundle),
+            // The directory already lists this device. A missing profile means
+            // it has not opened a client, not that the caller's token failed.
+            Err(links_server_store::StoreError::NotFound) => Err(AuthError::NotFound),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub async fn put_mls_key_package(
@@ -2969,7 +2976,7 @@ impl AccountAuth {
         RelationalStore::from_pool(self.pool.clone())
             .mls_key_package(target_device_id)
             .await?
-            .ok_or(AuthError::Denied)
+            .ok_or(AuthError::NotFound)
     }
 
     pub async fn contact_psi_parameters(

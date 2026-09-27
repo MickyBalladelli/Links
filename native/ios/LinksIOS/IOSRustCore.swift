@@ -1170,26 +1170,10 @@ final class IOSDirectoryChatAdapter: IOSDirectChatDirectory {
             throw IOSPreKeyError.invalidRecipient
         }
         onDirectoryResolved(directory.userID, directory.handle, directory.displayName)
-        guard !directory.devices.isEmpty,
-              directory.devices.count <= 100 else {
-            throw IOSPreKeyError.invalidRecipient
-        }
-        var descriptors = [IOSRecipientDeviceDescriptor]()
-        descriptors.reserveCapacity(directory.devices.count)
-        for device in directory.devices {
-            let package = try await keyPackageProvider.keyPackage(
-                accessToken: accessToken,
-                userID: directory.userID,
-                deviceID: device.deviceID,
-                mlsNodeID: device.mlsNodeID,
-                mlsCredential: device.mlsCredential)
-            descriptors.append(try IOSRecipientDeviceDescriptor(
-                userID: directory.userID,
-                deviceID: device.deviceID,
-                identityPublicKey: device.identityPublicKey,
-                mlsCredential: device.mlsCredential,
-                mlsKeyPackage: package))
-        }
-        return descriptors
+        return try await IOSRecipientDeviceLookup.descriptors(
+            for: directory.devices,
+            userID: directory.userID,
+            accessToken: accessToken,
+            keyPackageProvider: keyPackageProvider)
     }
 }

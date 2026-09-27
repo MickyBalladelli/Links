@@ -124,7 +124,8 @@ public struct IOSRecipientDeviceDescriptor: Sendable {
 }
 
 /// A directory adapter must authenticate the public device snapshot and return
-/// one current MLS KeyPackage per active recipient device.
+/// one current MLS KeyPackage for each recipient device that has published one.
+/// Devices that registered but never opened a client are omitted.
 public protocol IOSDirectChatDirectory: AnyObject {
     func queryRecipientDevices(accessToken: String, recipientUserID: String)
         async throws -> [IOSRecipientDeviceDescriptor]
@@ -167,27 +168,63 @@ public final class IOSUsernameDirectoryChatAdapter: IOSDirectChatDirectory {
               directory.devices.count <= 100 else {
             throw IOSPreKeyError.invalidRecipient
         }
-        var deviceIDs = Set<String>()
+        return try await IOSRecipientDeviceLookup.descriptors(
+            for: directory.devices,
+            userID: directory.userID,
+            accessToken: accessToken,
+            keyPackageProvider: keyPackageProvider)
+    }
+}
+
+/// Keeps devices that have published an MLS KeyPackage and skips the rest.
+public enum IOSRecipientDeviceLookup {
+    public static func descriptors(
+        for devices: [IOSDirectoryDevice],
+        userID: String,
+        accessToken: String,
+        keyPackageProvider: any IOSMLSKeyPackageProvider
+    ) async throws -> [IOSRecipientDeviceDescriptor] {
+        guard !devices.isEmpty, devices.count <= 100 else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        var seen = Set<String>()
         var descriptors = [IOSRecipientDeviceDescriptor]()
-        descriptors.reserveCapacity(directory.devices.count)
-        for device in directory.devices {
-            guard deviceIDs.insert(device.deviceID).inserted else {
+        descriptors.reserveCapacity(devices.count)
+        var missingPackages = 0
+        var tokenFailures = 0
+        for device in devices {
+            guard seen.insert(device.deviceID).inserted else {
                 throw IOSPreKeyError.invalidRecipient
             }
-            let keyPackage = try await keyPackageProvider.keyPackage(
-                accessToken: accessToken,
-                userID: directory.userID,
-                deviceID: device.deviceID,
-                mlsNodeID: device.mlsNodeID,
-                mlsCredential: device.mlsCredential)
+            let keyPackage: Data
+            do {
+                keyPackage = try await keyPackageProvider.keyPackage(
+                    accessToken: accessToken,
+                    userID: userID,
+                    deviceID: device.deviceID,
+                    mlsNodeID: device.mlsNodeID,
+                    mlsCredential: device.mlsCredential)
+            } catch IOSPreKeyError.notFound {
+                missingPackages += 1
+                continue
+            } catch IOSPreKeyError.invalidToken {
+                // Older account servers answer 401 when a device has no
+                // KeyPackage. A rejected token fails every device the same way.
+                tokenFailures += 1
+                continue
+            }
             descriptors.append(try IOSRecipientDeviceDescriptor(
-                userID: directory.userID,
+                userID: userID,
                 deviceID: device.deviceID,
                 identityPublicKey: device.identityPublicKey,
                 mlsCredential: device.mlsCredential,
                 mlsKeyPackage: keyPackage))
         }
-        return descriptors
+        if !descriptors.isEmpty { return descriptors }
+        if tokenFailures == devices.count && missingPackages == 0 {
+            throw IOSPreKeyError.invalidToken
+        }
+        throw IOSPreKeyError.invalidRecipient
     }
 }
 
@@ -208,6 +245,8 @@ public enum IOSPreKeyError: Error, Equatable {
     case invalidRecipient
     case invalidResponse
     case serviceRejected
+    /// This device has not published the requested pre-key or KeyPackage.
+    case notFound
     /// The account service already has this device's pre-key profile.
     case conflict
 }
@@ -337,6 +376,7 @@ public final class IOSPreKeyHTTPClient: IOSPreKeyAPI, Sendable {
         }
         if http.statusCode == 409 { throw IOSPreKeyError.conflict }
         if http.statusCode == 401 { throw IOSPreKeyError.invalidToken }
+        if http.statusCode == 404 { throw IOSPreKeyError.notFound }
         guard (200..<300).contains(http.statusCode),
               data.count <= Self.maximumResponseBytes,
               Self.isProtobuf(http.value(forHTTPHeaderField: "Content-Type")) else {

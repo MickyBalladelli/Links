@@ -456,7 +456,15 @@ impl<S> DesktopCoreHostAdapter<S> {
             let item_cursor = item.cursor;
             match item.entry.ok_or(CoreError::InvalidSync)? {
                 v1::queue_item::Entry::Envelope(envelope) => {
-                    let message = core.open_envelope(&envelope, now_ms)?;
+                    let message = match core.open_envelope(&envelope, now_ms) {
+                        Ok(message) => message,
+                        // The gateway delivers every stored welcome before the
+                        // mailbox, so an envelope that still cannot be opened
+                        // never will. Skipping it keeps the connection up and
+                        // lets later messages through.
+                        Err(CoreError::Authentication) => continue,
+                        Err(error) => return Err(error),
+                    };
                     if let Some(v1::message::Content::Text(text)) = message.content.as_ref() {
                         rendered.push(DesktopReceivedTextMessage {
                             conversation_id: message.conversation_id.clone(),

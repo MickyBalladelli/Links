@@ -306,18 +306,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
               descriptors.allSatisfy({ $0.userID == recipientUserID }) else {
             throw IOSPreKeyError.invalidRecipient
         }
-        var deviceIDs = Set<String>()
-        var claimed = [IOSClaimedRecipientDevice]()
-        claimed.reserveCapacity(descriptors.count)
-        for descriptor in descriptors {
-            guard deviceIDs.insert(descriptor.deviceID).inserted else {
-                throw IOSPreKeyError.invalidRecipient
-            }
-            let bundle = try await preKeyAPI.claim(
-                accessToken: token, deviceID: descriptor.deviceID)
-            claimed.append(try IOSClaimedRecipientDevice(
-                descriptor: descriptor, bundle: bundle))
-        }
+        let claimed = try await claimReadyDevices(
+            descriptors, accessToken: token, preKeyAPI: preKeyAPI)
         try coreQueue.sync {
             try sharedCore.initializeDirectConversation(
                 conversationID: conversationID,
@@ -354,18 +344,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
               descriptors.allSatisfy({ $0.userID == recipientUserID }) else {
             throw IOSPreKeyError.invalidRecipient
         }
-        var deviceIDs = Set<String>()
-        var claimed = [IOSClaimedRecipientDevice]()
-        claimed.reserveCapacity(descriptors.count)
-        for descriptor in descriptors {
-            guard deviceIDs.insert(descriptor.deviceID).inserted else {
-                throw IOSPreKeyError.invalidRecipient
-            }
-            let bundle = try await preKeyAPI.claim(
-                accessToken: token, deviceID: descriptor.deviceID)
-            claimed.append(try IOSClaimedRecipientDevice(
-                descriptor: descriptor, bundle: bundle))
-        }
+        let claimed = try await claimReadyDevices(
+            descriptors, accessToken: token, preKeyAPI: preKeyAPI)
         try coreQueue.sync {
             try sharedCore.resetDirectConversation(
                 conversationID: conversationID,
@@ -390,6 +370,44 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
         return (sharedCore, manager)
     }
 
+    /// Claim a bundle for every device that has published pre-keys. Devices that
+    /// registered and then never opened a client are skipped. Setup fails only
+    /// when none of the supplied devices can be claimed.
+    private func claimReadyDevices(
+        _ descriptors: [IOSRecipientDeviceDescriptor],
+        accessToken: String,
+        preKeyAPI: any IOSPreKeyAPI
+    ) async throws -> [IOSClaimedRecipientDevice] {
+        guard !descriptors.isEmpty, descriptors.count <= 100 else {
+            throw IOSPreKeyError.invalidRecipient
+        }
+        var seen = Set<String>()
+        var claimed = [IOSClaimedRecipientDevice]()
+        claimed.reserveCapacity(descriptors.count)
+        var missingProfiles = 0
+        var tokenFailures = 0
+        for descriptor in descriptors {
+            guard seen.insert(descriptor.deviceID).inserted else {
+                throw IOSPreKeyError.invalidRecipient
+            }
+            do {
+                let bundle = try await preKeyAPI.claim(
+                    accessToken: accessToken, deviceID: descriptor.deviceID)
+                claimed.append(try IOSClaimedRecipientDevice(
+                    descriptor: descriptor, bundle: bundle))
+            } catch IOSPreKeyError.notFound {
+                missingProfiles += 1
+            } catch IOSPreKeyError.invalidToken {
+                tokenFailures += 1
+            }
+        }
+        if !claimed.isEmpty { return claimed }
+        if tokenFailures == descriptors.count && missingProfiles == 0 {
+            throw IOSPreKeyError.invalidToken
+        }
+        throw IOSPreKeyError.invalidRecipient
+    }
+
     /// Fetch each user's devices from the directory, claim one pre-key bundle
     /// per device and register them so the core can seal to them.
     private func registerDevices(of userIDs: [String], core sharedCore: any SharedClientCore,
@@ -405,11 +423,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
                   descriptors.allSatisfy({ $0.userID == userID }) else {
                 throw IOSPreKeyError.invalidRecipient
             }
-            for descriptor in descriptors {
-                let bundle = try await preKeyAPI.claim(
-                    accessToken: token, deviceID: descriptor.deviceID)
-                claimed.append(try IOSClaimedRecipientDevice(descriptor: descriptor, bundle: bundle))
-            }
+            claimed.append(contentsOf: try await claimReadyDevices(
+                descriptors, accessToken: token, preKeyAPI: preKeyAPI))
         }
         guard !claimed.isEmpty else { return }
         try coreQueue.sync { try sharedCore.registerRecipientDevices(claimed) }

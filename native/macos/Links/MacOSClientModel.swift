@@ -1344,6 +1344,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                 return "Pre-key endpoint is invalid. Use http://127.0.0.1:8080 in Debug."
             case .invalidRecipient:
                 return "Pre-key recipient data is invalid. Check the account device record."
+            case .notFound:
+                return "That device has not published pre-keys yet."
             }
         }
         if let error = error as? IOSMessagingError {
