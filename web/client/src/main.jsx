@@ -1489,6 +1489,7 @@ async function addOrOpenContact(event) {
 
 async function sendPreviewMessage(event) {
   event?.preventDefault()
+  notice.value = ''
   const text = composerText.value.trim()
   const attachment = pendingAttachment.value
   const id = selectedConversationID.value
@@ -1529,6 +1530,7 @@ async function sendPreviewMessage(event) {
     ? { ...conversation, messages: [...conversation.messages, ...additions] }
     : conversation)
   composerText.value = ''
+  scheduleMessageScrollRestore()
   let sentOverNetwork = false
   let sendError = ''
   const networkConversationID = selected?.mlsConversationID || selected?.id
@@ -1571,10 +1573,9 @@ async function sendPreviewMessage(event) {
     }
   }
   notice.value = sendError || (sentOverNetwork
-    ? 'Encrypted message sent.'
+    ? ''
     : 'Saved in the local preview. Encrypted transport is not connected yet.')
   persistState()
-  scheduleMessageScrollRestore()
 }
 
 async function resetPreview() {
@@ -1906,7 +1907,7 @@ function ConversationDetail() {
                   : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
             </div>)}
 
-        <section class="message-list is-scroll-pending" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
+        <section class="message-list" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
 
         <form
           class={computed(() => `composer ${composerDragActive.value ? 'is-dragging' : ''}`)}
