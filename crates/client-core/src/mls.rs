@@ -314,6 +314,9 @@ pub struct OpenMlsEngine<P, S, V> {
     verifier: V,
     credential: CredentialWithKey,
     local_binding: DeviceBinding,
+    /// Per direct conversation, the leaf encryption key of the KeyPackage
+    /// last used for each peer device.
+    direct_peer_packages: HashMap<String, HashMap<Uuid, Vec<u8>>>,
 }
 
 impl<P, S, V> OpenMlsEngine<P, S, V>
@@ -343,6 +346,7 @@ where
                 signature_key: public_key.to_vec().into(),
             },
             local_binding,
+            direct_peer_packages: HashMap::new(),
         })
     }
 
@@ -958,7 +962,9 @@ where
             ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;
             return Ok(());
         }
-        self.join_group_with_id(group_id, welcome, DIRECT_MAX_USERS)
+        self.join_group_with_id(group_id, welcome, DIRECT_MAX_USERS)?;
+        self.direct_peer_packages.remove(conversation_id);
+        Ok(())
     }
 
     fn process_commit(&mut self, conversation_id: &str, commit: &[u8]) -> Result<(), CoreError> {
@@ -1016,9 +1022,27 @@ where
         welcome: &[u8],
     ) -> Result<(), CoreError> {
         let group_id = group_id(conversation_id)?;
-        // Validate the welcome before dropping the current group, so a stale
-        // or replayed welcome cannot destroy a working conversation.
-        let staged = self.stage_welcome(Some(group_id.clone()), welcome, DIRECT_MAX_USERS)?;
+        // OpenMLS refuses to stage a Welcome while the group exists, and
+        // staging consumes the KeyPackage. Only a Welcome addressed to one of
+        // our unused KeyPackages may drop the current group, so a stale or
+        // replayed Welcome cannot destroy a working conversation.
+        let input =
+            MlsMessageIn::tls_deserialize_exact(welcome).map_err(|_| CoreError::Authentication)?;
+        let MlsMessageBodyIn::Welcome(parsed) = input.extract() else {
+            return Err(CoreError::Authentication);
+        };
+        use openmls_traits::storage::StorageProvider as _;
+        let addressed_to_us = parsed.secrets().iter().any(|secret| {
+            self.provider
+                .storage()
+                .key_package::<KeyPackageRef, KeyPackageBundle>(&secret.new_member())
+                .ok()
+                .flatten()
+                .is_some()
+        });
+        if !addressed_to_us {
+            return Err(CoreError::Authentication);
+        }
         if let Some(mut group) = MlsGroup::load(self.provider.storage(), &group_id)
             .map_err(|_| CoreError::Provider)?
         {
@@ -1026,10 +1050,11 @@ where
                 .delete(self.provider.storage())
                 .map_err(|_| CoreError::Provider)?;
         }
-        staged
+        self.stage_welcome(Some(group_id), welcome, DIRECT_MAX_USERS)?
             .into_group(&self.provider)
-            .map(|_| ())
-            .map_err(|_| CoreError::Provider)
+            .map_err(|_| CoreError::Provider)?;
+        self.direct_peer_packages.remove(conversation_id);
+        Ok(())
     }
 
     fn reset_direct_group(
@@ -1049,6 +1074,7 @@ where
                 .map_err(|_| CoreError::Provider)?;
         }
         self.create_group_with_id(group_id)?;
+        self.direct_peer_packages.remove(conversation_id);
         self.add_members(conversation_id, key_packages)
     }
 
@@ -1089,17 +1115,29 @@ where
             packages.push((
                 *bytes,
                 binding.device_id,
-                package.leaf_node().encryption_key().clone(),
+                package
+                    .leaf_node()
+                    .encryption_key()
+                    .tls_serialize_detached()
+                    .map_err(|_| CoreError::Authentication)?,
             ));
         }
+        let seen_packages = packages
+            .iter()
+            .map(|(_, device_id, key)| (*device_id, key.clone()))
+            .collect::<HashMap<_, _>>();
 
         let existing =
             MlsGroup::load(self.provider.storage(), &group_id).map_err(|_| CoreError::Provider)?;
         let Some(group) = existing else {
             self.create_group_with_id(group_id)?;
-            return self
-                .add_members(conversation_id, key_package_bytes)
-                .map(Some);
+            let mut pending = self.add_members(conversation_id, key_package_bytes)?;
+            // The peer may still hold a group for this conversation, e.g. after
+            // this browser reloaded. A plain Welcome would be ignored there.
+            pending.reset_group = true;
+            self.direct_peer_packages
+                .insert(conversation_id.to_owned(), seen_packages);
+            return Ok(Some(pending));
         };
 
         let users = verified_group_user_counts(&self.verifier, &group)?;
@@ -1111,23 +1149,28 @@ where
             return Err(CoreError::Authentication);
         }
 
-        let mut member_keys = HashMap::new();
+        let mut member_devices = HashSet::new();
         for member in group.members() {
             let binding =
                 verify_credential(&self.verifier, &member.credential, &member.signature_key)?;
-            member_keys.insert(
-                binding.device_id,
-                openmls::treesync::EncryptionKey::from(member.encryption_key.clone()),
-            );
+            member_devices.insert(binding.device_id);
         }
-        // A browser keeps its MLS state in memory and publishes a KeyPackage
-        // with a new leaf encryption key after every reload. Its identity key
-        // stays the same, so compare the encryption key and recreate the group.
-        let stale = packages.iter().any(|(_, device_id, encryption_key)| {
-            member_keys
-                .get(device_id)
-                .is_some_and(|current| current != encryption_key)
-        });
+        // A browser keeps its MLS state in memory and publishes a new
+        // KeyPackage after every reload. Leaf keys cannot show this: a group
+        // creator's or committer's leaf never matches its KeyPackage. So only
+        // a KeyPackage that changed since this conversation last used it
+        // means the peer lost its state.
+        let stale = self
+            .direct_peer_packages
+            .get(conversation_id)
+            .is_some_and(|known| {
+                seen_packages.iter().any(|(device_id, key)| {
+                    member_devices.contains(device_id)
+                        && known.get(device_id).is_some_and(|previous| previous != key)
+                })
+            });
+        self.direct_peer_packages
+            .insert(conversation_id.to_owned(), seen_packages);
         if stale {
             drop(group);
             if let Some(mut stored) = MlsGroup::load(self.provider.storage(), &group_id)
@@ -1144,7 +1187,7 @@ where
         }
         let missing = packages
             .iter()
-            .filter(|(_, device_id, _)| !member_keys.contains_key(device_id))
+            .filter(|(_, device_id, _)| !member_devices.contains(device_id))
             .map(|(bytes, _, _)| *bytes)
             .collect::<Vec<_>>();
         if missing.is_empty() {

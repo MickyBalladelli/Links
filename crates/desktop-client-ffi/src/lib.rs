@@ -3171,4 +3171,153 @@ mod group_tests {
 
         unsafe { links_desktop_core_destroy(mac.core) };
     }
+
+    fn route_to_mac(browser: &mut Browser, mac: &mut Device) {
+        let mut envelopes = Vec::new();
+        for frame in browser.core.take_outgoing_frames() {
+            let frame = v1::ClientFrame::decode(frame.as_slice()).unwrap();
+            match frame.body {
+                Some(v1::client_frame::Body::MlsBootstrap(bootstrap))
+                    if bootstrap.recipient_device_id == mac.device_id =>
+                {
+                    let server = v1::ServerFrame {
+                        request_id: Uuid::new_v4().to_string(),
+                        body: Some(v1::server_frame::Body::MlsBootstrap(bootstrap)),
+                    }
+                    .encode_to_vec();
+                    let status = unsafe {
+                        links_desktop_core_handle_server_frame(mac.core, server.as_ptr(), server.len())
+                    };
+                    assert_eq!(status, LINKS_DESKTOP_OK, "mac bootstrap");
+                }
+                Some(v1::client_frame::Body::Send(envelope))
+                    if envelope.recipient_device_id == mac.device_id =>
+                {
+                    envelopes.push(envelope)
+                }
+                _ => {}
+            }
+        }
+        assert!(!envelopes.is_empty(), "browser sent no envelope to the mac");
+        let mut cursor = mac.cursor;
+        let items = envelopes
+            .into_iter()
+            .map(|envelope| {
+                cursor += 1;
+                v1::QueueItem { cursor, entry: Some(v1::queue_item::Entry::Envelope(envelope)) }
+            })
+            .collect();
+        let server = v1::ServerFrame {
+            request_id: Uuid::new_v4().to_string(),
+            body: Some(v1::server_frame::Body::Batch(v1::SyncBatch {
+                recipient_device_id: mac.device_id.clone(),
+                after_cursor: mac.cursor,
+                next_cursor: cursor,
+                high_watermark: cursor,
+                items,
+            })),
+        }
+        .encode_to_vec();
+        let status =
+            unsafe { links_desktop_core_handle_server_frame(mac.core, server.as_ptr(), server.len()) };
+        assert_eq!(status, LINKS_DESKTOP_OK, "mac batch");
+        mac.cursor = cursor;
+    }
+
+    #[test]
+    fn browser_to_mac_direct_text_and_reply() {
+        let mut mac = Device::new();
+        let seed = *IdentitySeed::generate().unwrap().expose_for_wrapping();
+        let (user, device) = (random_uuid(), random_uuid());
+        let mut browser = Browser::open(&seed, user, device);
+        let conversation = Uuid::new_v4().to_string();
+
+        if browser
+            .core
+            .set_recipient(
+                &mac.user_id, &mac.device_id, &mac.public_key,
+                &mac.bundle, &mac.credential, &mac.key_package,
+            )
+            .is_err()
+        {
+            panic!("browser set_recipient");
+        }
+        if browser.core.send_text(&conversation, &mac.user_id, "from browser").is_err() {
+            panic!("browser send_text");
+        }
+        route_to_mac(&mut browser, &mut mac);
+        let received = mac.host.texts.drain(..).collect::<Vec<_>>();
+        assert_eq!(
+            received,
+            vec![(conversation.clone(), browser.user_id.clone(), "from browser".to_owned())]
+        );
+
+        know_browser(&mac, &browser);
+        let status = unsafe {
+            links_desktop_core_send_text(
+                mac.core,
+                conversation.as_ptr(), conversation.len(),
+                browser.user_id.as_ptr(), browser.user_id.len(),
+                "reply".as_ptr(), "reply".len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK, "mac reply");
+        route_to_browser(&mut mac, &mut browser);
+        assert_eq!(browser.texts(), vec!["reply".to_owned()]);
+
+        // Both sides send before seeing each other's message. Neither send may
+        // rebuild the group, or the message in flight in the old group is lost.
+        if browser.core.send_text(&conversation, &mac.user_id, "browser again").is_err() {
+            panic!("browser second send");
+        }
+        know_browser(&mac, &browser);
+        let status = unsafe {
+            links_desktop_core_send_text(
+                mac.core,
+                conversation.as_ptr(), conversation.len(),
+                browser.user_id.as_ptr(), browser.user_id.len(),
+                "mac again".as_ptr(), "mac again".len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK, "mac second send");
+        route_to_mac(&mut browser, &mut mac);
+        route_to_browser(&mut mac, &mut browser);
+        let received = mac.host.texts.drain(..).map(|(_, _, text)| text).collect::<Vec<_>>();
+        assert_eq!(received, vec!["browser again".to_owned()]);
+        assert_eq!(browser.texts(), vec!["mac again".to_owned()]);
+
+        // After a reload the browser writes first; the mac must replace its
+        // old group instead of ignoring the new Welcome.
+        let mut reloaded = Browser::open(&seed, user, device);
+        if reloaded
+            .core
+            .set_recipient(
+                &mac.user_id, &mac.device_id, &mac.public_key,
+                &mac.bundle, &mac.credential, &mac.key_package,
+            )
+            .is_err()
+        {
+            panic!("reloaded set_recipient");
+        }
+        if reloaded.core.send_text(&conversation, &mac.user_id, "after reload").is_err() {
+            panic!("reloaded send_text");
+        }
+        route_to_mac(&mut reloaded, &mut mac);
+        let received = mac.host.texts.drain(..).map(|(_, _, text)| text).collect::<Vec<_>>();
+        assert_eq!(received, vec!["after reload".to_owned()]);
+        know_browser(&mac, &reloaded);
+        let status = unsafe {
+            links_desktop_core_send_text(
+                mac.core,
+                conversation.as_ptr(), conversation.len(),
+                reloaded.user_id.as_ptr(), reloaded.user_id.len(),
+                "welcome back".as_ptr(), "welcome back".len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK, "mac reply after reload");
+        route_to_browser(&mut mac, &mut reloaded);
+        assert_eq!(reloaded.texts(), vec!["welcome back".to_owned()]);
+
+        unsafe { links_desktop_core_destroy(mac.core) };
+    }
 }
