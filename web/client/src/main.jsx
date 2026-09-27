@@ -1866,93 +1866,106 @@ function Messages() {
   })
 }
 
-function ConversationDetail() {
+function ConversationHeader() {
   return computed(() => {
     const conversation = selectedConversation.value
+    if (!conversation) return null
     const pictures = contactPictures.value
-    if (!conversation) {
-      return (
-        <main class="empty-detail">
-          <EmptyState icon={<ChatIcon size="1.7rem" />} title="Choose a conversation" description="Open a contact or create a conversation to start messaging." />
-        </main>
-      )
-    }
     return (
-      <main class="conversation-detail">
-        <header class="conversation-header">
-          <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
-          <ConversationAvatar conversation={conversation} pictures={pictures} size="large" />
-          <div class="conversation-heading">
-            <h1>{conversation.displayName || conversation.title}</h1>
-            <p>{conversation.isGroup ? `${conversation.members?.length || 1} members` : conversation.title}</p>
-          </div>
-          {conversation.isGroup
-            ? <button type="button" class="group-info-button" onClick={() => openGroupInfo(conversation)}>Members</button>
-            : null}
-          <div class="conversation-status"><StatusDot /><span>{statusLabel}</span></div>
-        </header>
-
-        {computed(() => connectionState.value === 'ready'
-          ? <div class="conversation-notices" aria-hidden="true"></div>
-          : <div class="conversation-notices">
-              <div class="delivery-banner">
-                <LiveStatusIcon size="1rem" />
-                <div>
-                  <strong>{connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Connecting to server' : 'Local browser mode'}</strong>
-                  <span>{connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Encrypted sync is reconnecting.' : 'Messages and attachments are saved on this device.'}</span>
-                </div>
-                <Badge value={connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Connecting' : 'Local'} tone="warning" />
-              </div>
-              <div class="secure-note"><LockIcon size="0.8rem" /><span>{wasmAvailability.value === false
-                ? 'Encrypted sync is unavailable in this browser build.'
-                : accessToken.value
-                  ? 'Encrypted sync is reconnecting to the server.'
-                  : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
-            </div>)}
-
-        <section class="message-list" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
-
-        <form
-          class={computed(() => `composer ${composerDragActive.value ? 'is-dragging' : ''}`)}
-          onSubmit={sendPreviewMessage}
-          onDragEnter={event => { event.preventDefault(); composerDragActive.value = true }}
-          onDragOver={event => { event.preventDefault(); composerDragActive.value = true }}
-          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) composerDragActive.value = false }}
-          onDrop={handleComposerDrop}
-        >
-          {computed(() => pendingAttachment.value ? (
-            <div class="composer-attachment">
-              {pendingAttachment.value.kind === 'image'
-                ? <img src={pendingAttachment.value.previewURL} alt="Selected attachment" />
-                : <FileIcon />}
-              <span><strong>{pendingAttachment.value.name}</strong><small>{formatBytes(pendingAttachment.value.size)}</small></span>
-              <button type="button" aria-label="Remove attachment" onClick={clearPendingAttachment}><CloseIcon /></button>
-            </div>
-          ) : null)}
-          <label class="attach-button" aria-label="Attach image or file" title="Attach image or file">
-            <UploadIcon size="18" />
-            <input type="file" onChange={event => { handleComposerFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
-          </label>
-          <textarea
-            value={composerText}
-            onInput={event => { composerText.value = event.currentTarget.value }}
-            onPaste={handleComposerPaste}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                sendPreviewMessage(event)
-              }
-            }}
-            placeholder={computed(() => pendingAttachment.value ? 'Add a caption' : 'Message')}
-            aria-label={`Message ${conversation.title}`}
-            rows="1"
-          ></textarea>
-          <Button type="submit" label="Send" showLabel={false} icon={<SendIcon />} ariaLabel="Save preview message or attachment" variant="primary" disabled={computed(() => !composerText.value.trim() && !pendingAttachment.value)} />
-          <span class="drop-hint">Drop an image or file to attach</span>
-        </form>
-      </main>
+      <header class="conversation-header">
+        <Button label="Open sidebar" showLabel={false} icon={<ChatIcon />} ariaLabel="Open conversations" variant="tertiary" size="small" class="mobile-menu" onClick={() => { mobileSidebarOpen.value = true }} />
+        <ConversationAvatar conversation={conversation} pictures={pictures} size="large" />
+        <div class="conversation-heading">
+          <h1>{conversation.displayName || conversation.title}</h1>
+          <p>{conversation.isGroup ? `${conversation.members?.length || 1} members` : conversation.title}</p>
+        </div>
+        {conversation.isGroup
+          ? <button type="button" class="group-info-button" onClick={() => openGroupInfo(conversation)}>Members</button>
+          : null}
+        <div class="conversation-status"><StatusDot /><span>{statusLabel}</span></div>
+      </header>
     )
   })
+}
+
+function ConversationNotices() {
+  return computed(() => connectionState.value === 'ready'
+    ? <div class="conversation-notices" aria-hidden="true"></div>
+    : <div class="conversation-notices">
+        <div class="delivery-banner">
+          <LiveStatusIcon size="1rem" />
+          <div>
+            <strong>{connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Connecting to server' : 'Local browser mode'}</strong>
+            <span>{connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Encrypted sync is reconnecting.' : 'Messages and attachments are saved on this device.'}</span>
+          </div>
+          <Badge value={connectionState.value === 'connecting' || connectionState.value === 'failed' ? 'Connecting' : 'Local'} tone="warning" />
+        </div>
+        <div class="secure-note"><LockIcon size="0.8rem" /><span>{wasmAvailability.value === false
+          ? 'Encrypted sync is unavailable in this browser build.'
+          : accessToken.value
+            ? 'Encrypted sync is reconnecting to the server.'
+            : 'Sign in or pair this browser to enable encrypted sync.'}</span></div>
+      </div>)
+}
+
+function ConversationComposer() {
+  return (
+    <form
+      class={computed(() => `composer ${composerDragActive.value ? 'is-dragging' : ''}`)}
+      onSubmit={sendPreviewMessage}
+      onDragEnter={event => { event.preventDefault(); composerDragActive.value = true }}
+      onDragOver={event => { event.preventDefault(); composerDragActive.value = true }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) composerDragActive.value = false }}
+      onDrop={handleComposerDrop}
+    >
+      {computed(() => pendingAttachment.value ? (
+        <div class="composer-attachment">
+          {pendingAttachment.value.kind === 'image'
+            ? <img src={pendingAttachment.value.previewURL} alt="Selected attachment" />
+            : <FileIcon />}
+          <span><strong>{pendingAttachment.value.name}</strong><small>{formatBytes(pendingAttachment.value.size)}</small></span>
+          <button type="button" aria-label="Remove attachment" onClick={clearPendingAttachment}><CloseIcon /></button>
+        </div>
+      ) : null)}
+      <label class="attach-button" aria-label="Attach image or file" title="Attach image or file">
+        <UploadIcon size="18" />
+        <input type="file" onChange={event => { handleComposerFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
+      </label>
+      <textarea
+        value={composerText}
+        onInput={event => { composerText.value = event.currentTarget.value }}
+        onPaste={handleComposerPaste}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            sendPreviewMessage(event)
+          }
+        }}
+        placeholder={computed(() => pendingAttachment.value ? 'Add a caption' : 'Message')}
+        aria-label={computed(() => `Message ${selectedConversation.value?.title || 'conversation'}`)}
+        rows="1"
+      ></textarea>
+      <Button type="submit" label="Send" showLabel={false} icon={<SendIcon />} ariaLabel="Save preview message or attachment" variant="primary" disabled={computed(() => !composerText.value.trim() && !pendingAttachment.value)} />
+      <span class="drop-hint">Drop an image or file to attach</span>
+    </form>
+  )
+}
+
+const hasSelectedConversation = computed(() => selectedConversation.value !== null)
+
+function ConversationDetail() {
+  return computed(() => hasSelectedConversation.value ? (
+    <main class="conversation-detail">
+      <ConversationHeader />
+      <ConversationNotices />
+      <section class="message-list" aria-live="polite" onScroll={rememberMessageScroll}><Messages /></section>
+      <ConversationComposer />
+    </main>
+  ) : (
+    <main class="empty-detail">
+      <EmptyState icon={<ChatIcon size="1.7rem" />} title="Choose a conversation" description="Open a contact or create a conversation to start messaging." />
+    </main>
+  ))
 }
 
 function UsernamePopup({ open, title, description }) {
