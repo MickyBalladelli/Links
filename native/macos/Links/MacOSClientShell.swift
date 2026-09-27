@@ -1858,6 +1858,16 @@ private struct ComposerView: View {
                 .padding(.leading, 4)
             }
             HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    NSApp.orderFrontCharacterPalette(nil)
+                } label: {
+                    Image(systemName: "face.smiling")
+                        .font(.title3)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .help("Add emoji")
+                .disabled(!model.canComposeSelectedConversation || model.isSendingComposerImage)
                 ZStack(alignment: .leading) {
                     ComposerTextEditor(
                         text: $model.composerText,

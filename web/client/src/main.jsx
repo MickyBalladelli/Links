@@ -25,6 +25,7 @@ import './style.css'
 import { AccountDevices } from './accountDevices.jsx'
 import { clearAttachments, readAttachment, removeAttachment, saveAttachment } from './attachmentStore.js'
 import { createBrowserIdentity, loadBrowserIdentity, saveBrowserIdentity } from './authStore.js'
+import { EmojiPicker } from './emojiPicker.jsx'
 import { createWebMessagingSession } from './messagingRuntime.js'
 import { RemoveConversationPopup } from './removeConversationPopup.jsx'
 
@@ -2159,6 +2160,7 @@ function ConversationComposer() {
         <UploadIcon size="18" />
         <input type="file" onChange={event => { handleComposerFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
       </label>
+      <EmojiPicker onSelect={emoji => { composerText.value += emoji }} />
       <textarea
         value={composerText}
         onInput={event => { composerText.value = event.currentTarget.value }}
