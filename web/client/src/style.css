@@ -276,8 +276,11 @@ button, input, textarea { font: inherit; }
 .emoji-picker summary { width: 40px; height: 42px; display: grid; place-items: center; list-style: none; border: 1px solid var(--links-border); border-radius: 10px; color: var(--links-muted); background: color-mix(in srgb, var(--links-text) 4%, var(--links-surface)); cursor: pointer; font-size: 1.15rem; }
 .emoji-picker summary::-webkit-details-marker { display: none; }
 .emoji-picker summary:hover { color: var(--links-accent); border-color: color-mix(in srgb, var(--links-accent) 50%, var(--links-border)); }
-.emoji-picker-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 5; width: 212px; padding: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; border: 1px solid var(--links-border-strong); border-radius: 12px; background: var(--links-surface); box-shadow: var(--links-shadow); }
-.emoji-picker-menu button { height: 38px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-size: 1.2rem; }
+.emoji-picker-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 5; width: min(350px, calc(100vw - 350px)); max-height: min(420px, calc(100dvh - 150px)); overflow-y: auto; padding: 10px; border: 1px solid var(--links-border-strong); border-radius: 12px; background: var(--links-surface); box-shadow: var(--links-shadow); }
+.emoji-picker-group + .emoji-picker-group { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--links-border); }
+.emoji-picker-group strong { display: block; margin: 0 3px 5px; color: var(--links-muted); font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.emoji-picker-group > div { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.emoji-picker-menu button { height: 34px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-size: 1.2rem; }
 .emoji-picker-menu button:hover, .emoji-picker-menu button:focus-visible { background: var(--links-accent-soft); outline: 0; }
 .composer-attachment { grid-column: 1 / -1; grid-row: 1; min-width: 0; padding: 8px 10px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; background: color-mix(in srgb, var(--links-text) 4%, var(--links-surface)); border: 1px solid var(--links-border); border-radius: 11px; }
 .composer > .attach-button,
@@ -438,6 +441,7 @@ button, input, textarea { font: inherit; }
   .secure-note { padding: 7px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .message-list { padding: 20px 14px; }
   .message-bubble { max-width: 84%; }
+  .emoji-picker-menu { width: min(350px, calc(100vw - 74px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
