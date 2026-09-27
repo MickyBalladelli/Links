@@ -154,13 +154,19 @@ async function loadRecipients(core, contacts, accessToken, localDeviceID) {
   return loadedRecipientIDs
 }
 
+function httpFailure(message, status) {
+  const error = new Error(`${message} (${status})`)
+  error.status = status
+  return error
+}
+
 async function loadRecipient(core, contact, accessToken, localDeviceID) {
   const headers = { Authorization: `Bearer ${accessToken()}`, Accept: 'application/json' }
   const directoryResponse = await fetch(`/links-api/v1/directory/users/${encodeURIComponent(contact.userID)}`, {
     headers,
     cache: 'no-store'
   })
-  if (!directoryResponse.ok) throw new Error(`Recipient directory lookup failed (${directoryResponse.status})`)
+  if (!directoryResponse.ok) throw httpFailure('Recipient directory lookup failed', directoryResponse.status)
   const directory = await directoryResponse.json()
   let installed = 0
   for (const device of directory.devices || []) {
@@ -173,6 +179,9 @@ async function loadRecipient(core, contact, accessToken, localDeviceID) {
         headers: { Authorization: headers.Authorization, Accept: 'application/octet-stream' }, cache: 'no-store'
       })
     ])
+    if (prekeyResponse.status === 401 || keyPackageResponse.status === 401) {
+      throw httpFailure('Recipient key lookup failed', 401)
+    }
     if (!prekeyResponse.ok || !keyPackageResponse.ok) continue
     core.setRecipient(
       directory.user_id,

@@ -15,7 +15,7 @@ unset LINKS_AUTH_URL
 bash scripts/launch-ipad.sh  
 
 
-# web client
-
+# tests
+./scripts/test-client-matrix.sh all
 
 ```

@@ -31,6 +31,13 @@ import { RemoveConversationPopup } from './removeConversationPopup.jsx'
 const storageKey = 'links-web-client-preview-v1'
 const authBaseURL = signal('/links-api')
 const accessToken = signal('')
+const accessTokenRenewLeadMs = 2 * 60 * 1000
+const accessTokenFallbackTtlMs = 15 * 60 * 1000
+let accessTokenExpiresAtMs = 0
+let accessTokenEpoch = 0
+let accessTokenRenewalAllowed = false
+let accessTokenRenewalTimer = null
+let accessTokenRenewal = null
 const autoRestoreDisabledKey = 'links-web-client-auto-restore-disabled-v1'
 const lastAccountHandleKey = 'links-web-client-last-account-handle-v1'
 const profilePictureKey = 'links-web-client-profile-picture-v1'
@@ -628,12 +635,92 @@ async function startWebMessaging(identity) {
   }
 }
 
+function clearAccessTokenRenewal() {
+  if (accessTokenRenewalTimer === null) return
+  window.clearTimeout(accessTokenRenewalTimer)
+  accessTokenRenewalTimer = null
+}
+
+function cancelAccessTokenRenewal() {
+  accessTokenEpoch += 1
+  accessTokenRenewalAllowed = false
+  clearAccessTokenRenewal()
+}
+
+function rememberAccessToken(session) {
+  accessTokenRenewalAllowed = true
+  accessToken.value = session.access_token
+  const expires = Number(session.expires_at_ms)
+  accessTokenExpiresAtMs = Number.isFinite(expires) && expires > Date.now()
+    ? expires
+    : Date.now() + accessTokenFallbackTtlMs
+  scheduleAccessTokenRenewal()
+}
+
+function accessTokenNeedsRenewal() {
+  if (!accessTokenRenewalAllowed || !accessToken.value.trim()) return false
+  if (!accessTokenExpiresAtMs) return true
+  return Date.now() >= accessTokenExpiresAtMs - accessTokenRenewLeadMs
+}
+
+function scheduleAccessTokenRenewalRetry() {
+  clearAccessTokenRenewal()
+  if (!accessTokenRenewalAllowed) return
+  accessTokenRenewalTimer = window.setTimeout(() => {
+    accessTokenRenewalTimer = null
+    if (!accessTokenRenewalAllowed) return
+    renewBrowserSession().catch(() => scheduleAccessTokenRenewalRetry())
+  }, 30_000)
+}
+
+function scheduleAccessTokenRenewal() {
+  clearAccessTokenRenewal()
+  if (!accessTokenRenewalAllowed || !accessToken.value.trim() || !accessTokenExpiresAtMs) return
+  const delay = accessTokenExpiresAtMs - Date.now() - accessTokenRenewLeadMs
+  // A just-issued session is already inside the lead window only when the
+  // server clock is far ahead. Wait for the next send instead of looping.
+  if (delay < 5_000) return
+  accessTokenRenewalTimer = window.setTimeout(() => {
+    accessTokenRenewalTimer = null
+    if (!accessTokenRenewalAllowed) return
+    renewBrowserSession().catch(() => scheduleAccessTokenRenewalRetry())
+  }, delay)
+}
+
+async function ensureFreshAccessToken() {
+  if (!accessTokenNeedsRenewal()) return
+  const expired = !accessTokenExpiresAtMs || Date.now() >= accessTokenExpiresAtMs
+  try {
+    await renewBrowserSession()
+  } catch (error) {
+    if (expired) throw error
+  }
+}
+
+function isUnauthorized(error) {
+  return error?.status === 401 || /\(401\)/.test(error?.message || '')
+}
+
 async function renewBrowserSession() {
-  const handle = normalizeHandle(profileHandle.value)
-  if (!validHandle(handle)) throw new Error('Sign in again before sending attachments.')
-  const identity = await loadBrowserIdentity(handle)
-  if (!identity) throw new Error('The saved browser identity is unavailable.')
-  await establishUsernameSession(handle, 'login', identity)
+  if (!accessTokenRenewalAllowed) throw new Error('Sign in again before sending.')
+  if (accessTokenRenewal) return accessTokenRenewal
+  const epoch = accessTokenEpoch
+  const pending = (async () => {
+    const handle = normalizeHandle(profileHandle.value)
+    if (!validHandle(handle)) throw new Error('Sign in again before sending.')
+    const identity = await loadBrowserIdentity(handle)
+    if (!identity?.privateKey) throw new Error('The saved browser identity is unavailable.')
+    const { session } = await requestUsernameSession(handle, 'login', identity)
+    if (epoch !== accessTokenEpoch || !accessTokenRenewalAllowed) return session
+    rememberAccessToken(session)
+    return session
+  })()
+  accessTokenRenewal = pending
+  try {
+    return await pending
+  } finally {
+    if (accessTokenRenewal === pending) accessTokenRenewal = null
+  }
 }
 
 async function publishProfilePictureBytes(dataUrl) {
@@ -944,7 +1031,7 @@ function openAuthenticationDialog(mode = 'login') {
   authDialogOpen.value = true
 }
 
-async function establishUsernameSession(handle, purpose, identity) {
+async function requestUsernameSession(handle, purpose, identity) {
   const publicKey = new Uint8Array(identity.publicKey)
   const publicKeyText = encodeBase64URL(publicKey)
   const challengeResponse = await fetch(`${authBase()}/v1/auth/username/challenge`, {
@@ -990,6 +1077,11 @@ async function establishUsernameSession(handle, purpose, identity) {
     throw new Error('The account service returned an invalid session.')
   }
   uuidBytes(session.user_id)
+  return { session, result }
+}
+
+async function establishUsernameSession(handle, purpose, identity) {
+  const { session, result } = await requestUsernameSession(handle, purpose, identity)
   let nextIdentity = { ...identity, userID: session.user_id, handle, mlsCredential: result.mls_credential || '' }
   if (!hasBrowserIdentitySeed(nextIdentity)) {
     nextIdentity = await migrateLegacyBrowserIdentity(handle, session)
@@ -1002,7 +1094,7 @@ async function establishUsernameSession(handle, purpose, identity) {
   setAutoRestoreDisabled(false)
   cancelAutoRestoreRetry()
   rememberAutoRestoreHandle(handle)
-  accessToken.value = session.access_token
+  rememberAccessToken(session)
   switchAccountState(session.user_id, handle)
   await startWebMessaging(nextIdentity)
   refreshProfileDisplayName()
@@ -1074,7 +1166,9 @@ async function logoutAccount() {
   const token = accessToken.value.trim()
   if (!token) {
     await stopWebMessaging()
+    cancelAccessTokenRenewal()
     accessToken.value = ''
+    accessTokenExpiresAtMs = 0
     cancelAutoRestoreRetry()
     setAutoRestoreDisabled(true)
     connectionState.value = 'preview'
@@ -1086,6 +1180,7 @@ async function logoutAccount() {
     return
   }
 
+  cancelAccessTokenRenewal()
   isLoggingOut.value = true
   let remoteRevoked = false
   try {
@@ -1101,7 +1196,10 @@ async function logoutAccount() {
     remoteRevoked = false
   } finally {
     await stopWebMessaging()
-    if (accessToken.value.trim() === token) accessToken.value = ''
+    if (!accessTokenRenewalAllowed || accessToken.value.trim() === token) {
+      accessToken.value = ''
+      accessTokenExpiresAtMs = 0
+    }
     cancelAutoRestoreRetry()
     setAutoRestoreDisabled(true)
     connectionState.value = 'preview'
@@ -1673,6 +1771,7 @@ async function sendPreviewMessage(event) {
       const session = webMessagingSession
       await session?.waitUntilConnected?.(15_000)
       if (!session?.isConnected) throw new Error('connection unavailable.')
+      await ensureFreshAccessToken()
       await session.refreshRecipient?.(selected.recipientUserID)
       if (attachment && attachment.kind === 'file') {
         await session.sendFile(networkConversationID, selected.recipientUserID, {
@@ -1691,7 +1790,7 @@ async function sendPreviewMessage(event) {
       await enqueueWebSend(sendNetworkPayload)
       sentOverNetwork = true
     } catch (error) {
-      if (error?.status === 401) {
+      if (isUnauthorized(error)) {
         try {
           await renewBrowserSession()
           await enqueueWebSend(sendNetworkPayload)
