@@ -558,6 +558,7 @@ function appendIncomingText(message) {
       }
     : item)
   persistState()
+  if (visible) scheduleMessageScrollRestore(true)
 }
 
 async function startWebMessaging(identity) {
