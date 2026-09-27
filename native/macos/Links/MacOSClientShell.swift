@@ -1858,13 +1858,20 @@ private struct ComposerView: View {
                 .padding(.leading, 4)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                Button {
-                    NSApp.orderFrontCharacterPalette(nil)
+                Menu {
+                    ForEach([
+                        "😀", "😂", "😍", "🥳", "😎", "😢", "😡", "👍",
+                        "👎", "👏", "🙏", "❤️", "🔥", "🎉", "✅", "👀"
+                    ], id: \.self) { emoji in
+                        Button(emoji) {
+                            model.composerText.append(emoji)
+                        }
+                    }
                 } label: {
                     Image(systemName: "face.smiling")
                         .font(.title3)
                 }
-                .buttonStyle(.bordered)
+                .menuStyle(.borderedButton)
                 .controlSize(.large)
                 .help("Add emoji")
                 .disabled(!model.canComposeSelectedConversation || model.isSendingComposerImage)
