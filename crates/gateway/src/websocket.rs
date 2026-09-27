@@ -293,15 +293,23 @@ where
                 }
                 GatewayAction::LocalDelivery { lease, delivery } => {
                     let target_session_id = lease.session_id.clone();
-                    self.send_to(
-                        &target_session_id,
-                        Outbound::Delivery {
-                            lease,
-                            delivery,
-                            now_ms,
-                        },
-                    )
-                    .await?;
+                    if self
+                        .send_to(
+                            &target_session_id,
+                            Outbound::Delivery {
+                                lease,
+                                delivery,
+                                now_ms,
+                            },
+                        )
+                        .await
+                        .is_err()
+                    {
+                        // The envelope is already in the durable mailbox. A stale
+                        // recipient socket must not tear down the sender; the
+                        // recipient will receive it through replay after reconnecting.
+                        self.unregister(&target_session_id).await;
+                    }
                 }
                 GatewayAction::LocalWebRtcSignal { lease, delivery } => {
                     let target_session_id = lease.session_id.clone();
@@ -317,15 +325,23 @@ where
                     bootstrap,
                 } => {
                     let target_session_id = lease.session_id.clone();
-                    self.send_to(
-                        &target_session_id,
-                        Outbound::MlsBootstrap {
-                            lease,
-                            request_id,
-                            bootstrap,
-                        },
-                    )
-                    .await?;
+                    if self
+                        .send_to(
+                            &target_session_id,
+                            Outbound::MlsBootstrap {
+                                lease,
+                                request_id,
+                                bootstrap,
+                            },
+                        )
+                        .await
+                        .is_err()
+                    {
+                        // Bootstrap data is persisted before dispatch. Keep the
+                        // sender connected and let the recipient recover it on
+                        // its next authenticated connection.
+                        self.unregister(&target_session_id).await;
+                    }
                 }
             }
         }
