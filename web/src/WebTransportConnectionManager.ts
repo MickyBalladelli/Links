@@ -87,6 +87,7 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
   private started = false
   private shutdownRequested = false
   private helloQueued = false
+  private authenticated = false
   private receiveBuffer = new Uint8Array(0)
   private expectedFrameBytes: number | null = null
   private currentState: WebConnectionState = 'stopped'
@@ -109,7 +110,7 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
   }
 
   get isConnected(): boolean {
-    return this.started && this.helloQueued && this.transport !== null &&
+    return this.started && this.authenticated && this.transport !== null &&
       this.writer !== null
   }
 
@@ -132,6 +133,7 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
     this.reader = null
     this.writer = null
     this.helloQueued = false
+    this.authenticated = false
     this.resetReceiveBuffer()
     if (active !== null) {
       try {
@@ -186,6 +188,7 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
     this.reader = null
     this.writer = null
     this.helloQueued = false
+    this.authenticated = false
     this.resetReceiveBuffer()
     void this.openStream(attempt, transport)
     void transport.closed.then(
@@ -216,11 +219,8 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
       await this.writeFrame(writer, framedHello, transport, attempt)
       if (!this.isCurrent(attempt, transport)) return
       this.helloQueued = true
-      this.clearHelloTimer()
       this.installHeartbeatCheck(attempt, transport, writer)
       this.installStableReset(attempt, transport)
-      this.setState('ready')
-      this.notify(this.onConnected)
       await this.readLoop(attempt, transport, reader)
     } catch {
       if (this.isCurrent(attempt, transport)) this.failTransport(transport, true)
@@ -271,6 +271,12 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
       const expected = this.expectedFrameBytes
       if (expected === null || combined.byteLength - offset < expected) break
       this.onFrame(combined.slice(offset, offset + expected))
+      if (!this.authenticated) {
+        this.authenticated = true
+        this.clearHelloTimer()
+        this.setState('ready')
+        this.notify(this.onConnected)
+      }
       offset += expected
       this.expectedFrameBytes = null
     }
@@ -298,6 +304,7 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
     this.reader = null
     this.writer = null
     this.helloQueued = false
+    this.authenticated = false
     this.resetReceiveBuffer()
     try {
       transport.close()
@@ -327,7 +334,7 @@ export class WebTransportConnectionManager implements WebConnectionTransport {
     this.clearHelloTimer()
     this.helloTimer = setTimeout(() => {
       this.helloTimer = null
-      if (this.isCurrent(attempt, transport) && !this.helloQueued) {
+      if (this.isCurrent(attempt, transport) && !this.authenticated) {
         this.failTransport(transport, true)
       }
     }, WEB_HELLO_DEADLINE_MS)

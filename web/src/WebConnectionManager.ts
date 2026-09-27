@@ -71,6 +71,7 @@ export class WebConnectionManager implements WebConnectionTransport {
   private started = false
   private shutdownRequested = false
   private helloQueued = false
+  private authenticated = false
   private currentState: WebConnectionState = 'stopped'
 
   constructor(options: WebConnectionManagerOptions) {
@@ -91,7 +92,7 @@ export class WebConnectionManager implements WebConnectionTransport {
   }
 
   get isConnected(): boolean {
-    return this.started && this.helloQueued && this.socket?.readyState === WebSocket.OPEN
+    return this.started && this.authenticated && this.socket?.readyState === WebSocket.OPEN
   }
 
   start(): void {
@@ -112,6 +113,7 @@ export class WebConnectionManager implements WebConnectionTransport {
     const active = this.socket
     this.socket = null
     this.helloQueued = false
+    this.authenticated = false
     if (active !== null && active.readyState !== WebSocket.CLOSED) {
       active.close(CLOSE_NORMAL, 'client shutdown')
     }
@@ -155,6 +157,7 @@ export class WebConnectionManager implements WebConnectionTransport {
     }
     this.socket = socket
     this.helloQueued = false
+    this.authenticated = false
 
     socket.onopen = () => {
       if (!this.isCurrent(attempt, socket)) {
@@ -186,11 +189,8 @@ export class WebConnectionManager implements WebConnectionTransport {
       }
       if (!this.isCurrent(attempt, socket)) return
       this.helloQueued = true
-      this.clearHelloTimer()
       this.installHeartbeatCheck(attempt, socket)
       this.installStableReset(attempt, socket)
-      this.setState('ready')
-      this.notify(this.onConnected)
     }
 
     socket.onmessage = event => {
@@ -202,6 +202,12 @@ export class WebConnectionManager implements WebConnectionTransport {
       }
       try {
         this.onFrame(frame.slice())
+        if (!this.authenticated) {
+          this.authenticated = true
+          this.clearHelloTimer()
+          this.setState('ready')
+          this.notify(this.onConnected)
+        }
       } catch {
         this.failSocket(socket, true, CLOSE_PROTOCOL_ERROR)
       }
@@ -216,6 +222,7 @@ export class WebConnectionManager implements WebConnectionTransport {
       this.clearSocketTimers()
       this.socket = null
       this.helloQueued = false
+      this.authenticated = false
       this.setState(this.started ? 'connecting' : 'stopped')
       if (this.started) {
         this.notify(this.onDisconnected)
@@ -244,6 +251,7 @@ export class WebConnectionManager implements WebConnectionTransport {
     this.clearSocketTimers()
     this.socket = null
     this.helloQueued = false
+    this.authenticated = false
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
       try {
         socket.close(closeCode, 'protocol error')
@@ -273,7 +281,7 @@ export class WebConnectionManager implements WebConnectionTransport {
     this.clearHelloTimer()
     this.helloTimer = setTimeout(() => {
       this.helloTimer = null
-      if (this.isCurrent(attempt, socket) && !this.helloQueued) {
+      if (this.isCurrent(attempt, socket) && !this.authenticated) {
         this.failSocket(socket, true, CLOSE_PROTOCOL_ERROR)
       }
     }, WEB_HELLO_DEADLINE_MS)

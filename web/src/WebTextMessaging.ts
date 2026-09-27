@@ -308,12 +308,9 @@ export class WebTextMessaging implements WebCoreTransport {
         message => this.notify(() => this.onTextMessage(message))
       )
     } catch {
-      // Keep the durable cursor before the failed batch. Reconnect so the
-      // gateway can replay pending MLS bootstraps before that batch.
-      if (this.manager === manager && manager.isConnected) {
-        manager.stop()
-        manager.start()
-      }
+      // A stale local envelope must not restart a healthy socket. The Rust
+      // core keeps the mailbox cursor moving past invalid items.
+      if (this.manager === manager && manager.isConnected) this.setState('ready')
     }
   }
 
@@ -322,9 +319,9 @@ export class WebTextMessaging implements WebCoreTransport {
     try {
       this.core.retryPending?.(manager)
     } catch {
-      manager.stop()
-      this.setState('connecting')
-      manager.start()
+      // Keep the connection stable. The pending encrypted frames remain in
+      // the Rust outbox and will retry on the next socket reconnect.
+      if (this.manager === manager && manager.isConnected) this.setState('ready')
     }
   }
 
