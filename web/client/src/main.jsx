@@ -160,23 +160,26 @@ function rememberMessageScroll(event) {
   })
 }
 
-function scheduleMessageScrollRestore() {
+function scheduleMessageScrollRestore(forceBottom = false) {
   if (messageScrollRestoreFrame) cancelAnimationFrame(messageScrollRestoreFrame)
   const conversationID = selectedConversationID.value
   messageScrollRestoreFrame = requestAnimationFrame(() => {
-    messageScrollRestoreFrame = 0
-    const element = document.querySelector('.message-list')
-    const position = messageScrollPositions.get(conversationID)
-    if (!element) return
-    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
-    if (!position) {
-      element.scrollTop = maxScrollTop
-    } else {
-      element.scrollTop = position.atBottom
-        ? maxScrollTop
-        : Math.min(position.top, maxScrollTop)
-    }
-    element.classList.remove('is-scroll-pending')
+    messageScrollRestoreFrame = requestAnimationFrame(() => {
+      messageScrollRestoreFrame = 0
+      if (selectedConversationID.value !== conversationID) return
+      const element = document.querySelector('.message-list')
+      const position = messageScrollPositions.get(conversationID)
+      if (!element) return
+      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+      if (forceBottom || !position) {
+        element.scrollTop = element.scrollHeight
+        messageScrollPositions.set(conversationID, { top: element.scrollTop, atBottom: true })
+      } else {
+        element.scrollTop = position.atBottom
+          ? maxScrollTop
+          : Math.min(position.top, maxScrollTop)
+      }
+    })
   })
 }
 
@@ -1530,7 +1533,7 @@ async function sendPreviewMessage(event) {
     ? { ...conversation, messages: [...conversation.messages, ...additions] }
     : conversation)
   composerText.value = ''
-  scheduleMessageScrollRestore()
+  scheduleMessageScrollRestore(true)
   let sentOverNetwork = false
   let sendError = ''
   const networkConversationID = selected?.mlsConversationID || selected?.id
