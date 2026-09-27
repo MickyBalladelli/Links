@@ -1086,7 +1086,11 @@ where
                 return Err(CoreError::Authentication);
             }
             target_user = Some(binding.user_id);
-            packages.push((*bytes, binding.device_id));
+            packages.push((
+                *bytes,
+                binding.device_id,
+                package.leaf_node().encryption_key().clone(),
+            ));
         }
 
         let existing =
@@ -1107,17 +1111,41 @@ where
             return Err(CoreError::Authentication);
         }
 
-        let existing_devices = group
-            .members()
-            .map(|member| {
-                verify_credential(&self.verifier, &member.credential, &member.signature_key)
-                    .map(|binding| binding.device_id)
-            })
-            .collect::<Result<HashSet<_>, _>>()?;
+        let mut member_keys = HashMap::new();
+        for member in group.members() {
+            let binding =
+                verify_credential(&self.verifier, &member.credential, &member.signature_key)?;
+            member_keys.insert(
+                binding.device_id,
+                openmls::treesync::EncryptionKey::from(member.encryption_key.clone()),
+            );
+        }
+        // A browser keeps its MLS state in memory and publishes a KeyPackage
+        // with a new leaf encryption key after every reload. Its identity key
+        // stays the same, so compare the encryption key and recreate the group.
+        let stale = packages.iter().any(|(_, device_id, encryption_key)| {
+            member_keys
+                .get(device_id)
+                .is_some_and(|current| current != encryption_key)
+        });
+        if stale {
+            drop(group);
+            if let Some(mut stored) = MlsGroup::load(self.provider.storage(), &group_id)
+                .map_err(|_| CoreError::Provider)?
+            {
+                stored
+                    .delete(self.provider.storage())
+                    .map_err(|_| CoreError::Provider)?;
+            }
+            self.create_group_with_id(group_id)?;
+            let mut pending = self.add_members(conversation_id, key_package_bytes)?;
+            pending.reset_group = true;
+            return Ok(Some(pending));
+        }
         let missing = packages
             .iter()
-            .filter(|(_, device_id)| !existing_devices.contains(device_id))
-            .map(|(bytes, _)| *bytes)
+            .filter(|(_, device_id, _)| !member_keys.contains_key(device_id))
+            .map(|(bytes, _, _)| *bytes)
             .collect::<Vec<_>>();
         if missing.is_empty() {
             ensure_direct_group_ready(&self.verifier, &group, &self.local_binding.user_id)?;

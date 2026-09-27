@@ -226,7 +226,7 @@ impl DesktopCoreServices for WebServices {
     }
 
     fn now_ms(&self) -> Result<u64, CoreError> {
-        let now = js_sys::Date::now();
+        let now = wall_clock_ms();
         if !now.is_finite() || now <= 0.0 {
             return Err(CoreError::Provider);
         }
@@ -444,9 +444,9 @@ impl WebMessagingCore {
         // The browser rebuilds this in-memory core after reload. Use a
         // time-ordered revision so the server accepts the fresh pre-key
         // profile as a rotation instead of conflicting with revision 1.
-        let profile_revision = (js_sys::Date::now() as u64)
+        let profile_revision = (wall_clock_ms() as u64)
             .saturating_mul(1024)
-            .saturating_add((js_sys::Math::random() * 1024.0) as u64)
+            .saturating_add((random_unit() * 1024.0) as u64)
             .min(protocol::MAX_CURSOR)
             .max(1);
         let profile = generate_profile(device_id.to_owned(), profile_revision, &signer, &mut vault)
@@ -625,22 +625,7 @@ impl WebMessagingCore {
     }
 
     pub fn handle_server_frame(&mut self, frame: &[u8]) -> Result<(), JsValue> {
-        let mut transport = WebTransport::new();
-        let mut received = Vec::new();
-        let server_frame =
-            v1::ServerFrame::decode(frame).map_err(|_| js_error(CoreError::InvalidSync))?;
-        if let Some(v1::server_frame::Body::MlsBootstrap(bootstrap)) = server_frame.body {
-            self.handle_bootstrap(bootstrap).map_err(js_error)?;
-        } else {
-            self.core
-                .handle_server_frame(frame, &mut transport, false, &mut |message| {
-                    received.push(message)
-                })
-                .map_err(js_error)?;
-        }
-        self.outgoing.extend(transport.frames);
-        self.received.extend(received);
-        Ok(())
+        self.handle_server_frame_bytes(frame).map_err(js_error)
     }
 
     fn handle_bootstrap(&mut self, bootstrap: v1::MlsBootstrap) -> Result<(), CoreError> {
@@ -652,7 +637,12 @@ impl WebMessagingCore {
         {
             return Err(CoreError::Authentication);
         }
-        let binding = links_identity::parse_mls_basic_identity(&bootstrap.sender_mls_credential)
+        // Senders put the full TLS BasicCredential in the bootstrap, as the
+        // account service stores it. Unwrap it before parsing the identity.
+        let credential = Credential::tls_deserialize_exact(&bootstrap.sender_mls_credential)
+            .map_err(|_| CoreError::Authentication)?;
+        let basic = BasicCredential::try_from(credential).map_err(|_| CoreError::Authentication)?;
+        let binding = links_identity::parse_mls_basic_identity(basic.identity())
             .map_err(|_| CoreError::Authentication)?;
         let sender_public_key: [u8; 32] = bootstrap
             .sender_identity_public_key
@@ -796,4 +786,51 @@ fn encode_client_frame(body: v1::client_frame::Body) -> Result<Vec<u8>, CoreErro
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wall_clock_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn wall_clock_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as f64)
+        .unwrap_or(0.0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn random_unit() -> f64 {
+    js_sys::Math::random()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn random_unit() -> f64 {
+    f64::from(Uuid::new_v4().as_bytes()[0]) / 256.0
+}
+
+/// Native entry points so the Rust core can be exercised without a browser.
+impl WebMessagingCore {
+    pub fn handle_server_frame_bytes(&mut self, frame: &[u8]) -> Result<(), CoreError> {
+        let mut transport = WebTransport::new();
+        let mut received = Vec::new();
+        let server_frame = v1::ServerFrame::decode(frame).map_err(|_| CoreError::InvalidSync)?;
+        if let Some(v1::server_frame::Body::MlsBootstrap(bootstrap)) = server_frame.body {
+            self.handle_bootstrap(bootstrap)?;
+        } else {
+            self.core
+                .handle_server_frame(frame, &mut transport, false, &mut |message| {
+                    received.push(message)
+                })?;
+        }
+        self.outgoing.extend(transport.frames);
+        self.received.extend(received);
+        Ok(())
+    }
+
+    pub fn take_outgoing_frames(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.outgoing)
+    }
 }

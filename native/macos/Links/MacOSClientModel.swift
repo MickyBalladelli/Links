@@ -2237,6 +2237,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                         metadata: encrypted.metadata, receipt: receipt,
                         directory: directory, preKeyAPI: preKeyAPI)
                 } else {
+                    try await self.refreshDirectRecipient(conversation)
                     try messaging.sendFile(conversationID: conversation.mlsConversationID,
                                            recipientUserID: conversation.recipientUserID,
                                            metadata: encrypted.metadata, receipt: receipt)
@@ -2332,6 +2333,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                         directory: directory,
                         preKeyAPI: preKeyAPI)
                 } else {
+                    try await self.refreshDirectRecipient(conversation)
                     try messaging.sendImage(
                         conversationID: conversation.mlsConversationID,
                         recipientUserID: conversation.recipientUserID,
@@ -2389,6 +2391,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
                                               directory: directory,
                                               preKeyAPI: preKeyAPI)
         } else {
+            try await refreshDirectRecipient(conversation)
             try messaging.sendText(conversationID: conversation.mlsConversationID,
                                    recipientUserID: conversation.recipientUserID,
                                    text: text)
@@ -2434,44 +2437,67 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             return
         }
         guard prepareConversationForPendingSend(conversation) else { return }
-        guard let messaging else {
+        guard messaging != nil else {
             actionError = "Messaging host is not configured yet."
             return
         }
-        do {
-            try messaging.sendText(
-                conversationID: conversation.mlsConversationID,
-                recipientUserID: conversation.recipientUserID,
-                text: text)
-            pendingOutboxCount = messaging.pendingOutboxCount
-            conversations[index].messages.append(LinksMacOSMessage(
-                id: UUID(),
-                text: text,
-                isOutgoing: true,
-                sentAt: Date(),
-                senderDeviceID: nil))
-            composerText = ""
-            actionError = nil
-            persistLocalState()
-        } catch {
-            pendingOutboxCount = messaging.pendingOutboxCount
-            if pendingOutboxCount > 0 {
-                deliveryState = .offlineOutboxRetry(count: pendingOutboxCount)
-                connectionStatus = deliveryState.title
-                actionError = "Message queued in the encrypted outbox for retry."
-            } else if messaging.state == .connecting
-                        || messaging.state == .reconnecting
-                        || messaging.state == .dependencyOutage {
-                deliveryState = .reconnecting
-                connectionStatus = deliveryState.title
-                actionError = "Offline. Message stays in the composer until reconnect."
-            } else {
-                deliveryState = .sendFailed
-                connectionStatus = deliveryState.title
-                actionError = "Message was not sent. Check the connection."
+        composerText = ""
+        let targetConversationID = conversation.id
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.refreshDirectRecipient(conversation)
+                guard let messaging = self.messaging else {
+                    throw IOSMessagingError.notConnected
+                }
+                try messaging.sendText(
+                    conversationID: conversation.mlsConversationID,
+                    recipientUserID: conversation.recipientUserID,
+                    text: text)
+                self.pendingOutboxCount = messaging.pendingOutboxCount
+                if let index = self.conversations.firstIndex(where: { $0.id == targetConversationID }) {
+                    self.conversations[index].messages.append(LinksMacOSMessage(
+                        id: UUID(),
+                        text: text,
+                        isOutgoing: true,
+                        sentAt: Date(),
+                        senderDeviceID: nil))
+                }
+                self.actionError = nil
+                self.persistLocalState()
+            } catch {
+                if self.composerText.isEmpty { self.composerText = text }
+                self.pendingOutboxCount = self.messaging?.pendingOutboxCount ?? 0
+                if self.pendingOutboxCount > 0 {
+                    self.deliveryState = .offlineOutboxRetry(count: self.pendingOutboxCount)
+                    self.connectionStatus = self.deliveryState.title
+                    self.actionError = "Message queued in the encrypted outbox for retry."
+                } else if self.messaging?.state == .connecting
+                            || self.messaging?.state == .reconnecting
+                            || self.messaging?.state == .dependencyOutage {
+                    self.deliveryState = .reconnecting
+                    self.connectionStatus = self.deliveryState.title
+                    self.actionError = "Offline. Message stays in the composer until reconnect."
+                } else {
+                    self.actionError = "Message not sent. Check the connection and try again."
+                }
             }
-            publishProfileStatus()
         }
+    }
+
+    /// Fetch the recipient's current KeyPackages before a direct send. A browser
+    /// reload publishes a new package, and the previous group can no longer be
+    /// opened there until this device sends a fresh welcome.
+    private func refreshDirectRecipient(_ conversation: LinksMacOSConversation) async throws {
+        guard !conversation.isGroup,
+              let messaging, let directChatDirectory, let preKeyAPI else {
+            return
+        }
+        try await messaging.initializeFirstDirectConversation(
+            conversationID: conversation.mlsConversationID,
+            recipientUserID: conversation.recipientUserID,
+            directory: directChatDirectory,
+            preKeyAPI: preKeyAPI)
     }
 
     nonisolated func directMessaging(_ messaging: IOSDirectMessaging,

@@ -19,3 +19,6 @@ prost.workspace = true
 serde_json = "1"
 uuid = { workspace = true, features = ["v4"] }
 zeroize.workspace = true
+
+[dev-dependencies]
+links-web-client = { path = "../web-client" }

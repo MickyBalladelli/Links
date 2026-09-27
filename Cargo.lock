@@ -1834,6 +1834,7 @@ dependencies = [
  "links-desktop-client",
  "links-identity",
  "links-protocol",
+ "links-web-client",
  "openmls",
  "openmls_rust_crypto",
  "openmls_traits",

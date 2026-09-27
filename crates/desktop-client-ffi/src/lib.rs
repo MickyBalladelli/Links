@@ -858,6 +858,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
             self.client.mls_mut().ensure_direct_group(conversation_id, &packages)?
         };
         let Some(pending) = pending else { return Ok(()) };
+        let reset_group = reset_group || pending.reset_group;
         let welcome = pending.welcome.as_ref().ok_or(CoreError::Provider)?;
         let mut bootstraps = Vec::with_capacity(records.len());
         for record in records {
@@ -3005,5 +3006,170 @@ mod group_tests {
             links_desktop_core_destroy(alice.core);
             links_desktop_core_destroy(bob.core);
         }
+    }
+
+    struct Browser {
+        core: links_web_client::WebMessagingCore,
+        user_id: String,
+        device_id: String,
+        public_key: [u8; 32],
+        credential: Vec<u8>,
+        bundle: Vec<u8>,
+        key_package: Vec<u8>,
+        cursor: u64,
+    }
+
+    impl Browser {
+        /// One browser session. A reload builds a new session from the same seed.
+        fn open(seed: &[u8; 32], user: Uuid, device: Uuid) -> Self {
+            let identity = IdentitySeed::from_vault(zeroize::Zeroizing::new(*seed));
+            let public_key = identity.public_key();
+            let credential = links_identity::DeviceBinding {
+                user_id: user,
+                device_id: device,
+                mls_node_id: Uuid::from_bytes([7; 16]),
+                public_key,
+            }
+            .mls_credential()
+            .unwrap();
+            let user_id = user.to_string();
+            let device_id = device.to_string();
+            let mut core = links_web_client::WebMessagingCore::from_identity_seed(
+                &user_id, &device_id, &credential, seed,
+            )
+            .unwrap_or_else(|_| panic!("web core"));
+            let upload = core.prekey_upload(2, 2).unwrap_or_else(|_| panic!("prekeys"));
+            let upload = v1::PreKeyUpload::decode(upload.as_slice()).unwrap();
+            let bundle = v1::PreKeyBundle {
+                protocol_version: protocol::VERSION,
+                device_id: device_id.clone(),
+                profile_revision: upload.profile_revision,
+                profile: upload.profile.clone(),
+                one_time_curve_prekey: upload.one_time_curve_prekeys.first().cloned(),
+                kem_prekey: upload.one_time_kem_prekeys.first().cloned(),
+            }
+            .encode_to_vec();
+            let key_package = core.key_package().unwrap_or_else(|_| panic!("key package"));
+            Self { core, user_id, device_id, public_key, credential, bundle, key_package, cursor: 0 }
+        }
+
+        fn texts(&mut self) -> Vec<String> {
+            let messages: Vec<serde_json::Value> =
+                serde_json::from_str(&self.core.take_messages()).unwrap();
+            messages.iter().map(|message| message["text"].as_str().unwrap().to_owned()).collect()
+        }
+    }
+
+    fn know_browser(mac: &Device, browser: &Browser) {
+        let status = unsafe {
+            links_desktop_core_set_recipient(
+                mac.core,
+                browser.user_id.as_ptr(), browser.user_id.len(),
+                browser.device_id.as_ptr(), browser.device_id.len(),
+                browser.public_key.as_ptr(), browser.public_key.len(),
+                browser.bundle.as_ptr(), browser.bundle.len(),
+                browser.credential.as_ptr(), browser.credential.len(),
+                browser.key_package.as_ptr(), browser.key_package.len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK);
+    }
+
+    /// What the gateway does: bootstraps first, then the mailbox as one batch.
+    fn route_to_browser(mac: &mut Device, browser: &mut Browser) {
+        let mut envelopes = Vec::new();
+        for frame in mac.host.sent.drain(..) {
+            let frame = v1::ClientFrame::decode(frame.as_slice()).unwrap();
+            match frame.body {
+                Some(v1::client_frame::Body::MlsBootstrap(bootstrap))
+                    if bootstrap.recipient_device_id == browser.device_id =>
+                {
+                    let server = v1::ServerFrame {
+                        request_id: Uuid::new_v4().to_string(),
+                        body: Some(v1::server_frame::Body::MlsBootstrap(bootstrap)),
+                    }
+                    .encode_to_vec();
+                    browser
+                        .core
+                        .handle_server_frame_bytes(&server)
+                        .unwrap_or_else(|error| panic!("browser bootstrap: {error:?}"));
+                }
+                Some(v1::client_frame::Body::Send(envelope))
+                    if envelope.recipient_device_id == browser.device_id =>
+                {
+                    envelopes.push(envelope)
+                }
+                _ => {}
+            }
+        }
+        if envelopes.is_empty() {
+            return;
+        }
+        let mut cursor = browser.cursor;
+        let items = envelopes
+            .into_iter()
+            .map(|envelope| {
+                cursor += 1;
+                v1::QueueItem { cursor, entry: Some(v1::queue_item::Entry::Envelope(envelope)) }
+            })
+            .collect();
+        let server = v1::ServerFrame {
+            request_id: Uuid::new_v4().to_string(),
+            body: Some(v1::server_frame::Body::Batch(v1::SyncBatch {
+                recipient_device_id: browser.device_id.clone(),
+                after_cursor: browser.cursor,
+                next_cursor: cursor,
+                high_watermark: cursor,
+                items,
+            })),
+        }
+        .encode_to_vec();
+        browser
+            .core
+            .handle_server_frame_bytes(&server)
+            .unwrap_or_else(|error| panic!("browser batch: {error:?}"));
+        browser.cursor = cursor;
+    }
+
+    fn mac_send(mac: &Device, conversation: &str, browser: &Browser, text: &str) {
+        let status = unsafe {
+            links_desktop_core_initialize_direct(
+                mac.core,
+                conversation.as_ptr(), conversation.len(),
+                browser.user_id.as_ptr(), browser.user_id.len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK, "initialize direct");
+        let status = unsafe {
+            links_desktop_core_send_text(
+                mac.core,
+                conversation.as_ptr(), conversation.len(),
+                browser.user_id.as_ptr(), browser.user_id.len(),
+                text.as_ptr(), text.len(),
+            )
+        };
+        assert_eq!(status, LINKS_DESKTOP_OK, "send text");
+    }
+
+    #[test]
+    fn mac_to_browser_direct_text_survives_browser_reload() {
+        let mut mac = Device::new();
+        let seed = *IdentitySeed::generate().unwrap().expose_for_wrapping();
+        let (user, device) = (random_uuid(), random_uuid());
+        let conversation = Uuid::new_v4().to_string();
+
+        let mut browser = Browser::open(&seed, user, device);
+        know_browser(&mac, &browser);
+        mac_send(&mac, &conversation, &browser, "first");
+        route_to_browser(&mut mac, &mut browser);
+        assert_eq!(browser.texts(), vec!["first".to_owned()]);
+
+        let mut reloaded = Browser::open(&seed, user, device);
+        know_browser(&mac, &reloaded);
+        mac_send(&mac, &conversation, &reloaded, "after reload");
+        route_to_browser(&mut mac, &mut reloaded);
+        assert_eq!(reloaded.texts(), vec!["after reload".to_owned()]);
+
+        unsafe { links_desktop_core_destroy(mac.core) };
     }
 }

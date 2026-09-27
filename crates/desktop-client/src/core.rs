@@ -185,7 +185,7 @@ where
                 device_id: self.core.device_id().to_owned(),
                 device_access_token: access_token.as_bytes().to_vec(),
                 last_seen_cursor,
-                supported_sync_compression: vec![protocol::SYNC_COMPRESSION_ZSTD_DICTIONARY_V1],
+                supported_sync_compression: supported_sync_compression(),
             })),
         };
         protocol::validate_id(&frame.request_id)?;
@@ -322,6 +322,15 @@ fn decode_server_frame(bytes: &[u8]) -> Result<v1::ServerFrame, CoreError> {
         }
     }
     Ok(frame)
+}
+
+/// The WASM build has no zstd decoder, so it must receive plain batches.
+fn supported_sync_compression() -> Vec<i32> {
+    if cfg!(target_arch = "wasm32") {
+        Vec::new()
+    } else {
+        vec![protocol::SYNC_COMPRESSION_ZSTD_DICTIONARY_V1]
+    }
 }
 
 fn validate_frame(frame: &[u8]) -> Result<Vec<u8>, CoreError> {

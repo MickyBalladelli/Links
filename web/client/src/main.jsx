@@ -524,21 +524,31 @@ function appendIncomingText(message) {
   let conversation = conversations.value.find(item => item.id === message.conversationID || item.mlsConversationID === message.conversationID)
   if (!conversation && isCanonicalUUID(message.senderUserID)) {
     const contact = contacts.value.find(item => item.userID === message.senderUserID)
-    conversation = {
-      id: message.conversationID,
-      mlsConversationID: message.conversationID,
-      title: contact ? `@${contact.handle}` : 'New conversation',
-      displayName: contact?.displayName,
-      recipientUserID: message.senderUserID,
-      unreadCount: 0,
-      messages: []
+    const existing = conversations.value.find(item => !item.isGroup && item.recipientUserID === message.senderUserID)
+    if (existing) {
+      conversations.value = conversations.value.map(item => item === existing
+        ? { ...item, mlsConversationID: message.conversationID }
+        : item)
+      conversation = conversations.value.find(item => !item.isGroup && item.recipientUserID === message.senderUserID)
+    } else {
+      conversation = {
+        id: message.conversationID,
+        mlsConversationID: message.conversationID,
+        title: contact ? `@${contact.handle}` : 'New conversation',
+        displayName: contact?.displayName,
+        recipientUserID: message.senderUserID,
+        unreadCount: 0,
+        messages: []
+      }
+      conversations.value = [conversation, ...conversations.value]
     }
-    conversations.value = [conversation, ...conversations.value]
   }
   if (!conversation) return
+  const visible = selectedConversationID.value === conversation.id
   conversations.value = conversations.value.map(item => item === conversation
     ? {
         ...item,
+        unreadCount: visible ? 0 : Number(item.unreadCount || 0) + 1,
         messages: [...item.messages, {
           id: crypto.randomUUID(),
           text: message.text,
