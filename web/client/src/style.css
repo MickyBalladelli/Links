@@ -375,6 +375,20 @@ button, input, textarea { font: inherit; }
 .popup-form, .profile-form { display: grid; gap: 9px; }
 .popup-form label, .profile-form label { margin-top: 4px; color: var(--links-text); font-size: .75rem; font-weight: 700; }
 .popup-form p { margin: 2px 0 3px; color: var(--links-muted); font-size: .72rem; line-height: 1.45; }
+.account-devices { padding: 11px; display: grid; gap: 9px; background: color-mix(in srgb, var(--links-text) 3%, transparent); border: 1px solid var(--links-border); border-radius: 10px; }
+.account-devices-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.account-devices-heading h3 { margin: 0; color: var(--links-text); font-size: .8rem; }
+.account-devices-heading p { margin: 3px 0 0; color: var(--links-muted); font-size: .68rem; line-height: 1.35; }
+.account-devices-heading .prism-button { flex: 0 0 auto; }
+.account-devices-list { max-height: 190px; display: grid; gap: 5px; overflow-y: auto; }
+.account-device-row { min-width: 0; padding: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: color-mix(in srgb, var(--links-surface) 72%, transparent); border: 1px solid var(--links-border); border-radius: 8px; }
+.account-device-row.is-revoked { opacity: .66; }
+.account-device-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.account-device-copy strong { color: var(--links-text); font-size: .74rem; }
+.account-device-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--links-muted); font-size: .64rem; }
+.account-device-row .prism-badge { flex: 0 0 auto; }
+.account-device-row .prism-button { flex: 0 0 auto; }
+.account-devices-empty { margin: 0; color: var(--links-muted); font-size: .7rem; }
 .popup-actions { width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .popup-actions.is-split { justify-content: space-between; }
 .popup-actions.is-split > .popup-actions { width: auto; }

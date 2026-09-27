@@ -51,6 +51,7 @@ pub fn router_with_trusted_proxies(
             "/v1/account/display-name",
             get(current_display_name).put(change_display_name),
         )
+        .route("/v1/account/devices", get(account_devices))
         .route("/v1/auth/logout", post(logout))
         .route("/v1/auth/sessions/others", delete(revoke_other_sessions))
         .route("/v1/auth/me", get(me))
@@ -568,6 +569,12 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AuthError> {
     Ok(Json(auth.authenticate(bearer(&headers)?).await?))
+}
+async fn account_devices(
+    State(auth): State<Arc<AccountAuth>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AuthError> {
+    Ok(Json(auth.account_devices(bearer(&headers)?).await?))
 }
 async fn change_username(
     State(auth): State<Arc<AccountAuth>>,

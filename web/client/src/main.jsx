@@ -22,6 +22,7 @@ import {
   prismTheme
 } from '@mickyballadelli/prism'
 import './style.css'
+import { AccountDevices } from './accountDevices.jsx'
 import { clearAttachments, readAttachment, removeAttachment, saveAttachment } from './attachmentStore.js'
 import { createBrowserIdentity, loadBrowserIdentity, saveBrowserIdentity } from './authStore.js'
 import { createWebMessagingSession } from './messagingRuntime.js'
@@ -140,6 +141,10 @@ const authMode = signal('login')
 const authHandle = signal('')
 const authError = signal('')
 const isAuthenticating = signal(false)
+const accountDevices = signal([])
+const accountDevicesError = signal('')
+const isLoadingAccountDevices = signal(false)
+const revokingDeviceID = signal('')
 const profilePicture = signal('')
 const profilePictureSrc = signal('')
 const profilePictureError = signal('')
@@ -375,6 +380,9 @@ function clearVisibleAccountState() {
   selectedConversationID.value = null
   composerText.value = ''
   searchQuery.value = ''
+  accountDevices.value = []
+  accountDevicesError.value = ''
+  revokingDeviceID.value = ''
   profileDisplayName.value = ''
   profileDisplayNameDraft.value = ''
   if (profilePictureObjectURL) URL.revokeObjectURL(profilePictureObjectURL)
@@ -1051,7 +1059,7 @@ function openLogoutConfirmation() {
 function cancelLogoutConfirmation() {
   if (isLoggingOut.value) return
   logoutConfirmOpen.value = false
-  requestAnimationFrame(() => { profileOpen.value = true })
+  requestAnimationFrame(() => { profileOpen.value = true; refreshAccountDevices() })
 }
 
 async function logoutAccount() {
@@ -1231,6 +1239,99 @@ async function refreshProfileDisplayName() {
     profileDisplayNameDraft.value = savedLocalName
   } catch {
     // Keep the last saved profile name when the account service is offline.
+  }
+}
+
+async function refreshAccountDevices() {
+  const token = accessToken.value.trim()
+  if (!token || isLoadingAccountDevices.value) {
+    if (!token) accountDevices.value = []
+    return
+  }
+  const requestedToken = token
+  isLoadingAccountDevices.value = true
+  accountDevicesError.value = ''
+  try {
+    const response = await fetch(`${authBase()}/v1/account/devices`, {
+      headers: { ...authHeaders(), Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (response.status === 401) throw new Error('Sign in again to view your devices.')
+    const result = response.ok
+      ? await response.json()
+      : await loadDirectoryAccountDevices(requestedToken)
+    if (accessToken.value.trim() !== requestedToken) return
+    if (!Array.isArray(result.devices)) throw new Error('The account service returned an invalid device list.')
+    accountDevices.value = result.devices.filter(device => device && typeof device.device_id === 'string')
+    accountDevicesError.value = ''
+  } catch (error) {
+    if (accessToken.value.trim() === requestedToken) accountDevicesError.value = error.message || 'Could not load the account devices.'
+  } finally {
+    isLoadingAccountDevices.value = false
+  }
+}
+
+async function loadDirectoryAccountDevices(token) {
+  const meResponse = await fetch(`${authBase()}/v1/auth/me`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+  if (meResponse.status === 401) throw new Error('Sign in again to view your devices.')
+  if (!meResponse.ok) throw new Error('Could not load the account devices.')
+  const account = await meResponse.json()
+  if (typeof account.user_id !== 'string' || typeof account.device_id !== 'string') {
+    throw new Error('The account service returned an invalid account.')
+  }
+  const directoryResponse = await fetch(`${authBase()}/v1/directory/users/${encodeURIComponent(account.user_id)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error'
+  })
+  if (directoryResponse.status === 401) throw new Error('Sign in again to view your devices.')
+  if (!directoryResponse.ok) throw new Error('Could not load the account devices.')
+  const directory = await directoryResponse.json()
+  return {
+    devices: Array.isArray(directory.devices)
+      ? directory.devices.map(device => ({
+          device_id: device.device_id,
+          registered_at: null,
+          revoked_at: null,
+          delegation_role: device.delegation_role,
+          current: device.device_id === account.device_id
+        }))
+      : []
+  }
+}
+
+async function revokeAccountDevice(device) {
+  if (!device?.device_id || device.current || revokingDeviceID.value) return
+  const shortID = device.device_id.slice(0, 8)
+  if (!window.confirm(`Revoke device ${shortID}? It will lose access to this account.`)) return
+  const token = accessToken.value.trim()
+  if (!token) return
+  revokingDeviceID.value = device.device_id
+  accountDevicesError.value = ''
+  try {
+    const response = await fetch(`${authBase()}/v1/devices/${encodeURIComponent(device.device_id)}`, {
+      method: 'DELETE',
+      headers: { ...authHeaders(), Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error'
+    })
+    if (response.status === 401) throw new Error('Sign in again before managing devices.')
+    if (!response.ok) throw new Error('Could not revoke that device.')
+    await refreshAccountDevices()
+    notice.value = `Device ${shortID} revoked.`
+  } catch (error) {
+    accountDevicesError.value = error.message || 'Could not revoke that device.'
+  } finally {
+    revokingDeviceID.value = ''
   }
 }
 
@@ -1831,7 +1932,7 @@ function Sidebar() {
         <div class="contact-list"><ContactList /></div>
       </section>
 
-      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileDisplayNameDraft.value = profileDisplayName.value; profileDisplayNameError.value = ''; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername(); refreshProfileDisplayName(); refreshSavedContactNames() }}>
+      <button type="button" class="profile-card" onClick={() => { profileHandleDraft.value = profileHandle.value; profileDisplayNameDraft.value = profileDisplayName.value; profileDisplayNameError.value = ''; profileUsernameError.value = ''; profileOpen.value = true; refreshProfileUsername(); refreshProfileDisplayName(); refreshSavedContactNames(); refreshAccountDevices() }}>
         <ProfilePicture />
         <span class="profile-copy">
           <strong>{computed(() => profileDisplayName.value || `@${normalizeHandle(profileHandle.value) || 'profile'}`)}</strong>
@@ -2176,8 +2277,6 @@ function AuthenticationPopup() {
         </div>
         <label for="auth-handle">Username</label>
         <TextField id="auth-handle" value={authHandle} placeholder="alice" autocomplete="username" />
-        <label for="session-auth-base">Account service</label>
-        <TextField id="session-auth-base" value={authBaseURL} placeholder="/links-api" autocomplete="off" />
         <p>{computed(() => authMode.value === 'registration'
           ? 'Creates a username account and a browser-specific signing identity for encrypted chat.'
           : 'Login works for an account identity previously created in this browser. Other devices must be paired first.')}</p>
@@ -2231,6 +2330,16 @@ function ProfilePopup() {
           </div>
           {computed(() => profilePictureError.value ? <Alert tone="error">{profilePictureError}</Alert> : null)}
         </div>
+        {computed(() => accessToken.value
+          ? <AccountDevices
+              devices={accountDevices}
+              loading={isLoadingAccountDevices}
+              error={accountDevicesError}
+              revokingDeviceID={revokingDeviceID}
+              onRefresh={refreshAccountDevices}
+              onRevoke={revokeAccountDevice}
+            />
+          : null)}
         <label for="profile-display-name">Display name</label>
         <TextField id="profile-display-name" value={profileDisplayNameDraft} placeholder="Name" autocomplete="name" />
         <p>Shown to people in your contacts and conversations.</p>
@@ -2239,11 +2348,7 @@ function ProfilePopup() {
         <TextField id="profile-handle" value={profileHandleDraft} placeholder="username" autocomplete="username" />
         <p>Use 3–32 lowercase letters, numbers, or underscores. Your old username becomes available to others.</p>
         {computed(() => profileUsernameError.value ? <Alert tone="error">{profileUsernameError}</Alert> : null)}
-        <label for="auth-base">Account service</label>
-        <TextField id="auth-base" value={authBaseURL} placeholder="/links-api" autocomplete="off" />
-        <label for="access-token">Bearer token</label>
-        <TextField id="access-token" value={accessToken} type="password" placeholder="Required to change names" autocomplete="off" />
-        <div class="privacy-copy"><LockIcon size="0.9rem" /><span>The token stays in memory and is never written to browser storage.</span></div>
+        <div class="privacy-copy"><LockIcon size="0.9rem" /><span>Secure account session managed automatically by Links.</span></div>
       </div>
     </Popup>
   )

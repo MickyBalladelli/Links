@@ -202,6 +202,21 @@ pub struct DisplayNameResponse {
 }
 
 #[derive(Serialize)]
+pub struct AccountDeviceResponse {
+    pub device_id: Uuid,
+    pub registered_at: String,
+    pub revoked_at: Option<String>,
+    pub delegation_role: String,
+    pub current: bool,
+}
+
+#[derive(Serialize)]
+pub struct AccountDevicesResponse {
+    pub devices: Vec<AccountDeviceResponse>,
+    pub current_device_id: Uuid,
+}
+
+#[derive(Serialize)]
 pub struct UsernameDirectoryResponse {
     pub handle: String,
     pub user_id: Uuid,
@@ -1683,6 +1698,42 @@ impl AccountAuth {
         Ok(DisplayNameResponse {
             display_name: row.try_get("display_name")?,
             display_name_set: row.try_get("display_name_set")?,
+        })
+    }
+
+    /// Return every device registered to the authenticated account, including
+    /// revoked devices so the account owner has a complete device history.
+    pub async fn account_devices(
+        &self,
+        token: &str,
+    ) -> Result<AccountDevicesResponse, AuthError> {
+        let account = self.authenticate(token).await?;
+        let rows = sqlx::query(
+            "SELECT device_id,registered_at::text AS registered_at,
+                    revoked_at::text AS revoked_at,delegation_role
+             FROM devices
+             WHERE user_id=$1
+             ORDER BY registered_at DESC, device_id",
+        )
+        .bind(account.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let devices = rows
+            .into_iter()
+            .map(|row| {
+                let device_id: Uuid = row.get("device_id");
+                AccountDeviceResponse {
+                    current: device_id == account.device_id,
+                    device_id,
+                    registered_at: row.get("registered_at"),
+                    revoked_at: row.get("revoked_at"),
+                    delegation_role: row.get("delegation_role"),
+                }
+            })
+            .collect();
+        Ok(AccountDevicesResponse {
+            devices,
+            current_device_id: account.device_id,
         })
     }
 
