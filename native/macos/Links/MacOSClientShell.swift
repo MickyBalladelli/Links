@@ -1712,6 +1712,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
             guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
             let modifiers = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
             if modifiers.contains(.shift) { return false }
+            textView.keepsCharacterPaletteOpen = false
             parent.onSend()
             return true
         }
@@ -1721,8 +1722,19 @@ private struct ComposerTextEditor: NSViewRepresentable {
 private final class ImagePastingTextView: NSTextView {
     var onPasteImage: ((NSImage) -> Void)?
     var onPasteFile: ((URL) -> Void)?
+    var keepsCharacterPaletteOpen = false
+
+    override func didChangeText() {
+        super.didChangeText()
+        guard keepsCharacterPaletteOpen else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.keepsCharacterPaletteOpen == true else { return }
+            NSApp.orderFrontCharacterPalette(nil)
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
+        keepsCharacterPaletteOpen = false
         window?.makeFirstResponder(self)
         super.mouseDown(with: event)
     }
@@ -1865,6 +1877,7 @@ private struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 Button {
                     composerTextView?.window?.makeFirstResponder(composerTextView)
+                    composerTextView?.keepsCharacterPaletteOpen = true
                     NSApp.orderFrontCharacterPalette(nil)
                 } label: {
                     Image(systemName: "face.smiling")
