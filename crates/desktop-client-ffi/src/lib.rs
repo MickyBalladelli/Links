@@ -1459,7 +1459,7 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
     }
 
     /// Open one mailbox envelope. Group handshakes are applied here; failures
-    /// surface as Authentication so the caller skips the item.
+    /// surface as Authentication so the caller can skip the stale item.
     fn open_mailbox_envelope(&mut self, envelope: &v1::Envelope) -> Result<MailboxItem, CoreError> {
         let raw = self.client.open_envelope_raw(envelope, now_ms())?;
         match mls_handshake_kind(raw.as_bytes()).map_err(|_| CoreError::Authentication)? {
@@ -1574,12 +1574,11 @@ fn send_frame(&self, frame: &[u8]) -> Result<(), CoreError> {
                             _ => {}
                         }
                     }
-                    // The gateway delivers every stored welcome before the
-                    // mailbox, so an envelope that still cannot be opened
-                    // never will. Skipping it keeps later messages flowing.
                     Err(CoreError::Authentication) => {
                         let storage = self.client.mls_mut().provider_mut().storage();
                         let mut values = storage.values.write().map_err(|_| CoreError::Provider)?;
+                        // A stale handshake or envelope must not poison the
+                        // MLS state for later mailbox items.
                         *values = storage_backup;
                     }
                     Err(error) => return Err(error),
@@ -1898,8 +1897,8 @@ pub unsafe extern "C" fn links_desktop_core_retry_outbox(core: *mut LinksDesktop
     boundary(|| {
         if core.is_null() { return LINKS_DESKTOP_INVALID; }
         let result = (|| -> Result<(), CoreError> {
-            let mut frames = unsafe { (&*core).outbox.clone() };
-            frames.extend(unsafe { (&*core).bootstrap_outbox.clone() });
+            let mut frames = unsafe { (&*core).bootstrap_outbox.clone() };
+            frames.extend(unsafe { (&*core).outbox.clone() });
             for frame in frames { unsafe { (&*core).send_frame(&frame)?; } }
             Ok(())
         })();

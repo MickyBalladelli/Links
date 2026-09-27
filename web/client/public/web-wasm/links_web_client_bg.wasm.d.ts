@@ -57,6 +57,7 @@ export const webmessagingcore_pending_outgoing_count: (a: number) => number;
 export const webmessagingcore_prekey_upload: (a: number, b: number, c: number) => [number, number, number, number];
 export const webmessagingcore_profile_upload: (a: number) => [number, number];
 export const webmessagingcore_public_key: (a: number) => [number, number];
+export const webmessagingcore_retry_outbox: (a: number) => void;
 export const webmessagingcore_send_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];
 export const webmessagingcore_send_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const webmessagingcore_send_text_to_self: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];

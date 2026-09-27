@@ -43,6 +43,13 @@ let isRestoringSession = false
 let autoRestoreTimer = null
 let isRepairingBrowserIdentity = false
 let webMessagingRetryTimer = null
+let webSendQueue = Promise.resolve()
+
+function enqueueWebSend(operation) {
+  const next = webSendQueue.then(operation, operation)
+  webSendQueue = next.catch(() => {})
+  return next
+}
 
 function setAutoRestoreDisabled(disabled) {
   try {
@@ -1652,7 +1659,7 @@ async function sendPreviewMessage(event) {
   let sendError = ''
   const canSendFile = attachment?.kind === 'file'
   const canSendText = text && !attachment
-  if ((canSendFile || canSendText) && webMessagingSession?.isConnected &&
+  if ((canSendFile || canSendText) && webMessagingSession &&
       selected?.recipientUserID) {
     let networkConversationID = browserSessionConversationIDs.get(id)
     if (!networkConversationID) {
@@ -1664,6 +1671,7 @@ async function sendPreviewMessage(event) {
     }
     const sendNetworkPayload = async () => {
       const session = webMessagingSession
+      await session?.waitUntilConnected?.(15_000)
       if (!session?.isConnected) throw new Error('connection unavailable.')
       await session.refreshRecipient?.(selected.recipientUserID)
       if (attachment && attachment.kind === 'file') {
@@ -1680,13 +1688,13 @@ async function sendPreviewMessage(event) {
       }
     }
     try {
-      await sendNetworkPayload()
+      await enqueueWebSend(sendNetworkPayload)
       sentOverNetwork = true
     } catch (error) {
       if (error?.status === 401) {
         try {
           await renewBrowserSession()
-          await sendNetworkPayload()
+          await enqueueWebSend(sendNetworkPayload)
           sentOverNetwork = true
         } catch (renewError) {
           sendError = `Encrypted send failed: ${renewError.message || 'sign-in expired.'}`

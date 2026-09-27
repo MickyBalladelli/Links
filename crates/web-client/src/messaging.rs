@@ -344,6 +344,11 @@ impl DesktopCoreServices for WebServices {
                 .as_deref()
                 != Some(envelope_id)
         });
+        self.bootstrap_outbox.retain(|frame| {
+            v1::ClientFrame::decode(frame.as_slice())
+                .map(|frame| frame.request_id != envelope_id)
+                .unwrap_or(true)
+        });
         Ok(())
     }
 
@@ -767,6 +772,20 @@ impl WebMessagingCore {
         self.outgoing.len()
             + self.core.host().services().outbox.len()
             + self.core.host().services().bootstrap_outbox.len()
+    }
+
+    /// Requeue every frame that was persisted before it was put on the
+    /// socket. The gateway accepts duplicate envelope IDs idempotently, so a
+    /// reconnect can safely resend frames whose Accepted response was lost.
+    pub fn retry_outbox(&mut self) {
+        let services = self.core.host().services();
+        let mut pending = services.bootstrap_outbox.clone();
+        pending.extend(services.outbox.iter().cloned());
+        for frame in pending {
+            if !self.outgoing.iter().any(|queued| queued == &frame) {
+                self.outgoing.push(frame);
+            }
+        }
     }
 }
 

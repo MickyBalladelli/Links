@@ -802,6 +802,14 @@ export class WebMessagingCore {
         return v1;
     }
     /**
+     * Requeue every frame that was persisted before it was put on the
+     * socket. The gateway accepts duplicate envelope IDs idempotently, so a
+     * reconnect can safely resend frames whose Accepted response was lost.
+     */
+    retry_outbox() {
+        wasm.webmessagingcore_retry_outbox(this.__wbg_ptr);
+    }
+    /**
      * @param {string} conversation_id
      * @param {string} recipient_user_id
      * @param {string} attachment_id

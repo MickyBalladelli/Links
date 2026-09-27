@@ -135,6 +135,12 @@ export class WebMessagingCore {
     prekey_upload(curve_count: number, kem_count: number): Uint8Array;
     profile_upload(): Uint8Array;
     public_key(): Uint8Array;
+    /**
+     * Requeue every frame that was persisted before it was put on the
+     * socket. The gateway accepts duplicate envelope IDs idempotently, so a
+     * reconnect can safely resend frames whose Accepted response was lost.
+     */
+    retry_outbox(): void;
     send_file(conversation_id: string, recipient_user_id: string, attachment_id: string, mime_type: string, file_name: string, ciphertext_size_bytes: string, content_key: Uint8Array, nonce: Uint8Array, ciphertext_sha256: Uint8Array): void;
     send_text(conversation_id: string, recipient_user_id: string, text: string): void;
     send_text_to_self(conversation_id: string, recipient_user_id: string, text: string): void;
@@ -264,6 +270,7 @@ export interface InitOutput {
     readonly webmessagingcore_prekey_upload: (a: number, b: number, c: number) => [number, number, number, number];
     readonly webmessagingcore_profile_upload: (a: number) => [number, number];
     readonly webmessagingcore_public_key: (a: number) => [number, number];
+    readonly webmessagingcore_retry_outbox: (a: number) => void;
     readonly webmessagingcore_send_file: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];
     readonly webmessagingcore_send_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly webmessagingcore_send_text_to_self: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];

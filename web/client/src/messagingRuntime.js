@@ -93,6 +93,7 @@ export async function createWebMessagingSession({
     start: () => session.start(),
     stop: () => session.stop(),
     shutdown: () => session.shutdown(),
+    waitUntilConnected: timeoutMs => session.waitUntilConnected(timeoutMs),
     sendText: (conversationID, recipientUserID, text) => session.sendText(conversationID, recipientUserID, text),
     sendFile: async (conversationID, recipientUserID, file) => {
       const encrypted = await files.encrypt(file.blob, file.name, file.mimeType)

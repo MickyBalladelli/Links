@@ -452,16 +452,14 @@ impl<S> DesktopCoreHostAdapter<S> {
         let mut items = Vec::with_capacity(batch.items.len());
         let mut rendered = Vec::new();
         let now_ms = self.services.now_ms()?;
-        for item in batch.items {
+        for item in &batch.items {
             let item_cursor = item.cursor;
-            match item.entry.ok_or(CoreError::InvalidSync)? {
+            match item.entry.as_ref().ok_or(CoreError::InvalidSync)? {
                 v1::queue_item::Entry::Envelope(envelope) => {
                     let message = match core.open_envelope(&envelope, now_ms) {
                         Ok(message) => message,
-                        // The gateway delivers every stored welcome before the
-                        // mailbox, so an envelope that still cannot be opened
-                        // never will. Skipping it keeps the connection up and
-                        // lets later messages through.
+                        // A stale handshake or envelope must not poison later
+                        // mailbox items.
                         Err(CoreError::Authentication) => continue,
                         Err(error) => return Err(error),
                     };

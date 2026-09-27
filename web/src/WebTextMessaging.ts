@@ -56,6 +56,8 @@ export interface WebMessagingCore extends WebCoreTransport {
     fullSync: boolean,
     onTextMessage: (message: WebReceivedTextMessage) => void
   ): WebCoreFrameResult
+  /** Requeue durable sends after the authenticated socket reconnects. */
+  retryPending?(transport: WebCoreTransport): void
   /** Persist the outbox record before reporting transport success. */
   sendText(
     conversationID: string,
@@ -157,6 +159,32 @@ export class WebTextMessaging implements WebCoreTransport {
     return this.currentState === 'ready' && this.manager?.isConnected === true
   }
 
+  waitUntilConnected(timeoutMs = 15_000): Promise<void> {
+    if (this.isConnected) return Promise.resolve()
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.floor(timeoutMs)
+      : 15_000
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now()
+      let deadline: ReturnType<typeof setTimeout>
+      const interval = setInterval(() => {
+        if (this.isConnected) {
+          clearInterval(interval)
+          clearTimeout(deadline)
+          resolve()
+        } else if (this.currentState === 'stopped' || Date.now() - startedAt >= timeout) {
+          clearInterval(interval)
+          clearTimeout(deadline)
+          reject(new Error('Web text session is not connected'))
+        }
+      }, 100)
+      deadline = setTimeout(() => {
+        clearInterval(interval)
+        reject(new Error('Web text session is not connected'))
+      }, timeout)
+    })
+  }
+
   start(): void {
     if (this.manager !== null || this.coreFailed) return
 
@@ -166,6 +194,7 @@ export class WebTextMessaging implements WebCoreTransport {
       helloProvider: () => this.createHello(),
       onFrame: frame => this.handleFrame(manager, frame),
       onState: state => this.handleManagerState(manager, state),
+      onConnected: () => this.handleConnected(manager),
       onFailure: () => this.handleFailure(manager)
     })
     this.manager = manager
@@ -279,10 +308,23 @@ export class WebTextMessaging implements WebCoreTransport {
         message => this.notify(() => this.onTextMessage(message))
       )
     } catch {
-      // A mailbox frame that cannot be opened must not close the socket.
-      // Closing it left the status on Connecting while the retry repeated
-      // the same frame.
-      if (this.manager === manager && manager.isConnected) this.setState('ready')
+      // Keep the durable cursor before the failed batch. Reconnect so the
+      // gateway can replay pending MLS bootstraps before that batch.
+      if (this.manager === manager && manager.isConnected) {
+        manager.stop()
+        manager.start()
+      }
+    }
+  }
+
+  private handleConnected(manager: WebConnectionManager): void {
+    if (this.manager !== manager || this.coreFailed) return
+    try {
+      this.core.retryPending?.(manager)
+    } catch {
+      manager.stop()
+      this.setState('connecting')
+      manager.start()
     }
   }
 

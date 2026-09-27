@@ -865,8 +865,8 @@ public final class IOSDirectMessaging: IOSConnectionManagerDelegate {
             let issue = issue(for: sharedCore, error: error,
                               fallback: client.isAuthenticated
                                   ? .dependencyOutage : .authenticationExpired)
-            // One undecryptable frame must not tear down the connection or
-            // raise a modal. The sender can still deliver the next message.
+            // A stale local envelope must not tear down the session. Later
+            // mailbox items can still be delivered on this socket.
             if issue == .dependencyOutage {
                 notifyState(.ready)
                 return

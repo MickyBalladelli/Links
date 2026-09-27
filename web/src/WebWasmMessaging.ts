@@ -26,6 +26,7 @@ export interface WebWasmMessagingHandle {
     ciphertextSHA256: Uint8Array
   ): void
   take_outgoing(): ArrayLike<Uint8Array>
+  retry_outbox(): void
   take_messages(): string
   set_recipient(
     userID: string,
@@ -111,6 +112,11 @@ export class WebWasmMessagingCore implements WebMessagingCore {
       metadata.nonce,
       metadata.ciphertextSHA256
     )
+    this.flush(transport)
+  }
+
+  retryPending(transport: WebCoreTransport): void {
+    this.inner.retry_outbox()
     this.flush(transport)
   }
 
