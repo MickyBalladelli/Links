@@ -68,10 +68,12 @@ particular:
 
 ### Start the local development composition
 
-The local composition uses host PostgreSQL or Docker PostgreSQL and one Debug
-Rust process. That process starts account auth on `127.0.0.1:8080` and the
-encrypted-mailbox gateway on `127.0.0.1:8081`. Both clients use the same
-WebSocket endpoint: `ws://127.0.0.1:8081/v1/connect`.
+The local composition uses host PostgreSQL or Docker PostgreSQL and one
+Node.js process (`server/`, Express and `ws`, Node.js 22.15 or newer). That
+process starts account auth on `127.0.0.1:8080` and the encrypted-mailbox
+gateway on `127.0.0.1:8081`. Both clients use the same WebSocket endpoint:
+`ws://127.0.0.1:8081/v1/connect`. The script installs the server's npm
+dependencies on first run.
 
 ```sh
 cp .env.example .env

@@ -1,0 +1,24 @@
+{
+  "name": "@links/server",
+  "private": true,
+  "type": "module",
+  "description": "Links local development server: username auth HTTP API and the links.v1 WebSocket gateway.",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/unit.test.js",
+    "parity": "node test/parity.js",
+    "interop": "node test/interop.js"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "express": "^5.2.1",
+    "long": "^5.3.2",
+    "pg": "^8.23.0",
+    "protobufjs": "^7.6.6",
+    "ws": "^8.22.0"
+  }
+}

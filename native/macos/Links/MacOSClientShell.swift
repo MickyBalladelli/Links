@@ -1712,7 +1712,7 @@ private struct ComposerTextEditor: NSViewRepresentable {
             guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
             let modifiers = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
             if modifiers.contains(.shift) { return false }
-            textView.keepsCharacterPaletteOpen = false
+            (textView as? ImagePastingTextView)?.keepsCharacterPaletteOpen = false
             parent.onSend()
             return true
         }

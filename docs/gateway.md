@@ -106,7 +106,9 @@ Run the full local composition with:
 bash scripts/local-dev.sh
 ```
 
-The script starts or reuses PostgreSQL and `links-local-dev`. Docker is used
+The script starts or reuses PostgreSQL and the Node.js local server in
+`server/` (a port of the Rust `links-local-dev` composition with the same
+routes, wire frames, and database schema). Docker is used
 when available; when Docker is absent, set `DATABASE_URL` to a host PostgreSQL
 database (or set `LINKS_USE_DOCKER=0`). The process applies the migrations,
 starts account auth at `http://127.0.0.1:8080`, uses the

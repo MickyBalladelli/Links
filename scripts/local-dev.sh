@@ -113,4 +113,16 @@ else
   fi
 fi
 
-cargo run -p links-gateway --bin links-local-dev --locked
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js 22.15 or newer is required to run the local backend." >&2
+  exit 1
+fi
+if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 15) ? 0 : 1)'; then
+  echo "Node.js 22.15 or newer is required for zstd sync compression; found $(node --version)." >&2
+  exit 1
+fi
+if [[ ! -d server/node_modules ]] || [[ server/package-lock.json -nt server/node_modules/.package-lock.json ]]; then
+  npm ci --prefix server --no-audit --no-fund
+fi
+
+exec node server/src/main.js
