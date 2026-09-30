@@ -1,4 +1,4 @@
-// Apply crates/server-store/migrations with the exact bookkeeping used by
+// Apply SQL migrations with the exact bookkeeping used by
 // `sqlx::migrate!`: the same `_sqlx_migrations` table, SHA-384 checksums,
 // advisory lock ID, and dirty/missing/modified checks. The Rust and Node
 // servers can therefore run against the same database interchangeably.
@@ -11,7 +11,7 @@ import { crc32 } from 'node:zlib'
 import { StoreError } from '../errors.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-export const MIGRATIONS_DIR = join(repoRoot, 'crates', 'server-store', 'migrations')
+export const MIGRATIONS_DIR = join(repoRoot, 'SQL')
 
 export function loadMigrations(directory = MIGRATIONS_DIR) {
   return readdirSync(directory)
