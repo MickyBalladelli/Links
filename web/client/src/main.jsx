@@ -1717,6 +1717,7 @@ async function addOrOpenContact(event) {
 
 async function sendPreviewMessage(event) {
   event?.preventDefault()
+  event?.currentTarget?.closest('.composer')?.querySelector('.emoji-picker')?.removeAttribute('open')
   notice.value = ''
   const text = composerText.value.trim()
   const attachment = pendingAttachment.value
