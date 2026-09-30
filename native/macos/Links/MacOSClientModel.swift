@@ -780,13 +780,21 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         isRefreshingContactPictures = true
         defer { isRefreshingContactPictures = false }
         var updated = contactPictures
-        for contact in contacts {
+        let conversationPeers = conversations.compactMap { conversation -> (String, String)? in
+            guard !conversation.isGroup else { return nil }
+            let userID = conversation.peerUserID ?? conversation.recipientUserID
+            let handle = conversation.title.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).lowercased()
+            return userID.isEmpty || handle.isEmpty ? nil : (userID, handle)
+        }
+        let peers = Dictionary(contacts.map { ($0.userID, $0.handle) } + conversationPeers,
+                               uniquingKeysWith: { saved, _ in saved })
+        for (userID, handle) in peers {
             do {
-                if let jpeg = try await authClient.downloadProfilePicture(handle: contact.handle) {
-                    updated[contact.userID] = jpeg
-                    cacheContactPicture(jpeg, userID: contact.userID)
-                } else if updated.removeValue(forKey: contact.userID) != nil {
-                    removeCachedContactPicture(userID: contact.userID)
+                if let jpeg = try await authClient.downloadProfilePicture(handle: handle) {
+                    updated[userID] = jpeg
+                    cacheContactPicture(jpeg, userID: userID)
+                } else if updated.removeValue(forKey: userID) != nil {
+                    removeCachedContactPicture(userID: userID)
                 }
             } catch {
                 continue
@@ -818,6 +826,24 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         try? await authClient.uploadProfilePicture(accessToken: token, jpeg: jpeg)
     }
 
+    private func refreshOwnProfilePicture() async {
+        guard !profileTornDown, let authClient, let handle = client?.accountHandle else { return }
+        do {
+            let jpeg = try await authClient.downloadProfilePicture(handle: handle)
+            guard jpeg != profilePictureJPEG else { return }
+            if let url = profilePictureURL {
+                if let jpeg {
+                    try jpeg.write(to: url, options: .atomic)
+                } else if FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
+                }
+            }
+            profilePictureJPEG = jpeg
+        } catch {
+            // Keep the cached picture while the account service is unavailable.
+        }
+    }
+
     private func deletePublishedProfilePicture() async {
         guard !profileTornDown, let authClient,
               let token = try? client?.accessToken() else { return }
@@ -828,7 +854,7 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
         contactPictureRefreshTask?.cancel()
         contactPictureRefreshTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                await self?.publishProfilePicture()
+                await self?.refreshOwnProfilePicture()
                 await self?.refreshContactPictures()
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
             }
