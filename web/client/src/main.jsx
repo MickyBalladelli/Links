@@ -26,6 +26,7 @@ import { AccountDevices } from './accountDevices.jsx'
 import { clearAttachments, readAttachment, removeAttachment, saveAttachment } from './attachmentStore.js'
 import { createBrowserIdentity, loadBrowserIdentity, saveBrowserIdentity } from './authStore.js'
 import { EmojiPicker } from './emojiPicker.jsx'
+import { FailedMessageBanner } from './failedMessageBanner.jsx'
 import { createWebMessagingSession } from './messagingRuntime.js'
 import { RemoveConversationPopup } from './removeConversationPopup.jsx'
 
@@ -283,7 +284,11 @@ function loadState(accountID = activeAccountID) {
         conversations: stored.conversations.map(conversation => ({
           ...conversation,
           unreadCount: Number(conversation.unreadCount || 0),
-          messages: Array.isArray(conversation.messages) ? conversation.messages : [],
+          messages: Array.isArray(conversation.messages)
+            ? conversation.messages.map(message => message.deliveryStatus === 'sending'
+              ? { ...message, deliveryStatus: 'failed', sendError: 'Sending was interrupted' }
+              : message)
+            : [],
           members: conversation.isGroup && Array.isArray(conversation.members) ? conversation.members : []
         }))
       }
@@ -1754,60 +1759,74 @@ async function sendPreviewMessage(event) {
     : conversation)
   composerText.value = ''
   scheduleMessageScrollRestore(true)
-  let sentOverNetwork = false
-  let sendError = ''
-  const canSendFile = attachment?.kind === 'file'
-  const canSendText = text && !attachment
-  if ((canSendFile || canSendText) && webMessagingSession &&
-      selected?.recipientUserID) {
-    let networkConversationID = browserSessionConversationIDs.get(id)
-    if (!networkConversationID) {
-      networkConversationID = crypto.randomUUID()
-      browserSessionConversationIDs.set(id, networkConversationID)
-      conversations.value = conversations.value.map(conversation => conversation.id === id
-        ? { ...conversation, mlsConversationID: networkConversationID }
-        : conversation)
-    }
-    const sendNetworkPayload = async () => {
-      const session = webMessagingSession
-      await session?.waitUntilConnected?.(15_000)
-      if (!session?.isConnected) throw new Error('connection unavailable.')
-      await ensureFreshAccessToken()
-      await session.refreshRecipient?.(selected.recipientUserID)
-      if (attachment && attachment.kind === 'file') {
-        await session.sendFile(networkConversationID, selected.recipientUserID, {
-          blob: attachment.blob,
-          name: attachment.name,
-          mimeType: attachment.mimeType
-        })
-        if (text) session.sendText(networkConversationID, selected.recipientUserID, text)
-      } else if (text && !attachment) {
-        session.sendText(networkConversationID, selected.recipientUserID, text)
-      } else {
-        throw new Error('This attachment type is not supported by encrypted browser sync yet.')
-      }
-    }
-    try {
-      await enqueueWebSend(sendNetworkPayload)
-      sentOverNetwork = true
-    } catch (error) {
-      if (isUnauthorized(error)) {
-        try {
-          await renewBrowserSession()
-          await enqueueWebSend(sendNetworkPayload)
-          sentOverNetwork = true
-        } catch (renewError) {
-          sendError = `Encrypted send failed: ${renewError.message || 'sign-in expired.'}`
-        }
-      } else {
-        sendError = `Encrypted send failed: ${error.message || 'connection unavailable.'}`
-      }
+  if (selected?.recipientUserID && accessToken.value) {
+    await Promise.all(additions.map(message => sendStoredMessage(id, message.id)))
+  } else {
+    notice.value = 'Saved in the local preview. Encrypted transport is not connected yet.'
+  }
+  persistState()
+}
+
+function updateMessage(conversationID, messageID, changes) {
+  conversations.value = conversations.value.map(conversation => conversation.id === conversationID
+    ? { ...conversation, messages: conversation.messages.map(message => message.id === messageID ? { ...message, ...changes } : message) }
+    : conversation)
+  persistState()
+}
+
+async function sendStoredMessage(conversationID, messageID) {
+  const conversation = conversations.value.find(item => item.id === conversationID)
+  const message = conversation?.messages.find(item => item.id === messageID)
+  if (!message || !conversation?.recipientUserID || message.deliveryStatus === 'sending') return
+  updateMessage(conversationID, messageID, { deliveryStatus: 'sending', sendError: '' })
+  let networkConversationID = browserSessionConversationIDs.get(conversationID) || conversation.mlsConversationID
+  if (!networkConversationID) {
+    networkConversationID = crypto.randomUUID()
+    browserSessionConversationIDs.set(conversationID, networkConversationID)
+    conversations.value = conversations.value.map(item => item.id === conversationID
+      ? { ...item, mlsConversationID: networkConversationID }
+      : item)
+    persistState()
+  }
+  const sendNetworkPayload = async () => {
+    const session = webMessagingSession
+    await session?.waitUntilConnected?.(15_000)
+    if (!session?.isConnected) throw new Error('Web text session is not connected')
+    await ensureFreshAccessToken()
+    await session.refreshRecipient?.(conversation.recipientUserID)
+    if (message.attachment?.kind === 'file') {
+      const blob = await readAttachment(message.attachment.id)
+      if (!blob) throw new Error('Attachment is no longer available in this browser')
+      await session.sendFile(networkConversationID, conversation.recipientUserID, {
+        blob,
+        name: message.attachment.name,
+        mimeType: message.attachment.mimeType
+      })
+    } else if (!message.attachment && message.text) {
+      session.sendText(networkConversationID, conversation.recipientUserID, message.text)
+    } else {
+      throw new Error('This attachment type is not supported by encrypted browser sync yet')
     }
   }
-  notice.value = sendError || (sentOverNetwork
-    ? ''
-    : 'Saved in the local preview. Encrypted transport is not connected yet.')
-  persistState()
+  try {
+    await enqueueWebSend(sendNetworkPayload)
+    updateMessage(conversationID, messageID, { deliveryStatus: 'sent', sendError: '' })
+  } catch (error) {
+    if (isUnauthorized(error)) {
+      try {
+        await renewBrowserSession()
+        await enqueueWebSend(sendNetworkPayload)
+        updateMessage(conversationID, messageID, { deliveryStatus: 'sent', sendError: '' })
+        return
+      } catch (renewError) {
+        error = renewError
+      }
+    }
+    updateMessage(conversationID, messageID, {
+      deliveryStatus: 'failed',
+      sendError: error.message || 'Connection unavailable'
+    })
+  }
 }
 
 async function resetPreview() {
@@ -2088,6 +2107,13 @@ function Messages() {
                   </a>
                 : <p>{message.text}</p>}
             <time>{message.sentAt}</time>
+            {message.deliveryStatus === 'failed' || message.deliveryStatus === 'sending'
+              ? <FailedMessageBanner
+                  error={message.sendError}
+                  sending={message.deliveryStatus === 'sending'}
+                  onRetry={() => sendStoredMessage(conversation.id, message.id)}
+                />
+              : null}
           </div>
         </div>
       )

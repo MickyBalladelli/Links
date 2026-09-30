@@ -14,6 +14,9 @@ bash scripts/launch-iphone.sh
 unset LINKS_AUTH_URL  
 bash scripts/launch-ipad.sh  
 
+# web client
+./launch-links-web-client.sh 
+
 
 # tests
 ./scripts/test-client-matrix.sh all
