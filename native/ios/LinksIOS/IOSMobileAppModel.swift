@@ -785,10 +785,6 @@ final class IOSMobileAppModel: ObservableObject {
             if profileName.isSet {
                 try? client.updateProfileDisplayName(profileName.name ?? "")
                 profileDisplayName = profileName.name ?? client.profile.name
-            } else if let localName = client.profileDisplayName, !localName.isEmpty {
-                let savedName = try await usernameAuthClient.changeDisplayName(
-                    accessToken: token, name: localName)
-                profileDisplayName = savedName.name ?? client.profile.name
             } else {
                 try? client.updateProfileDisplayName("")
                 profileDisplayName = client.profile.name
@@ -1264,7 +1260,7 @@ final class IOSMobileAppModel: ObservableObject {
         var updated = contactPictures
         let conversationPeers = conversations.compactMap { conversation -> (String, String)? in
             guard !conversation.isGroup else { return nil }
-            let handle = conversation.title.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).lowercased()
+            let handle = conversation.handle
             return conversation.recipientUserID.isEmpty || handle.isEmpty
                 ? nil : (conversation.recipientUserID, handle)
         }
@@ -1308,7 +1304,8 @@ final class IOSMobileAppModel: ObservableObject {
     }
 
     private func refreshOwnProfilePicture() async {
-        guard let usernameAuthClient, let handle = client?.accountHandle else { return }
+        guard let client, client.isAuthenticated,
+              let usernameAuthClient, let handle = client.accountHandle else { return }
         do {
             let jpeg = try await usernameAuthClient.downloadProfilePicture(handle: handle)
             guard jpeg != profilePictureJPEG else { return }

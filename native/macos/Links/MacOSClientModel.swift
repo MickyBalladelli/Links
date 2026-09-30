@@ -710,10 +710,6 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
             if profileName.isSet {
                 try? client.updateProfileDisplayName(profileName.name ?? "")
                 profileDisplayName = profileName.name ?? self.profileName
-            } else if let localName = client.profileDisplayName, !localName.isEmpty {
-                let savedName = try await authClient.changeDisplayName(
-                    accessToken: token, name: localName)
-                profileDisplayName = savedName.name ?? self.profileName
             } else {
                 try? client.updateProfileDisplayName("")
                 profileDisplayName = self.profileName
@@ -827,7 +823,8 @@ final class LinksMacOSAppModel: ObservableObject, IOSDirectMessagingDelegate {
     }
 
     private func refreshOwnProfilePicture() async {
-        guard !profileTornDown, let authClient, let handle = client?.accountHandle else { return }
+        guard !profileTornDown, let client, client.isAuthenticated,
+              let authClient, let handle = client.accountHandle else { return }
         do {
             let jpeg = try await authClient.downloadProfilePicture(handle: handle)
             guard jpeg != profilePictureJPEG else { return }

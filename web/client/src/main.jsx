@@ -519,7 +519,7 @@ function setProfilePicture(file) {
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
       const jpeg = canvas.toDataURL('image/jpeg', 0.82)
       rememberProfilePicture(jpeg)
-      publishProfilePictureBytes(jpeg)
+      publishProfilePictureBytes(jpeg).catch(error => { profilePictureError.value = error.message })
     }
     image.onerror = () => { profilePictureError.value = 'The picture could not be read.' }
     image.src = String(reader.result || '')
@@ -531,7 +531,7 @@ function setProfilePicture(file) {
 function removeProfilePicture() {
   profilePictureError.value = ''
   rememberProfilePicture('')
-  publishProfilePictureRemoval()
+  publishProfilePictureRemoval().catch(error => { profilePictureError.value = error.message })
 }
 
 function authBase() {
@@ -732,7 +732,7 @@ async function renewBrowserSession() {
 async function publishProfilePictureBytes(dataUrl) {
   const token = accessToken.value.trim()
   if (!token || !dataUrl) return
-  await fetch(`${authBase()}/v1/profile/picture`, {
+  const response = await fetch(`${authBase()}/v1/profile/picture`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -743,47 +743,91 @@ async function publishProfilePictureBytes(dataUrl) {
     credentials: 'omit',
     redirect: 'error'
   })
+  if (!response.ok) throw new Error('The picture could not be published.')
 }
 
 async function publishProfilePictureRemoval() {
   const token = accessToken.value.trim()
   if (!token) return
-  await fetch(`${authBase()}/v1/profile/picture`, {
+  const response = await fetch(`${authBase()}/v1/profile/picture`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
     credentials: 'omit',
     redirect: 'error'
   })
+  if (!response.ok) throw new Error('The picture could not be removed.')
+}
+
+let isRefreshingOwnPicture = false
+
+async function refreshOwnProfilePicture() {
+  const handle = normalizeHandle(profileHandle.value)
+  if (!accessToken.value || !validHandle(handle) || isRefreshingOwnPicture) return
+  const accountID = activeAccountID
+  isRefreshingOwnPicture = true
+  try {
+    const response = await fetch(`${authBase()}/v1/directory/${encodeURIComponent(handle)}/picture`, {
+      cache: 'no-store', credentials: 'omit', redirect: 'error'
+    })
+    if (activeAccountID !== accountID) return
+    if (response.status === 404) {
+      if (profilePicture.value) rememberProfilePicture('')
+    } else if (response.ok) {
+      const blob = await response.blob()
+      if (blob.type.includes('jpeg') && blob.size >= 3) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result || ''))
+          reader.onerror = () => reject(reader.error)
+          reader.readAsDataURL(blob)
+        })
+        if (activeAccountID === accountID && profilePicture.value !== dataUrl) rememberProfilePicture(dataUrl)
+      }
+    }
+  } catch {
+    // Keep the cached picture while the account service is unavailable.
+  } finally {
+    isRefreshingOwnPicture = false
+  }
 }
 
 async function refreshContactPictures() {
+  const accountID = activeAccountID
   const next = { ...contactPictures.value }
-  await Promise.all(contacts.value.map(async contact => {
+  const peers = new Map(contacts.value.map(contact => [contact.userID, contact.handle]))
+  conversations.value.forEach(conversation => {
+    if (conversation.recipientUserID && !peers.has(conversation.recipientUserID)) {
+      peers.set(conversation.recipientUserID, normalizeHandle(conversation.title))
+    }
+  })
+  await Promise.all([...peers].map(async ([userID, handle]) => {
+    if (!validHandle(handle)) return
     try {
-      const response = await fetch(`${authBase()}/v1/directory/${encodeURIComponent(contact.handle)}/picture`, {
+      const response = await fetch(`${authBase()}/v1/directory/${encodeURIComponent(handle)}/picture`, {
         cache: 'no-store',
         credentials: 'omit',
         redirect: 'error'
       })
       if (response.status === 404) {
-        if (next[contact.userID]) URL.revokeObjectURL(next[contact.userID])
-        delete next[contact.userID]
+        if (next[userID]) URL.revokeObjectURL(next[userID])
+        delete next[userID]
         return
       }
       if (!response.ok) return
       const blob = await response.blob()
       if (!blob.type.includes('jpeg') && blob.size < 3) return
-      if (next[contact.userID]) URL.revokeObjectURL(next[contact.userID])
-      next[contact.userID] = URL.createObjectURL(blob)
+      if (next[userID]) URL.revokeObjectURL(next[userID])
+      next[userID] = URL.createObjectURL(blob)
     } catch {
       // Keep the last picture when a contact is temporarily unreachable.
     }
   }))
-  contactPictures.value = next
+  if (activeAccountID === accountID) contactPictures.value = next
+  else Object.values(next).forEach(url => URL.revokeObjectURL(url))
 }
 
-setInterval(() => { refreshContactPictures() }, 10000)
+setInterval(() => { refreshContactPictures(); refreshOwnProfilePicture() }, 10000)
 refreshContactPictures()
 
 try {
@@ -1104,6 +1148,7 @@ async function establishUsernameSession(handle, purpose, identity) {
   switchAccountState(session.user_id, handle)
   await startWebMessaging(nextIdentity)
   refreshProfileDisplayName()
+  refreshOwnProfilePicture()
   refreshSavedContactNames()
   return nextIdentity
 }
@@ -1332,22 +1377,9 @@ async function refreshProfileDisplayName() {
       }
       return
     }
-    const savedLocalName = profileDisplayName.value
-    if (!validDisplayName(savedLocalName)) return
-    const publishResponse = await fetch(`${authBase()}/v1/account/display-name`, {
-      method: 'PUT',
-      headers: {
-        ...authHeaders(),
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ display_name: savedLocalName }),
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error'
-    })
-    if (!publishResponse.ok) return
-    profileDisplayNameDraft.value = savedLocalName
+    profileDisplayName.value = ''
+    profileDisplayNameDraft.value = ''
+    try { localStorage.removeItem(accountStorageKey(profileDisplayNameKey)) } catch { /* Keep the current tab usable. */ }
   } catch {
     // Keep the last saved profile name when the account service is offline.
   }
@@ -1532,6 +1564,7 @@ async function refreshSavedContactNames() {
       }
     }
     persistState()
+    refreshContactPictures()
   } finally {
     isRefreshingSavedContactNames = false
   }
